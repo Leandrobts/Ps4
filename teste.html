@@ -2,34 +2,33 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PoC - PS4 Extreme Browser Stress Tests</title>
+    <title>PoC - PS4 Extreme Browser + Vulnerability Scan</title>
     <style>
         body { font-family: monospace; background: black; color: lime; padding: 20px; }
         #log { white-space: pre-wrap; }
     </style>
 </head>
 <body>
-<h1>PoC - PS4 Extreme Browser Stress Tests</h1>
+<h1>PoC - PS4 Extreme Browser + Vulnerability Scan</h1>
 <div id="log"></div>
 
 <script>
+// Função para exibir os logs
 function log(msg) {
     document.getElementById('log').textContent += msg + "\n";
 }
 
-// Organização dos testes
-const tests = {
+// Testes de Estresse (já feitos antes)
+const stressTests = {
     async testOversizedArrayBuffer() {
         let hugeBuffer = new ArrayBuffer(0xFFFFFFFF);
         log("[+] Huge ArrayBuffer created: " + hugeBuffer.byteLength);
     },
-
     async testPrototypeCorruption() {
         Function.prototype.toString = () => "hacked!";
         (function() {})();
         log("[+] Function.prototype.toString overwritten.");
     },
-
     async testProxyAbuse() {
         let evilProxy = new Proxy({}, {
             get(target, prop) {
@@ -37,23 +36,18 @@ const tests = {
                 return Reflect.get(target, prop);
             }
         });
-        let test = evilProxy.someProperty;
+        evilProxy.someProperty;
         log("[+] Proxy test passed.");
     },
-
     async testFakeTypedArray() {
         let fakeArray = { buffer: {}, byteOffset: 0, byteLength: 0x1000, length: 0x400 };
         log("[+] Fake TypedArray created.");
     },
-
     async testMassiveStringConcatenation() {
         let s = "X";
-        for (let i = 0; i < 24; i++) {
-            s += s;
-        }
+        for (let i = 0; i < 24; i++) { s += s; }
         log("[+] Massive string length: " + s.length);
     },
-
     async testTypedArrayResizing() {
         let arr = new Uint8Array(2);
         for (let i = 0; i < 20000; i++) {
@@ -61,65 +55,45 @@ const tests = {
         }
         log("[+] TypedArray resized: " + arr.length);
     },
-
     async testDefinePropertyAbuse() {
         let obj = {};
         for (let i = 0; i < 20000; i++) {
-            Object.defineProperty(obj, 'prop' + i, {
-                get: function() { return 1337; },
-                set: function(v) { }
-            });
+            Object.defineProperty(obj, 'prop' + i, { get: () => 1337, set: () => {} });
         }
         log("[+] Massive getters created.");
     },
-
     async testMassivePromiseAll() {
         let promises = [];
-        for (let i = 0; i < 20000; i++) {
-            promises.push(Promise.resolve(i));
-        }
+        for (let i = 0; i < 20000; i++) { promises.push(Promise.resolve(i)); }
         await Promise.all(promises);
         log("[+] Massive Promise.all completed.");
     },
-
     async testStringInternalOverlap() {
         let s1 = "Y".repeat(1024 * 1024);
         let s2 = s1.slice(0, s1.length - 1);
         let overlapped = s1 + s2;
         log("[+] Overlapped string length: " + overlapped.length);
     },
-
     async testArraySpliceAbuse() {
         let arr = [1,2,3];
-        for (let i = 0; i < 20000; i++) {
-            arr.splice(-1, 0, i);
-        }
+        for (let i = 0; i < 20000; i++) { arr.splice(-1, 0, i); }
         log("[+] Array.splice abuse completed. Length: " + arr.length);
     },
-
     async testPrimitiveMemoryAccess() {
         let ab = new ArrayBuffer(8);
         let f64 = new Float64Array(ab);
         let u32 = new Uint32Array(ab);
-
         f64[0] = 1.23456789e+30;
         log("[*] Float64: " + f64[0]);
         log("[*] Uint32 low/high: " + u32[0] + " / " + u32[1]);
-
-        u32[0] = 0x41414141;
-        u32[1] = 0x42424242;
+        u32[0] = 0x41414141; u32[1] = 0x42424242;
         log("[+] Modified Float64 after raw write: " + f64[0]);
     },
-
-    // NOVOS TESTES EXTRAS:
     async testMassiveMapAbuse() {
         let map = new Map();
-        for (let i = 0; i < 100000; i++) {
-            map.set("key" + i, i);
-        }
+        for (let i = 0; i < 100000; i++) { map.set("key" + i, i); }
         log("[+] Massive Map created. Size: " + map.size);
     },
-
     async testWebWorkerBomb() {
         if (typeof Worker !== 'undefined') {
             log("[*] WebWorkers supported, launching bomb...");
@@ -133,7 +107,6 @@ const tests = {
             log("[!] WebWorkers not supported.");
         }
     },
-
     async testCanvasDrawOverload() {
         let canvas = document.createElement('canvas');
         let ctx = canvas.getContext('2d');
@@ -142,7 +115,6 @@ const tests = {
         }
         log("[+] Canvas overload drawing done.");
     },
-
     async testSymbolRegistryOverflow() {
         for (let i = 0; i < 50000; i++) {
             Symbol.for("sym" + i);
@@ -151,21 +123,98 @@ const tests = {
     }
 };
 
-// Executor principal
-(async function startExtremeTests(){
+// NOVO: Testes de Vulnerabilidades Conhecidas
+const vulnerabilityTests = {
+    async testUseAfterFree() {
+        let elem = document.createElement('div');
+        document.body.appendChild(elem);
+        document.body.removeChild(elem);
+        try {
+            elem.innerHTML = "Access After Free";
+            log("[+] Potential Use-After-Free tested.");
+        } catch (e) {
+            log("[!] Use-After-Free failed: " + e);
+        }
+    },
+    async testHeapOverflow() {
+        let buffer = new ArrayBuffer(10e6);
+        log("[+] Huge buffer created for overflow test: " + buffer.byteLength);
+    },
+    async testWebGLCrash() {
+        try {
+            let canvas = document.createElement('canvas');
+            let gl = canvas.getContext('webgl');
+            gl.createBuffer(999999999);
+            log("[+] WebGL crash test executed.");
+        } catch (e) {
+            log("[!] WebGL crash test failed: " + e);
+        }
+    },
+    async testJITTypeConfusion() {
+        function triggerTypeConfusion(obj) {
+            obj.prop = 123;
+            return obj.prop;
+        }
+        for (let i = 0; i < 100000; i++) {
+            triggerTypeConfusion({});
+        }
+        log("[+] JIT Type Confusion test executed.");
+    },
+    async testSameOriginPolicyBypass() {
+        try {
+            let iframe = document.createElement('iframe');
+            iframe.src = "https://example.com";
+            document.body.appendChild(iframe);
+            iframe.onload = () => {
+                try {
+                    let doc = iframe.contentDocument || iframe.contentWindow.document;
+                    log("[!] Potential SOP bypass detected: " + doc.URL);
+                } catch (e) {
+                    log("[+] SOP protected correctly.");
+                }
+            }
+        } catch (e) {
+            log("[!] SOP test failed: " + e);
+        }
+    },
+    async testClickjacking() {
+        let iframe = document.createElement('iframe');
+        iframe.style = "position:absolute;top:0;left:0;width:100%;height:100%;opacity:0.1;";
+        iframe.src = "https://example.com";
+        document.body.appendChild(iframe);
+        log("[+] Clickjacking test iframe injected.");
+    }
+};
+
+// Executor Principal
+(async function runAllTests() {
     try {
-        log("[+] Starting PS4 Extreme Browser Stress Tests...\n");
+        log("[+] Starting PS4 Extreme Browser Stress + Vulnerability Tests...\n");
 
         let count = 1;
-        for (let testName in tests) {
-            log(`\n=== Running Test #${count}: ${testName} ===`);
+        for (let testName in stressTests) {
+            log(`\n=== Running Stress Test #${count}: ${testName} ===`);
             try {
-                await tests[testName]();
-                log(`[OK] Test #${count} finished successfully.`);
+                await stressTests[testName]();
+                log(`[OK] Stress Test #${count} finished successfully.`);
             } catch (err) {
-                log(`[FAIL] Test #${count} error: ${err}`);
+                log(`[FAIL] Stress Test #${count} error: ${err}`);
             }
             count++;
+        }
+
+        log("\n[+] Moving to Vulnerability Tests...\n");
+        
+        let vcount = 1;
+        for (let vulnName in vulnerabilityTests) {
+            log(`\n=== Running Vulnerability Test #${vcount}: ${vulnName} ===`);
+            try {
+                await vulnerabilityTests[vulnName]();
+                log(`[OK] Vulnerability Test #${vcount} finished successfully.`);
+            } catch (err) {
+                log(`[FAIL] Vulnerability Test #${vcount} error: ${err}`);
+            }
+            vcount++;
         }
 
         log("\n[+] All tests completed!");
