@@ -6,16 +6,24 @@
     <style>
         body { font-family: monospace; background: black; color: lime; padding: 20px; }
         #log { white-space: pre-wrap; }
+        #status { color: red; margin-top: 10px; font-size: 1.2em; }
     </style>
 </head>
 <body>
 <h1>PoC - PS4 Extreme Browser Stress Tests</h1>
 <div id="log"></div>
+<div id="status">Aguardando Testes...</div>
 
 <script>
-// Função para logar a saída na tela
+// Função para logar a saída na tela de forma assíncrona
 function log(msg) {
     document.getElementById('log').textContent += msg + "\n";
+    window.scrollTo(0, document.body.scrollHeight); // Rolar para a última linha do log
+}
+
+// Atualiza o status de execução na tela
+function updateStatus(msg) {
+    document.getElementById('status').textContent = msg;
 }
 
 // Delay auxiliar
@@ -25,88 +33,91 @@ function delay(ms) {
 
 // Função para rodar um teste com timeout
 async function runWithTimeout(fn, name, timeout=5000) {
-  log(`[*] Running ${name} with timeout ${timeout}ms`);
-  let finished = false;
-  fn().then(() => finished = true).catch(e => log(`[!!] ${name} error: ${e}`));
-  let start = performance.now();
-  while (!finished) {
-    if (performance.now() - start > timeout) {
-      log(`[!!!] ${name} timed out! Aborting test to keep browser alive.`);
-      return;
+    updateStatus(`Executando: ${name}...`);
+    let finished = false;
+    fn().then(() => finished = true).catch(e => log(`[!!] ${name} error: ${e}`));
+    let start = performance.now();
+    while (!finished) {
+        if (performance.now() - start > timeout) {
+            log(`[!!!] ${name} expirou! Abortando teste.`);
+            updateStatus(`[!!!] ${name} expirou.`);
+            return;
+        }
+        await delay(100);
     }
-    await delay(100);
-  }
-  log(`[*] ${name} completed.`);
+    log(`[!] ${name} concluído.`);
+    updateStatus(`[!] ${name} concluído.`);
 }
 
 // Função para verificar corrupção de memória
 function verifyCorruption() {
-  const ta = new Float64Array(1);
-  ta[0] = 1.234;
-  if (!Number.isFinite(ta[0])) log("[CORRUPT] Detected NaN after stress!");
-  else log("[CLEAN] No corruption detected.");
+    const ta = new Float64Array(1);
+    ta[0] = 1.234;
+    if (!Number.isFinite(ta[0])) log("[CORRUPT] Corrupção de memória detectada!");
+    else log("[CLEAN] Nenhuma corrupção detectada.");
 }
 
 // Função para realizar JIT Spraying
 async function jitSpray() {
-  log("[*] Starting JIT spraying...");
-  for (let i = 0; i < 100000; i++) {
-    // Forçar comportamento inesperado, tipos misturados
-    let obj = {};
-    obj.prop = 123;  // Forçar confusão de tipo
-    obj.prop = "abc";  // Alterando o tipo
-    obj.prop = 456;  // Voltar ao número
-  }
-  verifyCorruption();  // Verificar se há corrupção após a execução
+    log("[*] Iniciando JIT Spraying...");
+    for (let i = 0; i < 100000; i++) {
+        // Forçar comportamento inesperado, tipos misturados
+        let obj = {};
+        obj.prop = 123;  // Forçar confusão de tipo
+        obj.prop = "abc";  // Alterando o tipo
+        obj.prop = 456;  // Voltar ao número
+    }
+    verifyCorruption();  // Verificar se há corrupção após a execução
 }
 
 // Função para teste de Heap Overflow
 async function heapOverflow() {
-  log("[*] Starting Heap Overflow test...");
-  let buffer = new ArrayBuffer(0x2000000); // Buffer grande para overflows
-  let view = new DataView(buffer);
-  try {
-    for (let i = 0; i < buffer.byteLength; i++) {
-      view.setUint8(i, 0x41); // Enviar dados que são "A"
+    log("[*] Iniciando teste de Heap Overflow...");
+    let buffer = new ArrayBuffer(0x2000000); // Buffer grande para overflows
+    let view = new DataView(buffer);
+    try {
+        for (let i = 0; i < buffer.byteLength; i++) {
+            view.setUint8(i, 0x41); // Enviar dados que são "A"
+        }
+        log("[!] Teste de Heap Overflow concluído.");
+    } catch (e) {
+        log("[!!] Exceção durante Heap Overflow: " + e);
     }
-    log("[!] Heap overflow test completed.");
-  } catch (e) {
-    log("[!!] Exception during heap overflow: " + e);
-  }
-  verifyCorruption();
+    verifyCorruption();
 }
 
 // Função para teste de WebGL (tentando vazamento de memória)
 async function webGLTest() {
-  log("[*] Starting WebGL Test...");
-  try {
-    const canvas = document.createElement('canvas');
-    const gl = canvas.getContext('webgl');
-    gl.createBuffer(999999999); // Alocação excessiva
-    log("[!] WebGL test completed.");
-  } catch (e) {
-    log("[!!] Exception during WebGL test: " + e);
-  }
+    log("[*] Iniciando teste de WebGL...");
+    try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl');
+        gl.createBuffer(999999999); // Alocação excessiva
+        log("[!] Teste de WebGL concluído.");
+    } catch (e) {
+        log("[!!] Exceção durante o teste de WebGL: " + e);
+    }
 }
 
-// Função para executar todos os testes de uma vez
+// Função para rodar todos os testes de uma vez
 async function runAllTests() {
-  log("[+] Starting extreme PS4 browser tests...");
-  
-  await runWithTimeout(jitSpray, "JIT Spraying", 5000);
-  await runWithTimeout(heapOverflow, "Heap Overflow", 5000);
-  await runWithTimeout(webGLTest, "WebGL Excessive Allocation", 5000);
-  
-  log("[+] All tests executed.");
+    log("[+] Iniciando os testes do navegador PS4...");
+
+    // Testes mais leves para começar
+    await runWithTimeout(jitSpray, "JIT Spraying", 5000);
+    await runWithTimeout(heapOverflow, "Heap Overflow", 5000);
+    await runWithTimeout(webGLTest, "WebGL Excessive Allocation", 5000);
+
+    log("[+] Todos os testes executados.");
 }
 
 // Inicialização dos testes
 (async function(){
-  try {
-    await runAllTests();
-  } catch (fatal) {
-    log("[FATAL] Uncaught exception: " + fatal);
-  }
+    try {
+        await runAllTests();
+    } catch (fatal) {
+        log("[FATAL] Exceção não capturada: " + fatal);
+    }
 })();
 </script>
 
