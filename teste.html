@@ -2,105 +2,112 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PoC PS4 Exploitation Extreme - CVE-2024-27808</title>
+    <title>PS4 PoC Unified Test - DataView Overflow, addrof/fakeobj, ROP Chain</title>
     <style>
-        body { font-family: monospace; background: black; color: lime; padding: 20px; }
-        #log { white-space: pre-wrap; }
-        button { padding: 10px; background: #444; color: lime; font-size: 16px; border: none; margin: 5px; cursor: pointer; }
-        button:hover { background: #666; }
+        body { background: black; color: lime; font-family: monospace; padding: 20px; }
+        #log { white-space: pre-wrap; margin: 20px 0; height: 500px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
+        button { background: lime; color: black; border: none; padding: 10px 20px; cursor: pointer; font-weight: bold; }
     </style>
 </head>
 <body>
-<h1>PoC PS4 Exploitation Extreme</h1>
-<p>Exploração de vulnerabilidades CVE-2024-27808 (Use-After-Free, Buffer Overflow)</p>
+    <h1>PS4 PoC Unified Test</h1>
+    <p>Steps: 1) DataView Overflow, 2) addrof/fakeobj, 3) ROP Chain Simulation.</p>
+    <button id="runBtn">Run All PoC Steps</button>
+    <div id="log"></div>
 
-<button id="attackBtn">Iniciar Ataque Total</button>
-
-<div id="log"></div>
-
-<script>
-function log(msg) {
-    const logElement = document.getElementById('log');
-    logElement.textContent += msg + "\n";
-    logElement.scrollTop = logElement.scrollHeight;
-}
-
-document.getElementById('attackBtn').addEventListener('click', async () => {
-    log("[+] Iniciando ataque...");
-
-    // Fase 1: Exploração do Heap (Spray de memória)
-    log("[1] Iniciando Heap Spray...");
-    try {
-        let heapSpray = new Array(0x1000000).fill("X"); // Heap Spray
-        log("[!] Heap Spray realizado.");
-    } catch (e) {
-        log("[!!] Erro ao realizar Heap Spray: " + e);
+    <script>
+    // Logging utility
+    function log(msg) {
+        const logDiv = document.getElementById('log');
+        logDiv.textContent += msg + "\n";
+        logDiv.scrollTop = logDiv.scrollHeight;
     }
 
-    // Fase 2: Uso de buffer overflow
-    log("[2] Iniciando teste de buffer overflow...");
-    try {
-        let bigBuffer = new ArrayBuffer(10e6); // Alocação massiva de buffer
-        let view = new Uint8Array(bigBuffer);
-        for (let i = 0; i < view.length; i++) {
-            view[i] = i % 256; // Preencher buffer
+    function delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    // 1. DataView Overflow PoC
+    async function testDataViewOverflow() {
+        log("[1] DataView Overflow Test started...");
+        try {
+            const buffer = new ArrayBuffer(8);
+            const view = new DataView(buffer);
+            const invalidOffset = view.byteLength + 0x1000;
+            log(`[*] Attempting getUint32 at offset ${invalidOffset}...`);
+            const data = view.getUint32(invalidOffset);
+            log(`[!] Unexpected Data: ${data}`);
+        } catch (e) {
+            log(`[OK] DataView exception as expected: ${e}`);
         }
-        log("[!] Buffer overflow completado.");
-    } catch (e) {
-        log("[!!] Erro durante buffer overflow: " + e);
+        log("[1] DataView Overflow Test completed.\n");
     }
 
-    // Fase 3: Manipulação de DOM (Use-After-Free)
-    log("[3] Teste de Use-After-Free...");
-    try {
-        let elem = document.createElement("div");
-        document.body.appendChild(elem);
-        document.body.removeChild(elem); // Removendo o elemento
-        elem.innerHTML = "Exploit Test"; // Acessando depois da remoção
-        log("[!] Use-After-Free simulado.");
-    } catch (e) {
-        log("[!!] Erro no Use-After-Free: " + e);
-    }
-
-    // Fase 4: Execução de código remoto com injeção de shellcode (simulado)
-    log("[4] Iniciando injeção de Shellcode...");
-    try {
-        let payload = "payload_maluco".repeat(10); // Payload fictício
-        eval(payload); // Injeção de código simulado
-        log("[!] Shellcode injetado.");
-    } catch (e) {
-        log("[!!] Erro ao injetar shellcode: " + e);
-    }
-
-    // Fase 5: JIT spraying e Confusão de tipos
-    log("[5] Realizando JIT Spraying...");
-    try {
-        let typeConfusionTest = (obj) => {
-            obj.prop = 123;
-            return obj.prop;
-        };
-        for (let i = 0; i < 10000; i++) {
-            typeConfusionTest({});
+    // 2. addrof / fakeobj Primitives PoC
+    async function testAddrofFakeobj() {
+        log("[2] addrof / fakeobj Test started...");
+        function addrof(obj) {
+            try {
+                const buf = new ArrayBuffer(8);
+                const dv = new DataView(buf);
+                dv.setFloat64(0, obj);
+                return dv.getUint32(0);
+            } catch (e) {
+                log(`[!!] addrof error: ${e}`);
+            }
         }
-        log("[!] JIT Spraying e Confusão de tipos realizados.");
-    } catch (e) {
-        log("[!!] Erro no JIT Spraying: " + e);
+        function fakeobj(addr) {
+            try {
+                const buf = new ArrayBuffer(8);
+                const dv = new DataView(buf);
+                dv.setUint32(0, addr);
+                return dv;
+            } catch (e) {
+                log(`[!!] fakeobj error: ${e}`);
+            }
+        }
+        const obj = { test: 123 };
+        const addr = addrof(obj);
+        log(`[+] addrof returned: 0x${addr.toString(16)}`);
+        const fobj = fakeobj(addr);
+        log(`[+] fakeobj created DataView: ${fobj}`);
+        log("[2] addrof / fakeobj Test completed.\n");
     }
 
-    // Fase 6: Tentativa de sandbox escape via iframe (exemplo)
-    log("[6] Tentando escapar da sandbox...");
-    try {
-        let iframe = document.createElement('iframe');
-        iframe.src = "http://exemplo.com"; // Tentar iframe cross-origin
-        document.body.appendChild(iframe);
-        log("[!] Tentativa de sandbox escape via iframe.");
-    } catch (e) {
-        log("[!!] Erro ao tentar escapar da sandbox: " + e);
+    // 3. ROP Chain Simulation PoC
+    async function testROPChain() {
+        log("[3] ROP Chain Simulation started...");
+        try {
+            const buf = new ArrayBuffer(16);
+            const dv = new DataView(buf);
+            dv.setUint32(0, 0x41414141);
+            dv.setUint32(4, 0x42424242);
+            dv.setUint32(8, 0x43434343);
+            log("[*] ROP buffer filled with fake gadget addresses.");
+            // Simulated execution: perform XOR to change values
+            for (let i = 0; i < 3; i++) {
+                const val = dv.getUint32(i*4);
+                dv.setUint32(i*4, val ^ 0xdeadbeef);
+            }
+            log("[!] ROP simulation modified buffer: " +
+                [dv.getUint32(0), dv.getUint32(4), dv.getUint32(8)].map(v => '0x'+v.toString(16)).join(', ')
+            );
+        } catch (e) {
+            log(`[!!] ROP Chain error: ${e}`);
+        }
+        log("[3] ROP Chain Simulation completed.\n");
     }
 
-    log("[+] Ataque concluído.");
-});
-</script>
-
+    // Orchestrator
+    document.getElementById('runBtn').addEventListener('click', async () => {
+        log("=== PoC Unified Test Starting ===\n");
+        await testDataViewOverflow();
+        await delay(500);
+        await testAddrofFakeobj();
+        await delay(500);
+        await testROPChain();
+        log("=== PoC Unified Test Finished ===");
+    });
+    </script>
 </body>
 </html>
