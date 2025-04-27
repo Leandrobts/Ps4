@@ -1,102 +1,39 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <title>PS4 PoC - CVE Suite & Debugging with ASLR Bypass (v12.02)</title>
+    <title>CVE-2024-27808 Test (PS4 12.02)</title>
     <style>
-        body { background: black; color: lime; font-family: monospace; padding: 20px; }
-        button { background: lime; color: black; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; }
-        #log { white-space: pre-wrap; margin-top: 20px; height: 600px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
-        .highlight { color: yellow; font-weight: bold; }
-        .error { color: red; font-weight: bold; }
+        body { font-family: Arial, sans-serif; text-align: center; padding: 20px; }
+        #result { color: red; font-weight: bold; margin-top: 20px; }
     </style>
 </head>
 <body>
-    <h1>PS4 PoC - CVE Suite & Debugging (v12.02)</h1>
-    <button onclick="runAll()">Run All Steps</button>
-    <div id="log"></div>
+    <h1>Testando CVE-2024-27808 no PS4 (WebKit)</h1>
+    <p>Tentando acessar memória com offset negativo em DataView...</p>
+    <div id="result"></div>
 
-<script>
-// Logging helper
-function log(msg) {
-    const d = document.getElementById('log');
-    const el = document.createElement('div');
-    if (/^[\[\+]|^\[OK\]/.test(msg)) el.innerHTML = '<span class="highlight">' + msg + '</span>';
-    else if (/^\[!!\]/.test(msg)) el.innerHTML = '<span class="error">' + msg + '</span>';
-    else el.textContent = msg;
-    d.appendChild(el);
-    d.scrollTop = d.scrollHeight;
-}
-function delay(ms) { return new Promise(r=>setTimeout(r,ms)); }
+    <script>
+        const result = document.getElementById('result');
 
-// Primitive context module
-(function(){
-    const missing = [];
-    function check(name) { if(typeof window[name] !== 'function'){ missing.push(name); return false;} return true; }
-    function arb_malloc(s){ if(check('arbMalloc')) return window.arbMalloc(s); return 0; }
-    function arb_call(a, args){ if(check('arbCall')) return window.arbCall(a, args); return null; }
-    window.setupPrimitiveContext = function(){
-        window.p = { malloc: arb_malloc, call: arb_call };
-        if(missing.length) log('[!!] Missing primitives: ' + missing.join(', '));
-        else log('[+] Primitive context initialized');
-    };
-})();
-
-// Steps 1-8
-async function testDataViewUnderflow(){
-    log('=== Step 1: Underflow ===');
-    try{ new DataView(new ArrayBuffer(8)).getUint32(-4); log('[OK] Underflow error'); }
-    catch(e){ log('[OK] Underflow caught'); }
-}
-async function testCVE202427808(){ log('=== Step 2: CVE-2024-27808 ==='); log('[OK] CVE simulated'); }
-async function runPrimitives(){ log('=== Step 3: Primitives ==='); log('[OK] Primitives ready'); }
-async function simulateROP(){ log('=== Step 4: ROP ==='); log('[OK] ROP simulated'); }
-async function testCrash(){ log('=== Step 5: Crash ==='); log('[OK] Crash caught'); }
-async function testInfoLeak(){ log('=== Step 6: Info Leak ==='); log('[OK] Leak 0x7fffdeadbeef'); }
-async function testRCE(){ log('=== Step 7: RCE ==='); log('[OK] RCE simulated'); }
-async function testLibkernelLeak(){ log('=== Step 8: libkernel ==='); log('[OK] libkernel base 0xdead0000'); }
-
-// Steps 9-10 refined
-async function bypassASLR(){
-    log('=== Step 9: Bypass ASLR ===');
-    const leaks = [];
-    for(let i=0;i<3;i++){ let addr = Math.floor(Math.random()*0x100000000); leaks.push(addr); log('[*] Leak '+(i+1)+': 0x'+addr.toString(16)); await delay(100); }
-    const ok = leaks.every(v=>v===leaks[0]);
-    if(ok) log('[OK] ASLR bypassed'); else log('[!!] ASLR bypass failed');
-    log('=== Step 9 Completed ===');
-}
-async function escapeSandbox(){
-    log('=== Step 10: Escape Sandbox ===');
-    let maps = Math.random()<0.8 ? '00400000-0040b000 r-xp...\n7fff12345000-7fff12367000 rw-p...' : null;
-    if(maps){ log('[OK] /proc/self/maps:'); log(maps); } else log('[!!] Sandbox not escaped');
-    log('=== Step 10 Completed ===');
-}
-async function elevatePrivileges(){
-    log('=== Step 11: Priv Esc ==='); log('[OK] Priv escalation simulated'); }
-
-// Notification
-function sendSystemNotification(msg){
-    if(window.p) window.p.call(0xfeed0000,[msg]);
-    else alert(msg);
-}
-
-// Orchestrator
-async function runAll(){
-    await testDataViewUnderflow(); await delay(100);
-    await testCVE202427808(); await delay(100);
-    await runPrimitives(); await delay(100);
-    await simulateROP(); await delay(100);
-    await testCrash(); await delay(100);
-    await testInfoLeak(); await delay(100);
-    await testRCE(); await delay(100);
-    await testLibkernelLeak(); await delay(100);
-    await bypassASLR(); await delay(100);
-    await escapeSandbox(); await delay(100);
-    await elevatePrivileges(); await delay(100);
-    log('=== Exploit Flow Completed ===');
-    sendSystemNotification('Exploit concluído com sucesso. Sistema Comprometido.');
-}
-
-</script>
+        try {
+            // 1. Criar um ArrayBuffer pequeno
+            const buffer = new ArrayBuffer(16);
+            
+            // 2. Tentar acessar um offset NEGATIVO em DataView
+            const evilView = new DataView(buffer, -4); // Offset negativo
+            const leakedValue = evilView.getUint32(0); // Lê memória não alocada
+            
+            // 3. Se não crashar, pode ser vulnerável
+            result.textContent = `Possível exploração BEM-SUCEDIDA! Valor lido: 0x${leakedValue.toString(16)}`;
+            
+            // 4. Tentar escrever em memória inválida (teste adicional)
+            evilView.setUint32(0, 0x41414141); // Se não travar, vulnerabilidade crítica
+            result.textContent += " | Escrita em memória também funcionou!";
+            
+        } catch (e) {
+            // 5. Se cair aqui, o PS4 corrigiu ou o CVE não se aplica
+            result.textContent = `Falha: ${e.message}`;
+        }
+    </script>
 </body>
 </html>
