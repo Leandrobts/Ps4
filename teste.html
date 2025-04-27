@@ -2,26 +2,27 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PS4 Extreme Browser Stress Tests</title>
+    <title>PoC - PS4 Extreme Browser Stress Tests</title>
     <style>
         body { font-family: monospace; background: black; color: lime; padding: 20px; }
-        #log { white-space: pre-wrap; }
+        #log { white-space: pre-wrap; margin: 20px 0; height: 500px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
         #status { color: red; margin-top: 10px; font-size: 1.2em; }
     </style>
 </head>
 <body>
 <h1>PoC - PS4 Extreme Browser Stress Tests</h1>
-<div id="log"></div>
 <div id="status">Aguardando Testes...</div>
+<div id="log"></div>
 
 <script>
-// Função para logar a saída na tela de forma assíncrona
+// Logger
 function log(msg) {
-    document.getElementById('log').textContent += msg + "\n";
-    window.scrollTo(0, document.body.scrollHeight); // Rolar para a última linha do log
+    const logDiv = document.getElementById('log');
+    logDiv.textContent += msg + "\n";
+    logDiv.scrollTop = logDiv.scrollHeight;
 }
 
-// Atualiza o status de execução na tela
+// Status display
 function updateStatus(msg) {
     document.getElementById('status').textContent = msg;
 }
@@ -34,19 +35,20 @@ function delay(ms) {
 // Função para rodar um teste com timeout
 async function runWithTimeout(fn, name, timeout=5000) {
     updateStatus(`Executando: ${name}...`);
+    log(`[*] Running ${name} with timeout ${timeout}ms`);
     let finished = false;
     fn().then(() => finished = true).catch(e => log(`[!!] ${name} error: ${e}`));
     let start = performance.now();
     while (!finished) {
         if (performance.now() - start > timeout) {
-            log(`[!!!] ${name} expirou! Abortando teste.`);
-            updateStatus(`[!!!] ${name} expirou.`);
+            log(`[!!!] ${name} timed out! Aborting test.`);
+            updateStatus(`[!!!] ${name} timeout.`);
             return;
         }
         await delay(100);
     }
-    log(`[!] ${name} concluído.`);
-    updateStatus(`[!] ${name} concluído.`);
+    log(`[*] ${name} completed.`);
+    updateStatus(`[*] ${name} completed.`);
 }
 
 // Função para verificar corrupção de memória
@@ -57,69 +59,73 @@ function verifyCorruption() {
     else log("[CLEAN] Nenhuma corrupção detectada.");
 }
 
-// Função para realizar JIT Spraying
+// Teste 1: JIT Spraying
 async function jitSpray() {
-    log("[*] Iniciando JIT Spraying...");
+    log("[1] JIT Spraying (Type Confusion) started...");
     for (let i = 0; i < 100000; i++) {
-        // Forçar comportamento inesperado, tipos misturados
         let obj = {};
-        obj.prop = 123;  // Forçar confusão de tipo
-        obj.prop = "abc";  // Alterando o tipo
-        obj.prop = 456;  // Voltar ao número
+        obj.prop = 123;
+        obj.prop = "abc";
+        obj.prop = 456;
     }
-    verifyCorruption();  // Verificar se há corrupção após a execução
+    log("[*] JIT Spraying finished.");
+    verifyCorruption();
 }
 
-// Função para teste de Heap Overflow
+// Teste 2: Heap Overflow via DataView (código refinado)
 async function heapOverflow() {
-    log("[*] Iniciando teste de Heap Overflow...");
-    let buffer = new ArrayBuffer(0x2000000); // Buffer grande para overflows
-    let view = new DataView(buffer);
+    log("[2] Heap Overflow via DataView started...");
     try {
-        for (let i = 0; i < buffer.byteLength; i++) {
-            view.setUint8(i, 0x41); // Enviar dados que são "A"
-        }
-        log("[!] Teste de Heap Overflow concluído.");
+        // Criação de Buffer e DataView
+        const buffer = new ArrayBuffer(0x1000000); // 16MB
+        const view = new DataView(buffer);
+        // Acesso fora dos limites para tentar corromper
+        const offset = view.byteLength + 0x100;
+        log(`[*] Attempting DataView overflow at offset ${offset}...`);
+        view.getUint32(offset); // Deve lançar ou corromper
+        log("[!] Unexpected success reading DataView!");
     } catch (e) {
-        log("[!!] Exceção durante Heap Overflow: " + e);
+        log(`[OK] DataView exception as expected: ${e}`);
     }
     verifyCorruption();
 }
 
-// Função para teste de WebGL (tentando vazamento de memória)
+// Teste 3: WebGL Excessive Allocation
 async function webGLTest() {
-    log("[*] Iniciando teste de WebGL...");
+    log("[3] WebGL Excessive Allocation started...");
     try {
         const canvas = document.createElement('canvas');
-        const gl = canvas.getContext('webgl');
-        gl.createBuffer(999999999); // Alocação excessiva
-        log("[!] Teste de WebGL concluído.");
+        // Tenta instanciar tanto WebGL quanto Experimental
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        if (!gl) {
+            log("[!] WebGL not supported.");
+            return;
+        }
+        const buffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+        const size = 10 * 1024 * 1024; // 10MB
+        gl.bufferData(gl.ARRAY_BUFFER, size, gl.STATIC_DRAW);
+        log(`[!] WebGL bufferData of ${size} bytes completed.`);
     } catch (e) {
-        log("[!!] Exceção durante o teste de WebGL: " + e);
+        log(`[!!] Exception during WebGL test: ${e}`);
     }
+    verifyCorruption();
 }
 
-// Função para rodar todos os testes de uma vez
-async function runAllTests() {
-    log("[+] Iniciando os testes do navegador PS4...");
-
-    // Testes mais leves para começar
-    await runWithTimeout(jitSpray, "JIT Spraying", 5000);
-    await runWithTimeout(heapOverflow, "Heap Overflow", 5000);
-    await runWithTimeout(webGLTest, "WebGL Excessive Allocation", 5000);
-
-    log("[+] Todos os testes executados.");
-}
-
-// Inicialização dos testes
-(async function(){
+// Orquestrador principal
+(async function runAllTests() {
     try {
-        await runAllTests();
+        log("[+] Starting extreme PS4 browser tests...");
+        await runWithTimeout(jitSpray, "JIT Spraying", 5000);
+        await runWithTimeout(heapOverflow, "Heap Overflow", 5000);
+        await runWithTimeout(webGLTest, "WebGL Excessive Allocation", 5000);
+        log("[+] All tests executed.");
+        updateStatus("[+] Tests complete.");
     } catch (fatal) {
-        log("[FATAL] Exceção não capturada: " + fatal);
+        log(`[FATAL] Uncaught exception: ${fatal}`);
+        updateStatus("[FATAL] Execution stopped.");
     }
 })();
 </script>
-
 </body>
 </html>
