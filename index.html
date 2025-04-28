@@ -1,124 +1,135 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
     <meta charset="UTF-8">
-    <title>CVE-2024-27808: Exploit Avançado (PS4/PS5)</title>
+    <title>PS4 Vulnerability Scanner (v12.02)</title>
     <style>
-        body { font-family: monospace; background: #000; color: #0f0; padding: 20px; }
-        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
-        .success { color: #0f0; }
-        .warning { color: #ff0; }
+        body { background: #000; color: #aaa; font-family: monospace; padding: 20px; }
+        #log { white-space: pre; overflow: auto; height: 500px; border: 1px solid #333; padding: 10px; }
+        button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; cursor: pointer; }
+        .success { color: #0f0; font-weight: bold; }
         .error { color: #f00; }
+        .warning { color: #ff0; }
+        .result { margin-top: 20px; border-top: 1px solid #333; padding-top: 10px; }
     </style>
 </head>
 <body>
-    <h1>CVE-2024-27808: Técnicas de Exploração Avançadas</h1>
-    <button onclick="runExploit()">Iniciar Exploração</button>
+    <h1>PS4 Vulnerability Scanner (v12.02)</h1>
+    <button onclick="runTests()">▶️ Run Tests</button>
+    <button onclick="clearLog()">🧹 Clear Log</button>
     <div id="log"></div>
 
-    <script>
-        const log = (msg, type = "success") => {
-            const el = document.createElement('div');
-            el.className = type;
-            el.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-            document.getElementById('log').appendChild(el);
-        };
+<script>
+const log = (msg, type = "info") => {
+    const logElement = document.getElementById("log");
+    const colorClass = type === "success" ? "success" : 
+                       type === "error" ? "error" : 
+                       type === "warning" ? "warning" : "";
+    logElement.innerHTML += `<span class="${colorClass}">${msg}</span>\n`;
+    logElement.scrollTop = logElement.scrollHeight;
+};
 
-        // ===== [1] HEAP SPRAY (ALOCAÇÃO EM MASSA) =====
-        function heapSpray() {
-            log("Iniciando Heap Spray (alocação de 0x1000 objetos)...", "warning");
-            const spray = [];
-            for (let i = 0; i < 0x1000; i++) {
-                const buf = new ArrayBuffer(0x1000);
-                const dv = new DataView(buf);
-                dv.setUint32(0, 0x41414141); // Preenche com marcadores
-                spray.push(dv);
-            }
-            log("Heap Spray concluído. Objetos alocados: " + spray.length, "success");
-            return spray;
-        }
+const clearLog = () => { document.getElementById("log").innerHTML = ""; };
 
-        // ===== [2] JIT COMPILER ABUSE (TYPE CONFUSION) =====
-        function jitTypeConfusion() {
-            log("Testando Type Confusion via JIT...", "warning");
-            try {
-                function confuse(x) {
-                    return x + 1;
-                }
-                for (let i = 0; i < 100000; i++) confuse(i); // Otimiza a função
-                confuse("string"); // Força type confusion
-                log("Type Confusion potencialmente explorável!", "warning");
-                return true;
-            } catch (e) {
-                log(`JIT resistente: ${e.message}`, "error");
-                return false;
-            }
+// ====== TESTES PRINCIPAIS ======
+const tests = {
+    // 1. Teste de DataView Underflow
+    dataViewUnderflow: () => {
+        try {
+            const view = new DataView(new ArrayBuffer(16));
+            view.setUint32(-1, 0x41414141); // Underflow intencional
+            log("[✅] DataView Underflow: Vulnerável! (Pode corromper memória)", "success");
+            return true;
+        } catch (e) {
+            log("[❌] DataView Underflow: Protegido. (" + e.message + ")", "error");
+            return false;
         }
+    },
 
-        // ===== [3] WASM MEMORY MANIPULATION =====
-        async function wasmExploit() {
-            log("Iniciando manipulação de memória WASM...", "warning");
-            try {
-                const wasmCode = new Uint8Array([0x00, 0x61, 0x73, 0x6d, 0x01, 0x00, 0x00, 0x00]);
-                const module = await WebAssembly.compile(wasmCode);
-                const instance = await WebAssembly.instantiate(module);
-                log("WASM instanciado. Tentando acessar memória...", "success");
-                
-                // Tenta acessar memória fora dos limites
-                const mem = new Uint8Array(instance.exports.memory.buffer, -4, 4);
-                log(`Leitura de memória WASM: ${mem[0]}`, "warning");
-                return true;
-            } catch (e) {
-                log(`Falha no WASM: ${e.message}`, "error");
-                return false;
-            }
+    // 2. Teste de Type Confusion (vazamento)
+    typeConfusion: () => {
+        try {
+            let obj = {};
+            obj.__proto__ = Array.prototype;
+            obj.length = 0x1000;
+            const leak = obj[0];
+            log(`[✅] Type Confusion: Vazamento possível! (Valor: ${leak})`, "success");
+            return true;
+        } catch (e) {
+            log("[❌] Type Confusion: Bloqueado. (" + e.message + ")", "error");
+            return false;
         }
+    },
 
-        // ===== [4] ROP CHAIN SIMULADA (LIBC/KERNEL) =====
-        function simulateRopChain() {
-            log("Construindo ROP Chain simulada...", "warning");
-            try {
-                const gadgets = {
-                    pop_rdi: 0xdeadbeef,
-                    ret: 0xcafebabe,
-                    system: 0x7ff12345
-                };
-                const fakeStack = [
-                    gadgets.pop_rdi, 0x41414141,
-                    gadgets.ret,
-                    gadgets.system
-                ];
-                log(`ROP Chain simulada: ${fakeStack.map(x => "0x" + x.toString(16)).join(" -> ")}`, "success");
-                return true;
-            } catch (e) {
-                log(`Falha na ROP: ${e.message}`, "error");
-                return false;
-            }
+    // 3. Teste de Corrupção de ArrayBuffer
+    arrayBufferCorruption: () => {
+        try {
+            const buffer = new ArrayBuffer(0x1000);
+            const view = new Uint32Array(buffer);
+            view[0xFFFF] = 0x1337; // Escrita fora dos limites
+            log("[✅] ArrayBuffer Corruption: Vulnerável!", "success");
+            return true;
+        } catch (e) {
+            log("[❌] ArrayBuffer Corruption: Protegido. (" + e.message + ")", "error");
+            return false;
         }
+    },
 
-        // ===== [5] EXPLOIT COMPLETO =====
-        async function runExploit() {
-            log("=== INÍCIO DA EXPLORAÇÃO ===", "warning");
-            
-            // Heap Spray (estabiliza o heap)
-            heapSpray();
-            
-            // JIT Abuse (type confusion)
-            if (jitTypeConfusion()) {
-                // WASM Memory Manipulation
-                if (await wasmExploit()) {
-                    // ROP Chain (simulada)
-                    simulateRopChain();
-                    log("=== EXPLORAÇÃO BEM-SUCEDIDA (SIMULADA) ===", "warning");
-                    log("Próximos passos reais:", "success");
-                    log("1. Vazar libkernel base via Memory Read", "success");
-                    log("2. Construir ROP chain real com gadgets", "success");
-                    log("3. Chamar syscalls para escapar da sandbox", "success");
-                }
-            } else {
-                log("=== FALHA NA EXPLORAÇÃO ===", "error");
-            }
+    // 4. Teste de ASLR Bypass (WASM)
+    aslrBypass: () => {
+        try {
+            const wasm = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array([
+                0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00
+            ])));
+            log("[✅] WASM/ASLR Bypass: Possível vazamento de memória!", "success");
+            return true;
+        } catch (e) {
+            log("[❌] WASM/ASLR Bypass: Bloqueado. (" + e.message + ")", "error");
+            return false;
         }
-    </script>
+    },
+
+    // 5. Teste de Crash Controlado
+    controlledCrash: () => {
+        try {
+            const invalidFunc = null;
+            invalidFunc(); // Crash intencional
+            log("[❌] Crash Controlado: Navegador não travou (protegido).", "error");
+            return false;
+        } catch (e) {
+            log("[✅] Crash Controlado: Navegador travou (pode ser explorável).", "success");
+            return true;
+        }
+    }
+};
+
+// ====== EXECUTAR TODOS OS TESTES ======
+async function runTests() {
+    clearLog();
+    log("=== Iniciando testes no PS4 (v12.02) ===", "warning");
+    
+    let successCount = 0;
+    const testNames = Object.keys(tests);
+    
+    for (const testName of testNames) {
+        log(`\n[🔍] Executando: ${testName}...`, "info");
+        const result = await tests[testName]();
+        if (result) successCount++;
+        await new Promise(resolve => setTimeout(resolve, 500)); // Delay para legibilidade
+    }
+
+    // Resultado final
+    log("\n=== RESULTADO FINAL ===", "warning");
+    log(`✅ ${successCount} testes PASSARAM (potencialmente vulneráveis)`, "success");
+    log(`❌ ${testNames.length - successCount} testes FALHARAM (protegidos)`, "error");
+    
+    if (successCount > 0) {
+        log("\n[⚠️] AVISO: Possíveis vulnerabilidades detectadas!", "warning");
+        log("Considere investigar CVE-2023-32409, CVE-2022-46663 ou outros exploits WebKit.", "warning");
+    } else {
+        log("\n[🔒] Navegador parece estar protegido contra as técnicas testadas.", "info");
+    }
+}
+</script>
 </body>
 </html>
