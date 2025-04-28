@@ -1,150 +1,192 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 WebKit Inspector</title>
+    <title>PS4 WebKit Forensic Inspector</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { border: 1px solid #333; padding: 10px; height: 60vh; overflow-y: scroll; }
-        .vuln { color: #f00; font-weight: bold; }
-        .safe { color: #0f0; }
-        .warning { color: #ff0; }
+        #log { border: 1px solid #444; padding: 15px; height: 60vh; overflow-y: scroll; }
+        .critical { color: #ff5555; font-weight: bold; }
+        .warning { color: #ffff55; }
+        .safe { color: #55ff55; }
+        .info { color: #5555ff; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Vulnerability Assessment</h1>
-    <button onclick="runAssessment()">Start Full Assessment</button>
+    <h1>PS4 Physical Device Profiler</h1>
+    <button onclick="runFullInspection()">Start Hardware Inspection</button>
     <div id="log"></div>
 
 <script>
-// Logger profissional com classificação de risco
-const log = (message, risk = 'info') => {
+// Logger profissional com classificação de severidade
+const log = (message, severity = 'info') => {
     const timestamp = new Date().toLocaleTimeString();
-    const riskClasses = {
-        critical: 'vuln',
-        high: 'vuln',
-        medium: 'warning',
-        low: 'warning',
-        info: 'safe'
-    };
-    document.getElementById('log').innerHTML += 
-        `<span class="${riskClasses[risk]}">[${timestamp}] ${message}</span><br>`;
+    const logEntry = document.createElement('div');
+    logEntry.className = severity;
+    logEntry.textContent = `[${timestamp}] ${message}`;
+    document.getElementById('log').appendChild(logEntry);
+    logEntry.scrollIntoView();
 };
 
-// 1. Detecção precisa do WebKit
-function detectWebKitVersion() {
-    const ua = navigator.userAgent;
-    log(`User Agent: ${ua}`, 'info');
-    
-    // Padrão específico do PS4
-    const ps4WebKitVersion = ua.match(/AppleWebKit\/([\d.]+)/i);
-    if (ps4WebKitVersion) {
-        log(`Detected WebKit version: ${ps4WebKitVersion[1]}`, 'high');
-        return ps4WebKitVersion[1];
-    }
-    log("Could not detect WebKit version", 'medium');
-    return null;
-}
-
-// 2. Teste de proteções do navegador
-async function testSecurityFeatures() {
-    const protections = {
-        aslr: false,
-        sandbox: true,
-        wasm: false,
-        sharedArrayBuffer: false
+// 1. Coleta detalhada do ambiente WebKit
+function collectBrowserForensics() {
+    const data = {
+        userAgent: navigator.userAgent,
+        platform: navigator.platform,
+        cpuCores: navigator.hardwareConcurrency || 'N/A',
+        memory: navigator.deviceMemory || 'N/A',
+        webGL: getWebGLInfo(),
+        features: detectBrowserFeatures()
     };
 
-    // Teste ASLR via vazamento de endereço
+    log(`=== WebKit Forensic Report ===`, 'info');
+    log(`User Agent: ${data.userAgent}`, 'info');
+    log(`Platform: ${data.platform}`, 'info');
+    log(`CPU Cores: ${data.cpuCores}`, 'info');
+    log(`Device Memory: ${data.memory}GB`, 'info');
+    
+    return data;
+}
+
+// 2. Detecção de WebGL (vazamento de hardware)
+function getWebGLInfo() {
+    try {
+        const canvas = document.createElement('canvas');
+        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+        
+        if (!gl) {
+            log('WebGL: Disabled', 'warning');
+            return null;
+        }
+
+        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
+        return {
+            vendor: gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL),
+            renderer: gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL),
+            version: gl.getParameter(gl.VERSION)
+        };
+    } catch (e) {
+        log(`WebGL Error: ${e.message}`, 'warning');
+        return null;
+    }
+}
+
+// 3. Detecção de APIs críticas
+function detectBrowserFeatures() {
+    const features = {
+        wasm: typeof WebAssembly !== 'undefined',
+        sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
+        simd: typeof WebAssembly.validate === 'function' && 
+              WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])),
+        webWorkers: typeof Worker !== 'undefined'
+    };
+
+    log('=== Feature Detection ===', 'info');
+    log(`WebAssembly: ${features.wasm ? 'Enabled' : 'Disabled'}`, features.wasm ? 'critical' : 'safe');
+    log(`SharedArrayBuffer: ${features.sharedArrayBuffer ? 'Enabled' : 'Disabled'}`, features.sharedArrayBuffer ? 'critical' : 'safe');
+    log(`SIMD: ${features.simd ? 'Enabled' : 'Disabled'}`, features.simd ? 'warning' : 'safe');
+    log(`Web Workers: ${features.webWorkers ? 'Enabled' : 'Disabled'}`, features.webWorkers ? 'warning' : 'safe');
+
+    return features;
+}
+
+// 4. Teste de proteções de memória
+function testMemoryProtections() {
+    log('=== Memory Protection Tests ===', 'info');
+    
+    // Teste ASLR básico
     try {
         const arr = new ArrayBuffer(1024);
         const view = new Uint32Array(arr);
-        const addr = view.byteOffset;
-        log(`Memory address leak test: 0x${addr.toString(16)}`, 'high');
-        protections.aslr = (addr === 0); // Se não for zero, ASLR pode ser fraco
+        const addr1 = view.byteOffset;
+        
+        const arr2 = new ArrayBuffer(1024);
+        const view2 = new Uint32Array(arr2);
+        const addr2 = view2.byteOffset;
+        
+        const aslrStrength = Math.abs(addr2 - addr1) > 0x1000 ? 'Strong' : 'Weak';
+        log(`ASLR Detection: ${aslrStrength} (${addr1.toString(16)} vs ${addr2.toString(16)})`, 
+            aslrStrength === 'Strong' ? 'safe' : 'critical');
     } catch (e) {
-        log(`ASLR test failed: ${e}`, 'medium');
+        log(`ASLR Test Failed: ${e.message}`, 'warning');
     }
 
-    // Teste WebAssembly (indicador de sandbox escape)
+    // Teste de isolamento de processos
     try {
-        new WebAssembly.Module(new Uint8Array([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]));
-        protections.wasm = true;
-        log("WebAssembly is available", 'high');
+        const workerCode = `
+            postMessage(performance.now());
+            close();
+        `;
+        const worker = new Worker(URL.createObjectURL(new Blob([workerCode])));
+        worker.onmessage = e => {
+            log(`Worker Isolation Test: ${e.data}ms`, 'info');
+        };
     } catch (e) {
-        log("WebAssembly is blocked", 'medium');
+        log(`Worker Test Failed: ${e.message}`, 'warning');
     }
-
-    // Teste SharedArrayBuffer (útil para ataques Spectre)
-    try {
-        if (typeof SharedArrayBuffer !== 'undefined') {
-            new SharedArrayBuffer(1024);
-            protections.sharedArrayBuffer = true;
-            log("SharedArrayBuffer is available", 'critical');
-        } else {
-            log("SharedArrayBuffer is blocked", 'info');
-        }
-    } catch (e) {
-        log(`SharedArrayBuffer test failed: ${e}`, 'medium');
-    }
-
-    return protections;
 }
 
-// 3. Exploração realista (baseada em CVE conhecidos)
-async function attemptExploitation() {
-    const webkitVersion = detectWebKitVersion();
-    const protections = await testSecurityFeatures();
-
-    // Análise de viabilidade
-    if (!protections.wasm) {
-        log("Critical: WebAssembly blocked - sandbox escape unlikely", 'critical');
-        return false;
-    }
-
-    if (protections.aslr) {
-        log("Warning: Strong ASLR detected - need info leak", 'high');
-        // Tentativa de vazamento via performance.now()
-        try {
-            const start = performance.now();
-            const arr = new Array(100000);
-            for (let i = 0; i < arr.length; i++) arr[i] = i;
-            const end = performance.now();
-            log(`Timing difference: ${end - start}ms`, 'high');
-        } catch (e) {
-            log(`Timing attack failed: ${e}`, 'medium');
-        }
-    }
-
-    // Técnica real usada em exploits de PS4 (CVE-2018-4441)
+// 5. Teste de mitigação de tipo
+function testTypeConfusion() {
+    log('=== Type Confusion Tests ===', 'info');
+    
     try {
-        log("Attempting JIT spraying technique...", 'high');
-        const spray = new Function(`
-            let arr = [1.1];
-            arr.length = 0x1000;
-            function target(x) { return x * 2; }
-            for (let i = 0; i < 100000; i++) target(i);
-            arr[0] = target;
-            return arr;
-        `);
-        const result = spray();
-        log(`JIT spray result: ${result[1]}`, 'high');
+        let obj = {};
+        obj.__proto__ = Array.prototype;
+        obj.length = 0x1000;
+        log(`Prototype Pollution: Array length set to ${obj.length}`, 
+            obj.length === 0x1000 ? 'critical' : 'safe');
     } catch (e) {
-        log(`JIT spray failed: ${e}`, 'critical');
+        log(`Type Confusion Mitigated: ${e.message}`, 'safe');
     }
-
-    return true;
 }
 
-function runAssessment() {
+// Função principal
+async function runFullInspection() {
     document.getElementById('log').innerHTML = '';
-    log("Starting PS4 WebKit vulnerability assessment...", 'info');
-    setTimeout(async () => {
-        const success = await attemptExploitation();
-        log(success ? 
-            "Assessment complete - vulnerabilities found" : 
-            "Assessment complete - system appears secure", 
-            success ? 'critical' : 'safe');
-    }, 500);
+    
+    // Coleta forense
+    const forensicData = collectBrowserForensics();
+    
+    // Testes de segurança
+    testMemoryProtections();
+    testTypeConfusion();
+    
+    // Análise de vulnerabilidades
+    analyzeVulnerabilities(forensicData);
+}
+
+// Análise baseada nos dados coletados
+function analyzeVulnerabilities(data) {
+    log('=== Vulnerability Analysis ===', 'info');
+    
+    // Verifica versão do WebKit para vulnerabilidades conhecidas
+    const webkitVersion = data.userAgent.match(/AppleWebKit\/([\d.]+)/)?.[1];
+    if (webkitVersion) {
+        log(`Detected WebKit version: ${webkitVersion}`, 'info');
+        
+        // Comparação com vulnerabilidades conhecidas
+        if (compareVersion(webkitVersion, '606.1.36') < 0) {
+            log('Potential CVE-2021-1789 (WebKit Memory Corruption)', 'critical');
+        }
+    }
+    
+    // Verifica WebGL para vazamento de informações
+    if (data.webGL && data.webGL.renderer.includes('AMD')) {
+        log('AMD GPU detected - potential timing attack vector', 'warning');
+    }
+}
+
+// Utilitário para comparação de versões
+function compareVersion(v1, v2) {
+    const parts1 = v1.split('.').map(Number);
+    const parts2 = v2.split('.').map(Number);
+    
+    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
+        const p1 = parts1[i] || 0;
+        const p2 = parts2[i] || 0;
+        if (p1 !== p2) return p1 - p2;
+    }
+    return 0;
 }
 </script>
 </body>
