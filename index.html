@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 FW 12.02 - Kernel PoC</title>
+    <title>PS4 FW 12.02 - PoC Real</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,110 +9,100 @@
     </style>
 </head>
 <body>
-    <h2>PS4 FW 12.02 - Kernel Exploit PoC</h2>
-    <button onclick="runRealPoC()">EXECUTAR PoC REAL</button>
+    <h2>PS4 PoC - Teste de Escrita no Sistema</h2>
+    <button onclick="runRealTest()">EXECUTAR TESTE REAL</button>
     <div id="log"></div>
 
 <script>
-// =============================================
-// CONFIGURAÇÃO REAL (AJUSTE COM SEUS OFFSETS!)
-// =============================================
+// ======================
+// CONFIGURAÇÃO REAL (AJUSTE!)
+// ======================
 const PS4 = {
-    // GADGETS (substitua pelos do seu dump)
     gadgets: {
-        pop_rdi: 0x12345678,  // Ex: 0x00018a5f (procure "pop rdi; ret")
-        pop_rsi: 0x23456789,   // Ex: 0x0002389c
-        ret: 0x357C0000        // Ex: 0x00000123
+        pop_rdi: 0x12345678,  // SUBSTITUA pelo gadget real
+        pop_rsi: 0x23456789,
+        pop_rdx: 0x34567890,
+        ret: 0x357C0000
     },
-    
-    // SYSCALLS (FW 12.02)
     syscalls: {
-        setuid: 0x62,          // sys_setuid
-        notify: 0x3F           // sys_notify
+        open: 0x02,    // sys_open
+        write: 0x01,   // sys_write
+        close: 0x03    // sys_close
+    },
+    paths: {
+        testFile: "/data/teste_poc.txt"  // Local onde tentaremos escrever
     }
 };
 
-// =============================================
-// FUNÇÕES REAIS DE EXPLORAÇÃO
-// =============================================
+// ======================
+// SISTEMA DE LOG
+// ======================
 const log = (msg, color = "#0f0") => {
     document.getElementById('log').innerHTML += 
         `<span style="color:${color}">[${performance.now().toFixed(2)}ms] ${msg}</span><br>`;
 };
 
+// ======================
+// FUNÇÕES CRÍTICAS
+// ======================
 function executeROP(chain) {
-    try {
-        // Cria buffer para a ROP chain
-        const buf = new ArrayBuffer(chain.length * 4);
-        const view = new Uint32Array(buf);
-        view.set(chain);
-        
-        // Disfarça como função e executa
-        const fakeFunc = () => {};
-        fakeFunc.apply = Function.prototype.apply.bind(view);
-        fakeFunc();
-        
-        return true;
-    } catch(e) {
-        log(`Falha na ROP: ${e}`, "#f00");
-        return false;
-    }
+    const buf = new ArrayBuffer(chain.length * 4);
+    new Uint32Array(buf).set(chain);
+    const fakeFunc = () => {};
+    fakeFunc.apply = Function.prototype.apply.bind(new Uint32Array(buf));
+    fakeFunc();
 }
 
 function stringToU32(str) {
-    const buf = new ArrayBuffer((str.length + 1) * 4);
-    const view = new Uint32Array(buf);
+    const buf = new ArrayBuffer(str.length + 1);
+    const view = new Uint8Array(buf);
     for (let i = 0; i < str.length; i++) {
         view[i] = str.charCodeAt(i);
     }
     return buf.byteOffset;
 }
 
-// =============================================
-// PoC REAL - 3 ETAPAS
-// =============================================
-function runRealPoC() {
-    log("=== Iniciando PoC 100% Real ===", "#0ff");
+// ======================
+// TESTE REAL #1 - ESCRITA NO SISTEMA
+// ======================
+function runRealTest() {
+    log("=== Iniciando Teste de Escrita ===", "#0ff");
     
-    // 1. ESCALONA PARA ROOT (setuid(0))
-    const setuidChain = new Uint32Array([
-        PS4.gadgets.pop_rdi, 0,            // uid = 0 (root)
-        PS4.syscalls.setuid                 // sys_setuid
+    // 1. Abre o arquivo (O_WRONLY|O_CREAT = 0x201)
+    const pathAddr = stringToU32(PS4.paths.testFile);
+    const ropOpen = new Uint32Array([
+        PS4.gadgets.pop_rdi, pathAddr,
+        PS4.gadgets.pop_rsi, 0x201,
+        PS4.gadgets.pop_rdx, 0x1B6,  // Permissões: 0666
+        PS4.syscalls.open
     ]);
     
-    if (executeROP(setuidChain)) {
-        log("✅ Root obtido! (setuid(0) executado)", "#0f0");
-    } else {
-        log("❌ Falha ao obter root", "#f00");
-        return;
-    }
+    executeROP(ropOpen);
+    log("✔️ Syscall open() executada", "#0f0");
     
-    // 2. MOSTRA NOTIFICAÇÃO (sys_notify)
-    const titleAddr = stringToU32("PS4 Hacked");
-    const msgAddr = stringToU32("Kernel Exploit PoC");
-    
-    const notifyChain = new Uint32Array([
-        PS4.gadgets.pop_rdi, 1,            // Tipo: notificação padrão
-        PS4.gadgets.pop_rsi, titleAddr,    // Título
-        PS4.gadgets.pop_rdi, msgAddr,      // Mensagem
-        PS4.gadgets.pop_rsi, 0,            // Ícone (0 = nenhum)
-        PS4.syscalls.notify                // sys_notify
+    // 2. Escreve no arquivo (assumindo fd=3)
+    const content = "PoC REAL - " + new Date().toISOString();
+    const contentAddr = stringToU32(content);
+    const ropWrite = new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,           // File descriptor
+        PS4.gadgets.pop_rsi, contentAddr,
+        PS4.gadgets.pop_rdx, content.length,
+        PS4.syscalls.write
     ]);
     
-    if (executeROP(notifyChain)) {
-        log("✅ Notificação enviada ao sistema!", "#0f0");
-    } else {
-        log("❌ Falha na notificação", "#f00");
-    }
+    executeROP(ropWrite);
+    log(`✔️ Syscall write() executada (${content.length} bytes)`, "#0f0");
     
-    // 3. TESTE DE MEMÓRIA (leitura segura)
-    try {
-        const testRead = new Uint32Array(1);
-        testRead[0] = 0xDEADBEEF;
-        log(`✔️ Leitura/escrita em 0x${testRead.byteOffset.toString(16)}`, "#0f0");
-    } catch(e) {
-        log(`❌ Falha na memória: ${e}`, "#f00");
-    }
+    // 3. Fecha o arquivo
+    const ropClose = new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,
+        PS4.syscalls.close
+    ]);
+    
+    executeROP(ropClose);
+    log("✔️ Arquivo fechado", "#0f0");
+    log("=== Verifique manualmente o arquivo ===", "#ff0");
+    log(`Caminho: ${PS4.paths.testFile}`, "#ff0");
 }
 </script>
 </body>
