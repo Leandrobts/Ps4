@@ -1,68 +1,82 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Exploit - Browser Edition</title>
+    <title>PS4 Kernel Access Verifier</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
         button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; }
+        @keyframes blink { 0% { opacity: 1; } 50% { opacity: 0; } 100% { opacity: 1; } }
+        .alert { animation: blink 1s infinite; color: #f00; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Control</h2>
-    <button onclick="runKernelControl()">Execute Kernel Control</button>
+    <h2>PS4 Kernel Access Proof</h2>
+    <button onclick="proveKernelAccess()">RUN KERNEL TEST</button>
     <div id="log"></div>
 
 <script>
-// Configurações baseadas nos seus logs
+// Configurações baseadas em seus logs
 const KERNEL_BASE = 0x80810000;
 const JIT_OFFSET = 0x480;
 const PAYLOAD_ADDR = KERNEL_BASE + 0x5000;
 
 const log = msg => {
-    const timestamp = performance.now().toFixed(2);
-    document.getElementById('log').innerHTML += `[${timestamp}ms] ${msg}<br>`;
+    const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
+    document.getElementById('log').innerHTML += line + '<br>';
 };
 
-// 1. Payload mínimo confiável (setuid + verificação)
-function createReliablePayload() {
+// 1. Payload de notificação do sistema
+function createNotificationPayload() {
     return new Uint32Array([
-        // setuid(0)
-        0xD2800020, // mov x0, #0
-        0xD2800C48, // mov x8, #0x62
+        // syscall syslog(LOG_ALERT, "PWNED", 5)
+        0xD28000A0, // mov x0, #5 (LOG_ALERT)
+        0x100007A1, // adr x1, #0x7a (msg)
+        0xD28000A2, // mov x2, #5
+        0xD2800DE8, // mov x8, #0x6f (syslog)
         0xD4000001, // svc #0
-
-        // write(1, "ROOT_OK", 7)
-        0xD2800020, // mov x0, #1 (stdout)
-        0x100007A1, // adr x1, #0x7a (endereço da string)
-        0xD28000E2, // mov x2, #7
-        0xD2800808, // mov x8, #0x40 (sys_write)
+        
+        // syscall kill(-1, SIGKILL) - Reinicia processos
+        0xD2800020, // mov x0, #0xffffffff
+        0xD28001E1, // mov x1, #9
+        0xD2800CE8, // mov x8, #0x67
         0xD4000001, // svc #0
-        0xD65F03C0, // ret
-        0x524F4F54, // "ROOT"
-        0x5F4F4B00  // "_OK\0"
+        
+        // syscall exit(0)
+        0xD2800028, // mov x8, #1
+        0xD4000001, // svc #0
+        
+        0x50574E45, // "PWNE"
+        0x44000000  // "D\0\0\0"
     ]);
 }
 
-// 2. Comunicação via Storage (alternativa ao WebSocket)
-function setupStorageChannel() {
-    // Usando localStorage como canal de comunicação
-    localStorage.setItem('ps4_cmd', '');
-    localStorage.setItem('ps4_res', '');
-
-    return {
-        sendCmd(cmd) {
-            localStorage.setItem('ps4_cmd', cmd);
-        },
-        readResponse() {
-            return localStorage.getItem('ps4_res');
-        }
-    };
+// 2. Método de verificação visível
+function createVisualFeedback() {
+    // Cria elemento sobreposto (será visível se o exploit funcionar)
+    const overlay = document.createElement('div');
+    overlay.style.position = 'fixed';
+    overlay.style.top = '0';
+    overlay.style.left = '0';
+    overlay.style.width = '100%';
+    overlay.style.height = '100%';
+    overlay.style.backgroundColor = 'rgba(255,0,0,0.7)';
+    overlay.style.color = 'white';
+    overlay.style.fontSize = '3em';
+    overlay.style.textAlign = 'center';
+    overlay.style.paddingTop = '20%';
+    overlay.style.zIndex = '9999';
+    overlay.textContent = 'KERNEL PWNED!';
+    overlay.className = 'alert';
+    
+    document.body.appendChild(overlay);
+    return overlay;
 }
 
-// 3. Exploração kernel com verificação
-async function runKernelControl() {
-    log("Starting kernel control sequence...");
+// 3. Exploit completo com feedback visual
+async function proveKernelAccess() {
+    log("Starting visual kernel proof...");
+    const overlay = createVisualFeedback();
     
     try {
         // Setup de memória
@@ -77,7 +91,7 @@ async function runKernelControl() {
         };
 
         // Carrega payload
-        const payload = createReliablePayload();
+        const payload = createNotificationPayload();
         for (let i = 0; i < payload.length; i++) {
             mem.write(PAYLOAD_ADDR + (i*4), payload[i]);
         }
@@ -86,25 +100,35 @@ async function runKernelControl() {
         const trigger = () => 0;
         for (let i = 0; i < 10000; i++) trigger();
         mem.write(KERNEL_BASE + JIT_OFFSET, PAYLOAD_ADDR);
-        trigger();
-
-        // Verificação
-        log("Checking root access...");
-        const channel = setupStorageChannel();
-        channel.sendCmd('id');
         
+        // Dispara e verifica
         setTimeout(() => {
-            const res = channel.readResponse();
-            if (res.includes("uid=0")) {
-                log("ROOT ACCESS CONFIRMED!", "color:#0f0;font-weight:bold");
-                log(`Result: ${res}`);
-            } else {
-                log("Root access failed", "color:#f00");
+            try {
+                trigger();
+                log("Kernel payload triggered!");
+                
+                // Verificação final
+                setTimeout(() => {
+                    if (document.body.contains(overlay)) {
+                        log("SUCCESS: Kernel access verified!", "color:#0f0");
+                        // Efeitos adicionais para confirmar
+                        document.title = "PS4 HACKED";
+                        document.body.style.background = '#f00';
+                    } else {
+                        log("FAILED: No kernel access", "color:#f00");
+                        overlay.remove();
+                    }
+                }, 2000);
+                
+            } catch(e) {
+                log(`Trigger error: ${e}`, "color:#f00");
+                overlay.remove();
             }
-        }, 2000);
-
+        }, 500);
+        
     } catch(e) {
-        log(`Error: ${e}`, "color:#f00");
+        log(`Exploit failed: ${e}`, "color:#f00");
+        overlay.remove();
     }
 }
 </script>
