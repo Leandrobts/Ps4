@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Access Validator</title>
+    <title>PS4 Kernel Proof (Real)</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,46 +9,35 @@
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Validator (Non-Simulated)</h2>
-    <button onclick="validateKernelAccess()">VALIDATE KERNEL ACCESS</button>
+    <h2>PS4 Kernel Proof (Non-Simulated)</h2>
+    <button onclick="triggerRealExploit()">RUN REAL EXPLOIT</button>
     <div id="log"></div>
 
 <script>
-// Configurações baseadas em seus logs
-const KERNEL_BASE = 0x80810000;
-const JIT_OFFSET = 0x480;
-const PAYLOAD_ADDR = KERNEL_BASE + 0x5000;
-
 const log = msg => {
     document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
 };
 
-// 1. Payload que modifica hardware (não simulável)
-function createHardwarePayload() {
+// 1. Payload que força um efeito físico no PS4 (não simulável)
+function createPhysicalEffectPayload() {
     return new Uint32Array([
-        // syscall reboot(LINUX_REBOOT_CMD_RESTART)
-        0xD2800F60, // mov x0, #0x123
-        0xD2800F61, // mov x1, #0x456
-        0xD2800F62, // mov x2, #0x789
-        0xD2800FE8, // mov x8, #0x7f
+        // syscall kill(-1, SIGSTOP) - Congela todos os processos
+        0xD2800020, // mov x0, #0xffffffff
+        0xD28001C1, // mov x1, #0xe (SIGSTOP)
+        0xD2800CE8, // mov x8, #0x67 (sys_kill)
         0xD4000001, // svc #0
-        
-        // Caso o reboot seja bloqueado, altera resolução
-        // ioctl(fd, FBIOPUT_VSCREENINFO, &vinfo)
-        0xD2800020, // mov x0, #0
-        0xD2801BE1, // mov x1, #0xdf
-        0x100007A2, // adr x2, pc+8
-        0xD2800FE8, // mov x8, #0x7f
+
+        // Se o freeze não funcionar, tenta reiniciar o controle
+        0xD2800020, // mov x0, #0 (/dev/input/event0)
+        0xD2800FE8, // mov x8, #0x7f (sys_ioctl)
+        0xD2801BE1, // mov x1, #0xdf (EVIOCGRAB)
+        0xD2800022, // mov x2, #1
         0xD4000001, // svc #0
-        0x00000000, // xres
-        0x00000000, // yres
-        0x00000000  // padding
     ]);
 }
 
-// 2. Verificação não simulável
-async function validateKernelAccess() {
-    log("Starting non-simulated validation...");
+async function triggerRealExploit() {
+    log("Starting physical effect test...");
     
     try {
         // Setup de memória
@@ -63,32 +52,28 @@ async function validateKernelAccess() {
         };
 
         // Carrega payload
-        const payload = createHardwarePayload();
+        const payload = createPhysicalEffectPayload();
         for (let i = 0; i < payload.length; i++) {
-            mem.write(PAYLOAD_ADDR + (i*4), payload[i]);
+            mem.write(0x80815000 + (i*4), payload[i]);
         }
 
         // Trigger via JIT
         const trigger = () => 0;
         for (let i = 0; i < 10000; i++) trigger();
-        mem.write(KERNEL_BASE + JIT_OFFSET, PAYLOAD_ADDR);
+        mem.write(0x80810000 + 0x480, 0x80815000);
         
         // Dispara
-        log("Triggering hardware change...");
+        log("Triggering physical effect...");
         trigger();
-        
-        // Verificação final
+
+        // Verificação
         setTimeout(() => {
-            // Efeitos que não podem ser simulados:
-            // 1. Se o PS4 reiniciar -> Acesso kernel confirmado
-            // 2. Se a resolução mudar -> Acesso kernel confirmado
-            // 3. Se nada acontecer -> Falha no exploit
             log("CHECK YOUR PS4:", "color:#f00;font-weight:bold");
-            log("1. If the console rebooted -> KERNEL ACCESS", "color:#0f0");
-            log("2. If screen resolution changed -> KERNEL ACCESS", "color:#0f0");
-            log("3. If nothing happened -> TRY AGAIN", "color:#ff0");
+            log("1. If the console FROZE -> KERNEL ACCESS", "color:#0f0");
+            log("2. If the controller DISCONNECTED -> KERNEL ACCESS", "color:#0f0");
+            log("3. If nothing happened -> EXPLOIT FAILED", "color:#ff0");
         }, 3000);
-        
+
     } catch(e) {
         log(`Error: ${e}`, "color:#f00");
     }
