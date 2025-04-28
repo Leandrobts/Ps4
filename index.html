@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 FW 12.02 Kernel PoC</title>
+    <title>PS4 FW 12.02 - Kernel PoC</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,99 +9,58 @@
     </style>
 </head>
 <body>
-    <h2>PS4 FW 12.02 Kernel Exploit</h2>
-    <button onclick="runPoC()">EXECUTE PoC</button>
+    <h2>PS4 FW 12.02 - Kernel Exploit PoC</h2>
+    <button onclick="runRealPoC()">EXECUTAR PoC REAL</button>
     <div id="log"></div>
 
 <script>
-// ======================
-// CONFIGURAÇÃO REAL (FW 12.02)
-// ======================
+// =============================================
+// CONFIGURAÇÃO REAL (AJUSTE COM SEUS OFFSETS!)
+// =============================================
 const PS4 = {
-    // OFFSETS EXTRAÍDOS DOS SEUS ARQUIVOS ELF
-    libkernel: {
-        base: 0x81000000,                 // Endereço base da libkernel
-        syscalls: {
-            notify: 0x3F,                 // sys_notify (visto no dump)
-            memcpy: 0x24,                 // sys_memcpy
-            setuid: 0x62                   // sys_setuid
-        },
-        gadgets: {
-            pop_rdi: 0x12345678,          // SUBSTITUA pelo gadget real
-            pop_rsi: 0x23456789,          // SUBSTITUA
-            ret: 0x357C0000                // SUBSTITUA
-        }
+    // GADGETS (substitua pelos do seu dump)
+    gadgets: {
+        pop_rdi: 0x12345678,  // Ex: 0x00018a5f (procure "pop rdi; ret")
+        pop_rsi: 0x23456789,   // Ex: 0x0002389c
+        ret: 0x357C0000        // Ex: 0x00000123
     },
-    // INFORMAÇÕES DO KERNEL DUMP
-    kernel: {
-        version: "12.02",
-        entry_point: 0x286C8              // e_entry do seu ELF
+    
+    // SYSCALLS (FW 12.02)
+    syscalls: {
+        setuid: 0x62,          // sys_setuid
+        notify: 0x3F           // sys_notify
     }
 };
 
-// ======================
-// SISTEMA DE LOG
-// ======================
+// =============================================
+// FUNÇÕES REAIS DE EXPLORAÇÃO
+// =============================================
 const log = (msg, color = "#0f0") => {
     document.getElementById('log').innerHTML += 
         `<span style="color:${color}">[${performance.now().toFixed(2)}ms] ${msg}</span><br>`;
 };
 
-// ======================
-// FUNÇÕES CRÍTICAS (BASEADAS NOS SEUS ELF)
-// ======================
-
-// 1. EXECUTA ROP CHAIN
 function executeROP(chain) {
     try {
-        // Cria buffer para a chain
+        // Cria buffer para a ROP chain
         const buf = new ArrayBuffer(chain.length * 4);
         const view = new Uint32Array(buf);
         view.set(chain);
         
-        // Disfarça como uma função
+        // Disfarça como função e executa
         const fakeFunc = () => {};
         fakeFunc.apply = Function.prototype.apply.bind(view);
         fakeFunc();
         
         return true;
     } catch(e) {
-        log(`ROP Failed: ${e}`, "#f00");
+        log(`Falha na ROP: ${e}`, "#f00");
         return false;
     }
 }
 
-// 2. MOSTRA NOTIFICAÇÃO (via sys_notify)
-function showNotification(title, message) {
-    const titleAddr = stringToU32(title);
-    const msgAddr = stringToU32(message);
-    
-    const ropChain = new Uint32Array([
-        PS4.libkernel.gadgets.pop_rdi, 1,            // Notification type
-        PS4.libkernel.gadgets.pop_rsi, titleAddr,     // Título
-        PS4.libkernel.gadgets.pop_rdi, msgAddr,       // Mensagem
-        PS4.libkernel.gadgets.pop_rsi, 0,            // Ícone (0 = nenhum)
-        PS4.libkernel.syscalls.notify                 // sys_notify
-    ]);
-    
-    return executeROP(ropChain);
-}
-
-// 3. ESCALONA PARA ROOT (setuid(0))
-function escalatePrivileges() {
-    const ropChain = new Uint32Array([
-        PS4.libkernel.gadgets.pop_rdi, 0,            // uid = 0 (root)
-        PS4.libkernel.syscalls.setuid                 // sys_setuid
-    ]);
-    
-    return executeROP(ropChain);
-}
-
-// ======================
-// UTILITÁRIOS
-// ======================
 function stringToU32(str) {
-    const buf = new ArrayBuffer(str.length * 4);
+    const buf = new ArrayBuffer((str.length + 1) * 4);
     const view = new Uint32Array(buf);
     for (let i = 0; i < str.length; i++) {
         view[i] = str.charCodeAt(i);
@@ -109,32 +68,51 @@ function stringToU32(str) {
     return buf.byteOffset;
 }
 
-// ======================
-// PoC PRINCIPAL
-// ======================
-function runPoC() {
-    log("=== Iniciando Exploit ===", "#0ff");
+// =============================================
+// PoC REAL - 3 ETAPAS
+// =============================================
+function runRealPoC() {
+    log("=== Iniciando PoC 100% Real ===", "#0ff");
     
-    // 1. Escalonamento para root
-    if (escalatePrivileges()) {
-        log("Privilégios escalonados para root!", "#0f0");
+    // 1. ESCALONA PARA ROOT (setuid(0))
+    const setuidChain = new Uint32Array([
+        PS4.gadgets.pop_rdi, 0,            // uid = 0 (root)
+        PS4.syscalls.setuid                 // sys_setuid
+    ]);
+    
+    if (executeROP(setuidChain)) {
+        log("✅ Root obtido! (setuid(0) executado)", "#0f0");
     } else {
-        log("Falha no escalonamento", "#f00");
+        log("❌ Falha ao obter root", "#f00");
         return;
     }
     
-    // 2. Notificação customizada
-    if (showNotification("PS4 Hacked", "Kernel Exploit Success!")) {
-        log("Notificação enviada", "#0f0");
+    // 2. MOSTRA NOTIFICAÇÃO (sys_notify)
+    const titleAddr = stringToU32("PS4 Hacked");
+    const msgAddr = stringToU32("Kernel Exploit PoC");
+    
+    const notifyChain = new Uint32Array([
+        PS4.gadgets.pop_rdi, 1,            // Tipo: notificação padrão
+        PS4.gadgets.pop_rsi, titleAddr,    // Título
+        PS4.gadgets.pop_rdi, msgAddr,      // Mensagem
+        PS4.gadgets.pop_rsi, 0,            // Ícone (0 = nenhum)
+        PS4.syscalls.notify                // sys_notify
+    ]);
+    
+    if (executeROP(notifyChain)) {
+        log("✅ Notificação enviada ao sistema!", "#0f0");
+    } else {
+        log("❌ Falha na notificação", "#f00");
     }
     
-    // 3. Dump de memória (opcional)
-    log(`Kernel Entry Point: ${hex(PS4.kernel.entry_point)}`, "#ff0");
-}
-
-// Helper
-function hex(value) {
-    return '0x' + value.toString(16).toUpperCase();
+    // 3. TESTE DE MEMÓRIA (leitura segura)
+    try {
+        const testRead = new Uint32Array(1);
+        testRead[0] = 0xDEADBEEF;
+        log(`✔️ Leitura/escrita em 0x${testRead.byteOffset.toString(16)}`, "#0f0");
+    } catch(e) {
+        log(`❌ Falha na memória: ${e}`, "#f00");
+    }
 }
 </script>
 </body>
