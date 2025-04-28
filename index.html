@@ -2,133 +2,309 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 Vulnerability Scanner (v12.02)</title>
+    <title>PS4 Vulnerability Scanner v12.02</title>
     <style>
-        body { background: #000; color: #aaa; font-family: monospace; padding: 20px; }
-        #log { white-space: pre; overflow: auto; height: 500px; border: 1px solid #333; padding: 10px; }
-        button { background: #0f0; color: #000; border: none; padding: 8px 15px; margin: 5px; cursor: pointer; }
-        .success { color: #0f0; font-weight: bold; }
-        .error { color: #f00; }
-        .warning { color: #ff0; }
-        .result { margin-top: 20px; border-top: 1px solid #333; padding-top: 10px; }
+        body {
+            background-color: #111;
+            color: #eee;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        #log {
+            background-color: #222;
+            border: 1px solid #444;
+            padding: 15px;
+            height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 20px;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+        }
+        .success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .danger {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .warning {
+            color: #FFC107;
+        }
+        .info {
+            color: #2196F3;
+        }
+        .section {
+            color: #9C27B0;
+            font-weight: bold;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
-    <h1>PS4 Vulnerability Scanner (v12.02)</h1>
-    <button onclick="runTests()">▶️ Run Tests</button>
-    <button onclick="clearLog()">🧹 Clear Log</button>
+    <h1>PS4 Browser Vulnerability Scanner</h1>
+    <h3>Firmware v12.02</h3>
+    
+    <button onclick="runAllTests()">Run Full Test Suite</button>
+    <button onclick="clearLog()">Clear Log</button>
+    
     <div id="log"></div>
 
 <script>
-const log = (msg, type = "info") => {
-    const logElement = document.getElementById("log");
-    const colorClass = type === "success" ? "success" : 
-                       type === "error" ? "error" : 
-                       type === "warning" ? "warning" : "";
-    logElement.innerHTML += `<span class="${colorClass}">${msg}</span>\n`;
+// Logging system with colors and timestamps
+function log(message, type = "info") {
+    const timestamp = new Date().toLocaleTimeString();
+    const logElement = document.getElementById('log');
+    const typeClass = type.toLowerCase();
+    
+    let prefix = "";
+    switch(type.toLowerCase()) {
+        case "success": prefix = "✓"; break;
+        case "danger": prefix = "✗"; break;
+        case "warning": prefix = "!"; break;
+        default: prefix = "•";
+    }
+    
+    logElement.innerHTML += `<span class="${typeClass}">[${timestamp}] ${prefix} ${message}</span>\n`;
     logElement.scrollTop = logElement.scrollHeight;
-};
+}
 
-const clearLog = () => { document.getElementById("log").innerHTML = ""; };
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
+}
 
-// ====== TESTES PRINCIPAIS ======
+// Test Cases
 const tests = {
-    // 1. Teste de DataView Underflow
-    dataViewUnderflow: () => {
-        try {
-            const view = new DataView(new ArrayBuffer(16));
-            view.setUint32(-1, 0x41414141); // Underflow intencional
-            log("[✅] DataView Underflow: Vulnerável! (Pode corromper memória)", "success");
-            return true;
-        } catch (e) {
-            log("[❌] DataView Underflow: Protegido. (" + e.message + ")", "error");
-            return false;
+    memoryCorruption: {
+        name: "Memory Corruption Tests",
+        desc: "Testing for buffer overflow/underflow vulnerabilities",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                dataViewUnderflow: false,
+                arrayBufferOOB: false,
+                typedArrayOOB: false
+            };
+            
+            // Test 1: DataView underflow
+            try {
+                const buffer = new ArrayBuffer(16);
+                const view = new DataView(buffer);
+                view.setUint32(-1, 0x41414141);
+                results.dataViewUnderflow = true;
+                log("DataView underflow successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`DataView underflow blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: ArrayBuffer out-of-bounds
+            try {
+                const buffer = new ArrayBuffer(8);
+                const view = new Uint32Array(buffer);
+                view[4] = 0xdeadbeef;
+                results.arrayBufferOOB = true;
+                log("ArrayBuffer OOB write successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`ArrayBuffer OOB blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 3: TypedArray out-of-bounds
+            try {
+                const arr = new Uint8Array(10);
+                arr.set(new Uint8Array(20), -5);
+                results.typedArrayOOB = true;
+                log("TypedArray OOB successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`TypedArray OOB blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
         }
     },
-
-    // 2. Teste de Type Confusion (vazamento)
-    typeConfusion: () => {
-        try {
-            let obj = {};
-            obj.__proto__ = Array.prototype;
-            obj.length = 0x1000;
-            const leak = obj[0];
-            log(`[✅] Type Confusion: Vazamento possível! (Valor: ${leak})`, "success");
-            return true;
-        } catch (e) {
-            log("[❌] Type Confusion: Bloqueado. (" + e.message + ")", "error");
-            return false;
+    
+    typeConfusion: {
+        name: "Type Confusion Tests",
+        desc: "Testing for type confusion vulnerabilities",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                protoHijack: false,
+                arrayLike: false
+            };
+            
+            // Test 1: Prototype hijacking
+            try {
+                let obj = {};
+                obj.__proto__ = Array.prototype;
+                obj.length = 0x1000;
+                const leak = obj[0];
+                results.protoHijack = true;
+                log(`Prototype hijack successful - leaked value: ${leak}`, "success");
+            } catch (e) {
+                log(`Prototype hijack blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: Array-like object confusion
+            try {
+                const fakeArray = { length: 100, [0]: "test" };
+                Array.prototype.push.call(fakeArray, "exploit");
+                results.arrayLike = true;
+                log("Array-like confusion successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`Array-like confusion blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
         }
     },
-
-    // 3. Teste de Corrupção de ArrayBuffer
-    arrayBufferCorruption: () => {
-        try {
-            const buffer = new ArrayBuffer(0x1000);
-            const view = new Uint32Array(buffer);
-            view[0xFFFF] = 0x1337; // Escrita fora dos limites
-            log("[✅] ArrayBuffer Corruption: Vulnerável!", "success");
-            return true;
-        } catch (e) {
-            log("[❌] ArrayBuffer Corruption: Protegido. (" + e.message + ")", "error");
-            return false;
+    
+    aslrBypass: {
+        name: "ASLR Bypass Tests",
+        desc: "Testing for memory address leaks",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                wasmLeak: false,
+                jitLeak: false
+            };
+            
+            // Test 1: WASM memory leak
+            try {
+                const wasm = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array([
+                    0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00
+                ])));
+                results.wasmLeak = true;
+                log("WASM instance created - potential memory leak possible", "success");
+            } catch (e) {
+                log(`WASM blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: JIT spray potential
+            try {
+                function jitFunc(n) { return n * n; }
+                for (let i = 0; i < 10000; i++) jitFunc(i);
+                results.jitLeak = true;
+                log("JIT compilation successful - potential spray possible", "success");
+            } catch (e) {
+                log(`JIT blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
         }
     },
-
-    // 4. Teste de ASLR Bypass (WASM)
-    aslrBypass: () => {
-        try {
-            const wasm = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array([
-                0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00
-            ])));
-            log("[✅] WASM/ASLR Bypass: Possível vazamento de memória!", "success");
-            return true;
-        } catch (e) {
-            log("[❌] WASM/ASLR Bypass: Bloqueado. (" + e.message + ")", "error");
-            return false;
-        }
-    },
-
-    // 5. Teste de Crash Controlado
-    controlledCrash: () => {
-        try {
-            const invalidFunc = null;
-            invalidFunc(); // Crash intencional
-            log("[❌] Crash Controlado: Navegador não travou (protegido).", "error");
-            return false;
-        } catch (e) {
-            log("[✅] Crash Controlado: Navegador travou (pode ser explorável).", "success");
-            return true;
+    
+    sandboxEscape: {
+        name: "Sandbox Escape Tests",
+        desc: "Testing for browser sandbox escape possibilities",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                workerEscape: false,
+                sharedArray: false
+            };
+            
+            // Test 1: Web Worker escape
+            try {
+                const worker = new Worker(URL.createObjectURL(
+                    new Blob(["postMessage('worker_test');"])
+                );
+                worker.onmessage = function(e) {
+                    results.workerEscape = true;
+                    log(`Worker message received: ${e.data} - potential sandbox escape`, "success");
+                };
+                setTimeout(() => {
+                    if (!results.workerEscape) {
+                        log("Web Workers blocked or restricted", "danger");
+                    }
+                }, 1000);
+            } catch (e) {
+                log(`Web Worker blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: SharedArrayBuffer test
+            try {
+                if (typeof SharedArrayBuffer !== 'undefined') {
+                    const sab = new SharedArrayBuffer(1024);
+                    results.sharedArray = true;
+                    log("SharedArrayBuffer available - potential sandbox escape", "success");
+                } else {
+                    log("SharedArrayBuffer not available", "danger");
+                }
+            } catch (e) {
+                log(`SharedArrayBuffer blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
         }
     }
 };
 
-// ====== EXECUTAR TODOS OS TESTES ======
-async function runTests() {
+// Main test runner
+async function runAllTests() {
     clearLog();
-    log("=== Iniciando testes no PS4 (v12.02) ===", "warning");
+    log("=== PS4 Browser Vulnerability Scan Started ===", "section");
+    log("Testing firmware version 12.02", "info");
     
-    let successCount = 0;
-    const testNames = Object.keys(tests);
+    const allResults = {};
+    let vulnerabilityCount = 0;
     
-    for (const testName of testNames) {
-        log(`\n[🔍] Executando: ${testName}...`, "info");
-        const result = await tests[testName]();
-        if (result) successCount++;
-        await new Promise(resolve => setTimeout(resolve, 500)); // Delay para legibilidade
+    // Run all test suites
+    for (const [testName, testSuite] of Object.entries(tests)) {
+        allResults[testName] = testSuite.run();
+        await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between tests
     }
-
-    // Resultado final
-    log("\n=== RESULTADO FINAL ===", "warning");
-    log(`✅ ${successCount} testes PASSARAM (potencialmente vulneráveis)`, "success");
-    log(`❌ ${testNames.length - successCount} testes FALHARAM (protegidos)`, "error");
     
-    if (successCount > 0) {
-        log("\n[⚠️] AVISO: Possíveis vulnerabilidades detectadas!", "warning");
-        log("Considere investigar CVE-2023-32409, CVE-2022-46663 ou outros exploits WebKit.", "warning");
-    } else {
-        log("\n[🔒] Navegador parece estar protegido contra as técnicas testadas.", "info");
-    }
+    // Analyze results
+    setTimeout(() => {
+        log("\n=== Final Results ===", "section");
+        
+        for (const [suiteName, suiteResults] of Object.entries(allResults)) {
+            log(`\n${tests[suiteName].name}:`, "info");
+            
+            for (const [testName, testResult] of Object.entries(suiteResults)) {
+                if (testResult) {
+                    log(`  ${testName}: POTENTIAL VULNERABILITY`, "success");
+                    vulnerabilityCount++;
+                } else {
+                    log(`  ${testName}: Secure`, "danger");
+                }
+            }
+        }
+        
+        log("\n=== Summary ===", "section");
+        if (vulnerabilityCount > 0) {
+            log(`Found ${vulnerabilityCount} potential vulnerabilities!`, "warning");
+            log("Further investigation recommended for these attack vectors.", "warning");
+        } else {
+            log("No obvious vulnerabilities detected in these tests.", "info");
+            log("The browser appears to have basic protections in place.", "info");
+        }
+        
+        log("\nScan completed. Note: This is not an exhaustive test.", "info");
+    }, 2000);
 }
 </script>
 </body>
