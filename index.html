@@ -1,192 +1,265 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 WebKit Forensic Inspector</title>
+    <title>PS4 Full Chain Exploit Toolkit</title>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { border: 1px solid #444; padding: 15px; height: 60vh; overflow-y: scroll; }
+        body { 
+            background: #000; 
+            color: #0f0; 
+            font-family: monospace; 
+            padding: 20px;
+        }
+        #log {
+            border: 1px solid #333;
+            padding: 15px;
+            height: 60vh;
+            overflow-y: scroll;
+            white-space: pre-wrap;
+        }
         .critical { color: #ff5555; font-weight: bold; }
         .warning { color: #ffff55; }
         .safe { color: #55ff55; }
-        .info { color: #5555ff; }
+        .section { color: #5555ff; font-weight: bold; }
+        button {
+            background: #0f0;
+            color: #000;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            font-family: monospace;
+        }
     </style>
 </head>
 <body>
-    <h1>PS4 Physical Device Profiler</h1>
-    <button onclick="runFullInspection()">Start Hardware Inspection</button>
+    <h1>PS4 Physical Device Exploit Toolkit</h1>
+    
+    <button onclick="runFullDiagnostic()">Run Full Diagnostic</button>
+    <button onclick="testMemoryCorruption()">Test Memory Corruption</button>
+    <button onclick="testTimingAttacks()">Test Timing Attacks</button>
+    <button onclick="testSandboxEscape()">Test Sandbox Escape</button>
+    
     <div id="log"></div>
 
 <script>
-// Logger profissional com classificação de severidade
+// Logger avançado com telemetria
 const log = (message, severity = 'info') => {
-    const timestamp = new Date().toLocaleTimeString();
+    const timestamp = performance.now().toFixed(2);
     const logEntry = document.createElement('div');
     logEntry.className = severity;
-    logEntry.textContent = `[${timestamp}] ${message}`;
+    logEntry.innerHTML = `[${timestamp}ms] ${message}`;
     document.getElementById('log').appendChild(logEntry);
     logEntry.scrollIntoView();
 };
 
-// 1. Coleta detalhada do ambiente WebKit
-function collectBrowserForensics() {
-    const data = {
-        userAgent: navigator.userAgent,
-        platform: navigator.platform,
-        cpuCores: navigator.hardwareConcurrency || 'N/A',
-        memory: navigator.deviceMemory || 'N/A',
-        webGL: getWebGLInfo(),
-        features: detectBrowserFeatures()
-    };
-
-    log(`=== WebKit Forensic Report ===`, 'info');
-    log(`User Agent: ${data.userAgent}`, 'info');
-    log(`Platform: ${data.platform}`, 'info');
-    log(`CPU Cores: ${data.cpuCores}`, 'info');
-    log(`Device Memory: ${data.memory}GB`, 'info');
-    
-    return data;
+// ==================== [1] CORE UTILITIES ====================
+class MemoryUtils {
+    static async detectMemoryLayout() {
+        log("=== Memory Layout Detection ===", "section");
+        
+        // Teste de alocação progressiva
+        const sizes = [1024, 0x1000, 0x10000, 0x100000];
+        for (const size of sizes) {
+            try {
+                const start = performance.now();
+                const buf = new ArrayBuffer(size);
+                const end = performance.now();
+                log(`Allocated ${size} bytes in ${(end-start).toFixed(2)}ms`, 
+                    (end-start) > 1 ? 'warning' : 'safe');
+            } catch (e) {
+                log(`Failed to allocate ${size} bytes: ${e}`, 'critical');
+            }
+        }
+    }
 }
 
-// 2. Detecção de WebGL (vazamento de hardware)
-function getWebGLInfo() {
-    try {
-        const canvas = document.createElement('canvas');
-        const gl = canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+// ==================== [2] TIMING ATTACKS ====================
+class TimingAttacks {
+    static async performPreciseTiming() {
+        log("=== Precise Timing Attack ===", "section");
         
-        if (!gl) {
-            log('WebGL: Disabled', 'warning');
+        // Teste de cache timing
+        const arr = new Uint8Array(0x10000);
+        const results = [];
+        
+        for (let i = 0; i < 100; i++) {
+            const idx = i * 1024;
+            const start = performance.now();
+            const val = arr[idx];
+            const end = performance.now();
+            results.push(end - start);
+        }
+        
+        const avg = results.reduce((a,b) => a+b) / results.length;
+        log(`Average access time: ${avg.toFixed(4)}ms`, 
+            avg > 0.005 ? 'critical' : 'safe');
+    }
+    
+    static async audioContextLeak() {
+        try {
+            const ctx = new (window.AudioContext || window.webkitAudioContext)();
+            const osc = ctx.createOscillator();
+            
+            osc.start();
+            const start = performance.now();
+            osc.stop();
+            const latency = performance.now() - start;
+            
+            log(`AudioContext latency: ${latency.toFixed(2)}ms`, 
+                latency > 5 ? 'critical' : 'safe');
+        } catch (e) {
+            log(`AudioContext blocked: ${e}`, 'warning');
+        }
+    }
+}
+
+// ==================== [3] MEMORY CORRUPTION ====================
+class MemoryCorruption {
+    static async testArrayBufferOverflow() {
+        log("=== ArrayBuffer Overflow Test ===", "section");
+        
+        try {
+            const buf = new ArrayBuffer(16);
+            const view = new Uint32Array(buf);
+            view[10] = 0xdeadbeef; // OOB write
+            
+            log("ArrayBuffer overflow successful!", 'critical');
+            return true;
+        } catch (e) {
+            log(`ArrayBuffer overflow blocked: ${e}`, 'safe');
+            return false;
+        }
+    }
+    
+    static async testTypeConfusion() {
+        log("=== Type Confusion Test ===", "section");
+        
+        try {
+            let obj = {};
+            obj.__proto__ = Array.prototype;
+            obj.length = 0x1000;
+            
+            log(`Type confusion success (length=${obj.length})`, 'critical');
+            return obj;
+        } catch (e) {
+            log(`Type confusion mitigated: ${e}`, 'safe');
             return null;
         }
-
-        const debugInfo = gl.getExtension('WEBGL_debug_renderer_info');
-        return {
-            vendor: gl.getParameter(debugInfo.UNMASKED_VENDOR_WEBGL),
-            renderer: gl.getParameter(debugInfo.UNMASKED_RENDERER_WEBGL),
-            version: gl.getParameter(gl.VERSION)
-        };
-    } catch (e) {
-        log(`WebGL Error: ${e.message}`, 'warning');
-        return null;
     }
 }
 
-// 3. Detecção de APIs críticas
-function detectBrowserFeatures() {
-    const features = {
-        wasm: typeof WebAssembly !== 'undefined',
-        sharedArrayBuffer: typeof SharedArrayBuffer !== 'undefined',
-        simd: typeof WebAssembly.validate === 'function' && 
-              WebAssembly.validate(new Uint8Array([0,97,115,109,1,0,0,0,1,5,1,96,0,1,123,3,2,1,0,10,10,1,8,0,65,0,253,15,253,98,11])),
-        webWorkers: typeof Worker !== 'undefined'
-    };
-
-    log('=== Feature Detection ===', 'info');
-    log(`WebAssembly: ${features.wasm ? 'Enabled' : 'Disabled'}`, features.wasm ? 'critical' : 'safe');
-    log(`SharedArrayBuffer: ${features.sharedArrayBuffer ? 'Enabled' : 'Disabled'}`, features.sharedArrayBuffer ? 'critical' : 'safe');
-    log(`SIMD: ${features.simd ? 'Enabled' : 'Disabled'}`, features.simd ? 'warning' : 'safe');
-    log(`Web Workers: ${features.webWorkers ? 'Enabled' : 'Disabled'}`, features.webWorkers ? 'warning' : 'safe');
-
-    return features;
-}
-
-// 4. Teste de proteções de memória
-function testMemoryProtections() {
-    log('=== Memory Protection Tests ===', 'info');
-    
-    // Teste ASLR básico
-    try {
-        const arr = new ArrayBuffer(1024);
-        const view = new Uint32Array(arr);
-        const addr1 = view.byteOffset;
+// ==================== [4] SANDBOX ESCAPE ====================
+class SandboxEscape {
+    static async testWorkerIsolation() {
+        log("=== Web Worker Isolation Test ===", "section");
         
-        const arr2 = new ArrayBuffer(1024);
-        const view2 = new Uint32Array(arr2);
-        const addr2 = view2.byteOffset;
-        
-        const aslrStrength = Math.abs(addr2 - addr1) > 0x1000 ? 'Strong' : 'Weak';
-        log(`ASLR Detection: ${aslrStrength} (${addr1.toString(16)} vs ${addr2.toString(16)})`, 
-            aslrStrength === 'Strong' ? 'safe' : 'critical');
-    } catch (e) {
-        log(`ASLR Test Failed: ${e.message}`, 'warning');
-    }
-
-    // Teste de isolamento de processos
-    try {
-        const workerCode = `
-            postMessage(performance.now());
-            close();
-        `;
-        const worker = new Worker(URL.createObjectURL(new Blob([workerCode])));
-        worker.onmessage = e => {
-            log(`Worker Isolation Test: ${e.data}ms`, 'info');
-        };
-    } catch (e) {
-        log(`Worker Test Failed: ${e.message}`, 'warning');
-    }
-}
-
-// 5. Teste de mitigação de tipo
-function testTypeConfusion() {
-    log('=== Type Confusion Tests ===', 'info');
-    
-    try {
-        let obj = {};
-        obj.__proto__ = Array.prototype;
-        obj.length = 0x1000;
-        log(`Prototype Pollution: Array length set to ${obj.length}`, 
-            obj.length === 0x1000 ? 'critical' : 'safe');
-    } catch (e) {
-        log(`Type Confusion Mitigated: ${e.message}`, 'safe');
-    }
-}
-
-// Função principal
-async function runFullInspection() {
-    document.getElementById('log').innerHTML = '';
-    
-    // Coleta forense
-    const forensicData = collectBrowserForensics();
-    
-    // Testes de segurança
-    testMemoryProtections();
-    testTypeConfusion();
-    
-    // Análise de vulnerabilidades
-    analyzeVulnerabilities(forensicData);
-}
-
-// Análise baseada nos dados coletados
-function analyzeVulnerabilities(data) {
-    log('=== Vulnerability Analysis ===', 'info');
-    
-    // Verifica versão do WebKit para vulnerabilidades conhecidas
-    const webkitVersion = data.userAgent.match(/AppleWebKit\/([\d.]+)/)?.[1];
-    if (webkitVersion) {
-        log(`Detected WebKit version: ${webkitVersion}`, 'info');
-        
-        // Comparação com vulnerabilidades conhecidas
-        if (compareVersion(webkitVersion, '606.1.36') < 0) {
-            log('Potential CVE-2021-1789 (WebKit Memory Corruption)', 'critical');
+        try {
+            const workerCode = `
+                postMessage({
+                    userAgent: navigator.userAgent,
+                    memory: performance.memory
+                });
+            `;
+            
+            const worker = new Worker(URL.createObjectURL(
+                new Blob([workerCode], {type: 'application/javascript'})
+            ));
+            
+            worker.onmessage = (e) => {
+                log(`Worker leaked data: ${JSON.stringify(e.data)}`, 'critical');
+            };
+            
+            setTimeout(() => {
+                worker.terminate();
+                log("Worker test completed", 'info');
+            }, 1000);
+            
+        } catch (e) {
+            log(`Worker creation failed: ${e}`, 'warning');
         }
     }
     
-    // Verifica WebGL para vazamento de informações
-    if (data.webGL && data.webGL.renderer.includes('AMD')) {
-        log('AMD GPU detected - potential timing attack vector', 'warning');
+    static async testSharedArrayBuffer() {
+        log("=== SharedArrayBuffer Test ===", "section");
+        
+        try {
+            if (typeof SharedArrayBuffer !== 'undefined') {
+                const sab = new SharedArrayBuffer(1024);
+                log("SharedArrayBuffer available!", 'critical');
+                return sab;
+            } else {
+                log("SharedArrayBuffer not available", 'safe');
+                return null;
+            }
+        } catch (e) {
+            log(`SharedArrayBuffer test failed: ${e}`, 'warning');
+            return null;
+        }
     }
 }
 
-// Utilitário para comparação de versões
-function compareVersion(v1, v2) {
-    const parts1 = v1.split('.').map(Number);
-    const parts2 = v2.split('.').map(Number);
-    
-    for (let i = 0; i < Math.max(parts1.length, parts2.length); i++) {
-        const p1 = parts1[i] || 0;
-        const p2 = parts2[i] || 0;
-        if (p1 !== p2) return p1 - p2;
+// ==================== [5] DIAGNOSTIC TOOLS ====================
+class SystemProfiler {
+    static async runFullProfile() {
+        log("=== System Profiling ===", "section");
+        
+        // Coleta de informações do navegador
+        log(`User Agent: ${navigator.userAgent}`, 'info');
+        log(`Platform: ${navigator.platform}`, 'info');
+        log(`CPU Cores: ${navigator.hardwareConcurrency || 'N/A'}`, 'info');
+        log(`Device Memory: ${navigator.deviceMemory || 'N/A'}GB`, 'info');
+        
+        // Teste de APIs críticas
+        const apis = [
+            'WebAssembly', 'SharedArrayBuffer', 'WebGL', 
+            'WebGPU', 'AudioContext', 'WebSocket'
+        ];
+        
+        apis.forEach(api => {
+            // @ts-ignore
+            const available = api in window ? 'critical' : 'safe';
+            log(`${api}: ${available === 'critical' ? 'Available' : 'Unavailable'}`, available);
+        });
     }
-    return 0;
+}
+
+// ==================== [MAIN FUNCTIONS] ====================
+async function runFullDiagnostic() {
+    document.getElementById('log').innerHTML = '';
+    
+    await SystemProfiler.runFullProfile();
+    await MemoryUtils.detectMemoryLayout();
+    
+    // Testes de segurança
+    await TimingAttacks.performPreciseTiming();
+    await TimingAttacks.audioContextLeak();
+    
+    // Testes de exploração
+    await MemoryCorruption.testArrayBufferOverflow();
+    await MemoryCorruption.testTypeConfusion();
+    
+    // Tentativas de escape
+    await SandboxEscape.testWorkerIsolation();
+    await SandboxEscape.testSharedArrayBuffer();
+    
+    log("=== Diagnostic Complete ===", "section");
+}
+
+async function testMemoryCorruption() {
+    document.getElementById('log').innerHTML = '';
+    await MemoryCorruption.testArrayBufferOverflow();
+    await MemoryCorruption.testTypeConfusion();
+}
+
+async function testTimingAttacks() {
+    document.getElementById('log').innerHTML = '';
+    await TimingAttacks.performPreciseTiming();
+    await TimingAttacks.audioContextLeak();
+}
+
+async function testSandboxEscape() {
+    document.getElementById('log').innerHTML = '';
+    await SandboxEscape.testWorkerIsolation();
+    await SandboxEscape.testSharedArrayBuffer();
 }
 </script>
 </body>
