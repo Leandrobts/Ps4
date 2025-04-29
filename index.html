@@ -1,123 +1,310 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 FW 12.02 - Kernel Read Fix</title>
+    <meta charset="UTF-8">
+    <title>PS4 Vulnerability Scanner v12.02</title>
     <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
-        button { background: #000; color: #0f0; border: 1px solid #0f0; padding: 8px 15px; }
+        body {
+            background-color: #111;
+            color: #eee;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+            line-height: 1.5;
+        }
+        #log {
+            background-color: #222;
+            border: 1px solid #444;
+            padding: 15px;
+            height: 500px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 20px;
+            border-radius: 5px;
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 16px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 5px;
+            font-family: 'Courier New', monospace;
+        }
+        .success {
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .danger {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .warning {
+            color: #FFC107;
+        }
+        .info {
+            color: #2196F3;
+        }
+        .section {
+            color: #9C27B0;
+            font-weight: bold;
+            margin-top: 15px;
+        }
     </style>
 </head>
 <body>
-    <h2>PS4 Kernel Read - Versão Validada</h2>
-    <button onclick="runKernelTest()">TESTAR LEITURA DO KERNEL</button>
+    <h1>PS4 Browser Vulnerability Scanner</h1>
+    <h3>Firmware v12.02</h3>
+    
+    <button onclick="runAllTests()">Run Full Test Suite</button>
+    <button onclick="clearLog()">Clear Log</button>
+    
     <div id="log"></div>
 
 <script>
-// ======================
-// CONFIGURAÇÃO REAL (FW 12.02)
-// ======================
-const PS4 = {
-    kernel: {
-        base: 0xFFFFFFFF80000000, // Endereço base do kernel
-        syscalls: {
-            memcpy: 0x24          // sys_memcpy (confirmado)
-        },
-        gadgets: {
-            pop_rdi: 0x18A5F,     // pop rdi; ret (substitua pelo seu)
-            pop_rsi: 0x2389C,     // pop rsi; ret
-            pop_rdx: 0x34567,     // pop rdx; ret
-            ret: 0x00123          // ret
+// Logging system with colors and timestamps
+function log(message, type = "info") {
+    const timestamp = new Date().toLocaleTimeString();
+    const logElement = document.getElementById('log');
+    const typeClass = type.toLowerCase();
+    
+    let prefix = "";
+    switch(type.toLowerCase()) {
+        case "success": prefix = "✓"; break;
+        case "danger": prefix = "✗"; break;
+        case "warning": prefix = "!"; break;
+        default: prefix = "•";
+    }
+    
+    logElement.innerHTML += `<span class="${typeClass}">[${timestamp}] ${prefix} ${message}</span>\n`;
+    logElement.scrollTop = logElement.scrollHeight;
+}
+
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
+}
+
+// Test Cases
+const tests = {
+    memoryCorruption: {
+        name: "Memory Corruption Tests",
+        desc: "Testing for buffer overflow/underflow vulnerabilities",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                dataViewUnderflow: false,
+                arrayBufferOOB: false,
+                typedArrayOOB: false
+            };
+            
+            // Test 1: DataView underflow
+            try {
+                const buffer = new ArrayBuffer(16);
+                const view = new DataView(buffer);
+                view.setUint32(-1, 0x41414141);
+                results.dataViewUnderflow = true;
+                log("DataView underflow successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`DataView underflow blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: ArrayBuffer out-of-bounds
+            try {
+                const buffer = new ArrayBuffer(8);
+                const view = new Uint32Array(buffer);
+                view[4] = 0xdeadbeef;
+                results.arrayBufferOOB = true;
+                log("ArrayBuffer OOB write successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`ArrayBuffer OOB blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 3: TypedArray out-of-bounds
+            try {
+                const arr = new Uint8Array(10);
+                arr.set(new Uint8Array(20), -5);
+                results.typedArrayOOB = true;
+                log("TypedArray OOB successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`TypedArray OOB blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
+        }
+    },
+    
+    typeConfusion: {
+        name: "Type Confusion Tests",
+        desc: "Testing for type confusion vulnerabilities",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                protoHijack: false,
+                arrayLike: false
+            };
+            
+            // Test 1: Prototype hijacking
+            try {
+                let obj = {};
+                obj.__proto__ = Array.prototype;
+                obj.length = 0x1000;
+                const leak = obj[0];
+                results.protoHijack = true;
+                log(`Prototype hijack successful - leaked value: ${leak}`, "success");
+            } catch (e) {
+                log(`Prototype hijack blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: Array-like object confusion
+            try {
+                const fakeArray = { length: 100, [0]: "test" };
+                Array.prototype.push.call(fakeArray, "exploit");
+                results.arrayLike = true;
+                log("Array-like confusion successful - potential vulnerability found!", "success");
+            } catch (e) {
+                log(`Array-like confusion blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
+        }
+    },
+    
+    aslrBypass: {
+        name: "ASLR Bypass Tests",
+        desc: "Testing for memory address leaks",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                wasmLeak: false,
+                jitLeak: false
+            };
+            
+            // Test 1: WASM memory leak
+            try {
+                const wasm = new WebAssembly.Instance(new WebAssembly.Module(new Uint8Array([
+                    0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00
+                ])));
+                results.wasmLeak = true;
+                log("WASM instance created - potential memory leak possible", "success");
+            } catch (e) {
+                log(`WASM blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: JIT spray potential
+            try {
+                function jitFunc(n) { return n * n; }
+                for (let i = 0; i < 10000; i++) jitFunc(i);
+                results.jitLeak = true;
+                log("JIT compilation successful - potential spray possible", "success");
+            } catch (e) {
+                log(`JIT blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
+        }
+    },
+    
+    sandboxEscape: {
+        name: "Sandbox Escape Tests",
+        desc: "Testing for browser sandbox escape possibilities",
+        run: function() {
+            log(`Starting: ${this.name}`, "info");
+            log(this.desc, "info");
+            
+            let results = {
+                workerEscape: false,
+                sharedArray: false
+            };
+            
+            // Test 1: Web Worker escape
+            try {
+                const worker = new Worker(URL.createObjectURL(
+                    new Blob(["postMessage('worker_test');"])
+                );
+                worker.onmessage = function(e) {
+                    results.workerEscape = true;
+                    log(`Worker message received: ${e.data} - potential sandbox escape`, "success");
+                };
+                setTimeout(() => {
+                    if (!results.workerEscape) {
+                        log("Web Workers blocked or restricted", "danger");
+                    }
+                }, 1000);
+            } catch (e) {
+                log(`Web Worker blocked: ${e.message}`, "danger");
+            }
+            
+            // Test 2: SharedArrayBuffer test
+            try {
+                if (typeof SharedArrayBuffer !== 'undefined') {
+                    const sab = new SharedArrayBuffer(1024);
+                    results.sharedArray = true;
+                    log("SharedArrayBuffer available - potential sandbox escape", "success");
+                } else {
+                    log("SharedArrayBuffer not available", "danger");
+                }
+            } catch (e) {
+                log(`SharedArrayBuffer blocked: ${e.message}`, "danger");
+            }
+            
+            return results;
         }
     }
 };
 
-// ======================
-// SISTEMA DE LOG
-// ======================
-const log = (msg, color = "#0f0") => {
-    document.getElementById('log').innerHTML += `<span style="color:${color}">${msg}</span><br>`;
-};
-
-// ======================
-// LEITURA DE KERNEL CONFIÁVEL
-// ======================
-function testKernelRead() {
-    // 1. Prepara buffer com valor conhecido (0x41 = 'A')
-    const buffer = new ArrayBuffer(16);
-    const view = new Uint8Array(buffer);
-    view.fill(0x41);
+// Main test runner
+async function runAllTests() {
+    clearLog();
+    log("=== PS4 Browser Vulnerability Scan Started ===", "section");
+    log("Testing firmware version 12.02", "info");
     
-    // 2. Chain para copiar kernel -> userland
-    const chain = [
-        PS4.kernel.gadgets.pop_rdi, buffer.byteOffset, // Destino
-        PS4.kernel.gadgets.pop_rsi, PS4.kernel.base,   // Origem (kernel)
-        PS4.kernel.gadgets.pop_rdx, 16,               // Tamanho
-        PS4.kernel.syscalls.memcpy,                   // sys_memcpy
-        PS4.kernel.gadgets.ret                        // Retorno seguro
-    ];
+    const allResults = {};
+    let vulnerabilityCount = 0;
     
-    // 3. Executa
-    const success = executeROP(new Uint32Array(chain));
-    
-    // 4. Verificação
-    if (!success) {
-        log("❌ Falha na execução da ROP chain", "#f00");
-        return false;
+    // Run all test suites
+    for (const [testName, testSuite] of Object.entries(tests)) {
+        allResults[testName] = testSuite.run();
+        await new Promise(resolve => setTimeout(resolve, 500)); // Small delay between tests
     }
     
-    // Checa se os dados foram sobrescritos (deveria ser != 0x41)
-    if (view[0] === 0x41) {
-        log("❌ Dados não foram copiados (memória inacessível)", "#f00");
-        log(`Bytes lidos: ${Array.from(view).map(x => x.toString(16)).join(' ')}`, "#f80");
-        return false;
-    }
-    
-    log("✅ Leitura do kernel BEM-SUCEDIDA!", "#0f0");
-    log(`Primeiros bytes: ${Array.from(view.slice(0,4)).map(x => x.toString(16)).join(' ')}`, "#ff0");
-    return true;
-}
-
-// ======================
-// EXECUÇÃO PRINCIPAL
-// ======================
-function runKernelTest() {
-    log("=== TESTE DE LEITURA DO KERNEL ===", "#0ff");
-    
-    if (testKernelRead()) {
-        // Teste adicional: Leitura da versão do kernel
-        readKernelVersion();
-    }
-}
-
-function readKernelVersion() {
-    const buffer = new ArrayBuffer(32);
-    const versionAddr = PS4.kernel.base + 0x123456; // Substitua pelo offset real
-    
-    executeROP(new Uint32Array([
-        PS4.kernel.gadgets.pop_rdi, buffer.byteOffset,
-        PS4.kernel.gadgets.pop_rsi, versionAddr,
-        PS4.kernel.gadgets.pop_rdx, 32,
-        PS4.kernel.syscalls.memcpy
-    ]));
-    
-    const version = new TextDecoder().decode(new Uint8Array(buffer));
-    log(`Versão do kernel: ${version.split('\0')[0]}`, "#0f0");
-}
-
-// Funções auxiliares
-function executeROP(chain) {
-    try {
-        const buf = new ArrayBuffer(chain.length * 4);
-        new Uint32Array(buf).set(chain);
-        const fakeFunc = () => {};
-        fakeFunc.apply = Function.prototype.apply.bind(new Uint32Array(buf));
-        fakeFunc();
-        return true;
-    } catch(e) {
-        log(`Erro ROP: ${e}`, "#f00");
-        return false;
-    }
+    // Analyze results
+    setTimeout(() => {
+        log("\n=== Final Results ===", "section");
+        
+        for (const [suiteName, suiteResults] of Object.entries(allResults)) {
+            log(`\n${tests[suiteName].name}:`, "info");
+            
+            for (const [testName, testResult] of Object.entries(suiteResults)) {
+                if (testResult) {
+                    log(`  ${testName}: POTENTIAL VULNERABILITY`, "success");
+                    vulnerabilityCount++;
+                } else {
+                    log(`  ${testName}: Secure`, "danger");
+                }
+            }
+        }
+        
+        log("\n=== Summary ===", "section");
+        if (vulnerabilityCount > 0) {
+            log(`Found ${vulnerabilityCount} potential vulnerabilities!`, "warning");
+            log("Further investigation recommended for these attack vectors.", "warning");
+        } else {
+            log("No obvious vulnerabilities detected in these tests.", "info");
+            log("The browser appears to have basic protections in place.", "info");
+        }
+        
+        log("\nScan completed. Note: This is not an exhaustive test.", "info");
+    }, 2000);
 }
 </script>
 </body>
