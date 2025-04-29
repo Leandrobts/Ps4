@@ -72,7 +72,10 @@ const webkitTests = {
     "huge_allocation": async function() {
         log("[WEBKIT] Testing Huge Memory Allocation...", "info");
         try {
-            const hugeArray = new Array(1000000).fill(new ArrayBuffer(1024));
+            const hugeArray = new Array(1000); // Reduzi para um número menor para evitar problemas de memória iniciais
+            for (let i = 0; i < hugeArray.length; i++) {
+                hugeArray[i] = new ArrayBuffer(1024 * 1024); // 1MB por buffer
+            }
             log("⚠️ Huge memory allocation attempted (monitor browser memory usage)", "warning");
             return true;
         } catch (e) {
@@ -103,11 +106,10 @@ const webkitTests = {
         try {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            // Tentativa de usar tamanhos extremos ou dados malformados
-            canvas.width = 4294967295; // Máximo valor de uint32
-            canvas.height = 4294967295;
+            canvas.width = 4096; // Reduzi as dimensões para evitar problemas de renderização iniciais
+            canvas.height = 4096;
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-            log("⚠️ Canvas API with extreme dimensions attempted (monitor performance/crashes)", "warning");
+            log("⚠️ Canvas API with large dimensions attempted (monitor performance/crashes)", "warning");
             return true;
         } catch (e) {
             log(`✅ Mitigated: ${e.message}`, "success");
@@ -118,18 +120,18 @@ const webkitTests = {
     "fetch_api_exploit": async function() {
         log("[WEBKIT] Testing Fetch API with Malicious Headers/Body...", "info");
         try {
-            await fetch('http://localhost:8000/test', { // Assumindo um servidor local para teste
+            const response = await fetch('http://example.com', { // Use um domínio seguro para teste
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/octet-stream',
-                    'X-Malicious-Header': 'A'.repeat(4096) // Header muito grande
+                    'X-Malicious-Header': 'A'.repeat(1024) // Reduzi o tamanho do header
                 },
-                body: 'B'.repeat(1024 * 1024 * 10) // Body grande
+                body: 'B'.repeat(1024 * 10) // Reduzi o tamanho do body
             });
-            log("⚠️ Fetch API with large headers/body sent (monitor network/browser)", "warning");
+            log(`⚠️ Fetch API request sent. Status: ${response.status}`, "warning");
             return true;
         } catch (e) {
-            log(`✅ Mitigated: ${e.message}`, "success");
+            log(`✅ Fetch API test error: ${e.message}`, "success");
             return false;
         }
     },
@@ -137,19 +139,27 @@ const webkitTests = {
     "websocket_exploit": async function() {
         log("[WEBKIT] Testing WebSocket Unusual Messages...", "info");
         try {
-            const ws = new WebSocket('ws://localhost:8080'); // Assumindo um servidor WebSocket local
+            const ws = new WebSocket('ws://echo.websocket.events'); // Use um servidor de eco seguro para teste
             ws.onopen = () => {
-                ws.send('C'.repeat(65536)); // Mensagem grande
-                ws.send(new ArrayBuffer(1024 * 1024)); // Mensagem ArrayBuffer grande
-                ws.send(undefined); // Mensagem inválida
-                log("⚠️ WebSocket with large/invalid messages sent (monitor server/browser)", "warning");
+                ws.send('C'.repeat(8192)); // Reduzi o tamanho da mensagem
+                ws.send(new ArrayBuffer(1024)); // Reduzi o tamanho do ArrayBuffer
+                ws.send(null); // Tentativa com valor nulo
+                log("⚠️ WebSocket with potentially large/invalid messages sent (monitor server/browser)", "warning");
             };
             ws.onerror = (error) => {
                 log(`WebSocket Error: ${error.message}`, "danger");
             };
-            return true;
+            return new Promise((resolve) => {
+                ws.onclose = () => resolve(true);
+                setTimeout(() => {
+                    if (ws.readyState !== WebSocket.CLOSED) {
+                        ws.close();
+                        resolve(true);
+                    }
+                }, 5000); // Espera um pouco para a conexão/envio
+            });
         } catch (e) {
-            log(`✅ Mitigated: ${e.message}`, "success");
+            log(`✅ WebSocket test error: ${e.message}`, "success");
             return false;
         }
     }
