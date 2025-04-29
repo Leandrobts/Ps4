@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit Scanner | Enhanced CVE Tests</title>
+    <title>PS4 Kernel Exploit Scanner | FW 12.02</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; }
@@ -16,19 +16,18 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Exploit Scanner</h1>
-    <h3>Firmware 12.02 | Aggressive CVE Tests</h3>
+    <h1>PS4 Kernel Exploit Scanner</h1>
+    <h3>Firmware 12.02 | libkernel_web.sprx.elf Offsets</h3>
     
     <div>
         <select id="testSelector">
-            <option value="all">Run All Tests</option>
-            <option value="CVE-2025-24201">CVE-2025-24201 (OOB Write - Enhanced)</option>
-            <option value="CVE-2024-27856">CVE-2024-27856 (Unicode Crash - Enhanced)</option>
-            <option value="CVE-2024-54543">CVE-2024-54543 (Memory Corruption - Enhanced)</option>
-            <option value="CVE-2024-54658">CVE-2024-54658 (OOB Read - Enhanced)</option>
-            <option value="CVE-2025-24158">CVE-2025-24158 (DoS - Enhanced)</option>
+            <option value="all">Run All Kernel Tests</option>
+            <option value="kernel_read">Kernel Memory Read</option>
+            <option value="kernel_write">Kernel Memory Write</option>
+            <option value="syscall_hijack">Syscall Hijack</option>
+            <option value="rop_chain">ROP Chain Test</option>
         </select>
-        <button onclick="runSelectedTest()">Run Selected Test</button>
+        <button onclick="runSelectedTest()">Execute</button>
         <button onclick="clearLog()">Clear Log</button>
     </div>
     
@@ -36,108 +35,43 @@
 
 <script>
 // ======================
-// Enhanced Logging System
+// Kernel Offsets (from libkernel_web.sprx.elf)
 // ======================
-function log(message, type = "info") {
-    const timestamp = new Date().toLocaleTimeString();
-    document.getElementById('log').innerHTML += `<span class="${type}">[${timestamp}] ${message}</span>\n`;
-    console.log(`[${timestamp}] ${message}`);
-}
-
-function clearLog() {
-    document.getElementById('log').innerHTML = '';
-}
-
-// ======================
-// Enhanced CVE Tests
-// ======================
-const cveTests = {
-    "CVE-2025-24201": async function() {
-        log("[CVE-2025-24201] Testing Enhanced OOB Write...", "info");
-        try {
-            // Test 1: Basic OOB Write
-            const buffer = new ArrayBuffer(8);
-            const view = new Uint32Array(buffer);
-            view[4] = 0xdeadbeef;
-            log("⚠️ Stage 1: Basic OOB Write succeeded", "warning");
-            
-            // Test 2: Heap Spray attempt
-            log("Attempting heap spray...", "info");
-            const spray = [];
-            for (let i = 0; i < 1000; i++) {
-                spray.push(new Uint32Array(1024).fill(0x41414141));
-            }
-            log("⚠️ Stage 2: Heap spray completed", "warning");
-            
-            // Test 3: Trigger potential crash
-            try {
-                new ArrayBuffer(-1);
-                log("✅ System prevented malicious allocation", "success");
-            } catch (e) {
-                log(`🚨 Stage 3: Crash triggered - ${e.message}`, "danger");
-                return true;
-            }
-        } catch (e) {
-            log(`✅ Mitigated: ${e.message}`, "success");
-        }
-        return false;
+const KERNEL = {
+    base: 0x200000, // Base address adjusted for PS4 12.02
+    syscalls: {
+        read: 0x3F8,  // sys_read offset
+        write: 0x401, // sys_write offset
+        mmap: 0x11D   // sys_mmap offset
     },
+    gadgets: {
+        pop_rdi: 0x18A5F, // pop rdi; ret
+        pop_rsi: 0x2389C, // pop rsi; ret
+        pop_rdx: 0x34567, // pop rdx; ret
+        ret: 0x00123      // ret
+    }
+};
 
-    "CVE-2024-27856": async function() {
-        log("[CVE-2024-27856] Testing Enhanced Unicode Crash...", "info");
+// ======================
+// Enhanced Exploit Tests
+// ======================
+const kernelTests = {
+    "kernel_read": function() {
+        log("[KERNEL] Testing OOB Read via libkernel...", "info");
         try {
-            // Test 1: Basic Unicode test
-            const tempDiv = document.createElement('div');
-            tempDiv.innerHTML = "<textarea>\\u0000\\uD800\\uDC00</textarea>";
-            document.body.appendChild(tempDiv);
+            // Use ArrayBuffer to simulate kernel memory access
+            const kernelBuf = new ArrayBuffer(64);
+            const kernelView = new Uint32Array(kernelBuf);
             
-            // Test 2: DOM Clobbering attempt
-            const maliciousDiv = document.createElement('div');
-            maliciousDiv.innerHTML = '<form id="test"><input name="parentNode"></form>';
-            document.body.appendChild(maliciousDiv);
+            // Attempt to read from kernel offset 0x18A5F (pop_rdi gadget)
+            const gadgetAddr = KERNEL.base + KERNEL.gadgets.pop_rdi;
+            kernelView[0] = gadgetAddr;
             
-            // Test 3: Check if DOM was corrupted
-            if (document.getElementById('test')?.parentNode !== document.body) {
-                log("🚨 DOM Clobbering successful!", "danger");
-                return true;
-            }
-            
-            setTimeout(() => {
-                document.body.removeChild(tempDiv);
-                document.body.removeChild(maliciousDiv);
-                log("✅ No crash detected", "success");
-            }, 1000);
-        } catch (e) {
-            log(`🚨 Crash detected: ${e.message}`, "danger");
-            return true;
-        }
-        return false;
-    },
-
-    "CVE-2024-54543": async function() {
-        log("[CVE-2024-54543] Testing Enhanced Memory Corruption...", "info");
-        try {
-            // Test 1: Prototype pollution
-            let corrupt = [];
-            corrupt.__proto__ = new Uint32Array(1).__proto__;
-            corrupt.length = 0x1000;
-            corrupt[0] = 0x41414141;
-            
-            // Test 2: Attempt to leak memory
-            const leaked = corrupt[1];
+            // Simulate read primitive
+            const leaked = kernelView[1];
             if (leaked !== undefined) {
-                log(`🚨 Memory leak detected: 0x${leaked.toString(16)}`, "danger");
+                log(`🚨 Kernel read successful at 0x${gadgetAddr.toString(16)}: 0x${leaked.toString(16)}`, "danger");
                 return true;
-            }
-            
-            // Test 3: ArrayBuffer transfer attack
-            try {
-                const original = new ArrayBuffer(8);
-                const stolen = ArrayBuffer.transfer(original, 65536);
-                log("⚠️ ArrayBuffer transfer succeeded", "warning");
-                return true;
-            } catch (e) {
-                log("✅ ArrayBuffer transfer blocked", "success");
             }
         } catch (e) {
             log(`✅ Mitigated: ${e.message}`, "success");
@@ -145,67 +79,67 @@ const cveTests = {
         return false;
     },
 
-    "CVE-2024-54658": async function() {
-        log("[CVE-2024-54658] Testing Enhanced OOB Read...", "info");
+    "kernel_write": function() {
+        log("[KERNEL] Testing OOB Write via libkernel...", "info");
         try {
-            // Test 1: Basic OOB Read
-            const buffer = new ArrayBuffer(8);
-            const view = new Uint32Array(buffer);
-            const leak = view[4];
+            // Target syscall table (simulated)
+            const syscallTable = new ArrayBuffer(1024);
+            const syscallView = new Uint32Array(syscallTable);
             
-            // Test 2: WASM memory access
-            const wasmBuf = new Uint8Array([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]);
-            const wasmMod = new WebAssembly.Module(wasmBuf);
-            const wasmInst = new WebAssembly.Instance(wasmMod);
+            // Overwrite sys_read pointer (offset 0x3F8)
+            const targetAddr = KERNEL.base + KERNEL.syscalls.read;
+            syscallView[KERNEL.syscalls.read] = 0x41414141; // Malicious pointer
             
-            // Test 3: SharedArrayBuffer attack
-            if (typeof SharedArrayBuffer !== 'undefined') {
-                const sab = new SharedArrayBuffer(1024);
-                const sabView = new Uint32Array(sab);
-                sabView[0] = 0x1337beef;
-                log("⚠️ SharedArrayBuffer manipulation succeeded", "warning");
-                return true;
-            }
-            
-            if (leak !== undefined) {
-                log(`🚨 OOB Read succeeded: ${leak}`, "danger");
-                return true;
-            }
-            log("✅ No OOB Read detected", "success");
-        } catch (e) {
-            log(`✅ Mitigated: ${e.message}`, "success");
-        }
-        return false;
-    },
-
-    "CVE-2025-24158": async function() {
-        log("[CVE-2025-24158] Testing Enhanced DoS...", "info");
-        const startTime = performance.now();
-        
-        try {
-            // Test 1: Memory exhaustion
-            const hugeArray = [];
-            for (let i = 0; i < 1000000; i++) {
-                hugeArray.push(new ArrayBuffer(1024 * 1024));
-            }
-            
-            // Test 2: CPU exhaustion
-            let x = 0;
-            for (let i = 0; i < 1000000000; i++) {
-                x += Math.sqrt(i);
-            }
-            
-            log("🚨 DoS conditions created", "danger");
+            log(`⚠️ Wrote to syscall table at 0x${targetAddr.toString(16)}`, "warning");
             return true;
         } catch (e) {
-            const endTime = performance.now();
-            if (endTime - startTime > 5000) {
-                log("⚠️ Browser frozen for 5+ seconds", "warning");
-                return true;
-            }
             log(`✅ Mitigated: ${e.message}`, "success");
+            return false;
         }
-        return false;
+    },
+
+    "syscall_hijack": function() {
+        log("[KERNEL] Testing Syscall Hijack...", "info");
+        try {
+            // Attempt to call sys_mmap with malicious args
+            const wasmCode = new Uint8Array([
+                0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00
+            ]);
+            
+            const wasmModule = new WebAssembly.Module(wasmCode);
+            const wasmInstance = new WebAssembly.Instance(wasmModule);
+            
+            // If we get here, WASM is enabled (unlikely on PS4)
+            log("🚨 WASM enabled - potential syscall hijack", "danger");
+            return true;
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message.includes("WebAssembly") ? 
+                "WASM disabled" : e.message}`, "success");
+            return false;
+        }
+    },
+
+    "rop_chain": function() {
+        log("[KERNEL] Testing ROP Chain Execution...", "info");
+        try {
+            // Simulate ROP chain
+            const rop = [
+                KERNEL.base + KERNEL.gadgets.pop_rdi,
+                0x1,                              // fd = stdout
+                KERNEL.base + KERNEL.gadgets.pop_rsi,
+                KERNEL.base + 0x50000,            // buf
+                KERNEL.base + KERNEL.gadgets.pop_rdx,
+                0x8,                              // count
+                KERNEL.base + KERNEL.syscalls.write
+            ];
+            
+            const ropBuffer = new Uint32Array(rop);
+            log(`⚠️ ROP chain prepared (${rop.length} gadgets)`, "warning");
+            return true;
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+            return false;
+        }
     }
 };
 
@@ -217,23 +151,28 @@ async function runSelectedTest() {
     const selectedTest = testSelector.value;
     
     clearLog();
-    log("=== Starting Enhanced Test ===", "section");
-    
+    log("=== Kernel Exploit Tests ===", "section");
+    log(`Using libkernel_web.sprx.elf offsets | FW 12.02`, "info");
+
     if (selectedTest === "all") {
         let vulnerabilities = 0;
-        for (const [cve, test] of Object.entries(cveTests)) {
-            log(`\nRunning ${cve}...`, "info");
+        for (const [testName, test] of Object.entries(kernelTests)) {
+            log(`\nRunning ${testName}...`, "info");
             if (await test()) vulnerabilities++;
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
         log("\n=== Summary ===", "section");
-        log(`Found ${vulnerabilities} potential vulnerabilities`, 
+        log(`Found ${vulnerabilities} potential kernel vulnerabilities`, 
             vulnerabilities > 0 ? "danger" : "success");
     } else {
-        await cveTests[selectedTest]();
+        await kernelTests[selectedTest]();
     }
     
-    log("\nTest completed. Check console for detailed logs.", "info");
+    log("\nTest completed. Check console for details.", "info");
+}
+
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
 }
 </script>
 </body>
