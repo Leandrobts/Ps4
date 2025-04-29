@@ -2,141 +2,71 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit OOB Write + CSP Bypass - Testes Finais (Tentativa)</title>
-    <style> /* ... estilos ... */ </style>
+    <title>PS4 WebKit OOB Write + CSP Bypass - Debug Log</title>
+    <style>
+        body {
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f8f8f8;
+        }
+        .critical { color: magenta; font-weight: bold; }
+        .warning { color: orange; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
 </head>
 <body>
-    <h1>PS4 WebKit OOB Write + CSP Bypass - Testes Finais (Tentativa)</h1>
+    <h1>PS4 WebKit OOB Write + CSP Bypass - Debug Log</h1>
     <div id="output"></div>
     <script>
-        const log = (message, type = 'info') => { /* ... função log ... */ };
-
-        async function finalExploitAttempt() {
-            log("Iniciando Testes Finais (Tentativa) OOB Write + CSP Bypass...", 'critical');
-
+        const log = (message, type = 'info') => {
             try {
-                const { targetObject, buffer, view, bufferSize } = prepareDataFinalAttempt();
-                await targetedOOBWriteTestsFinalAttempt(targetObject, view, bufferSize);
-                await introspectAndAttemptPrivilegedActionsFinalAttempt(targetObject);
-                log("Testes Finais (Tentativa) Concluídos.", 'critical');
-            } catch (error) {
-                log(`Erro fatal na execução: ${error}`, 'error');
-            }
-        }
-
-        function prepareDataFinalAttempt() { /* ... função prepareData ... */ }
-
-        async function targetedOOBWriteTestsFinalAttempt(targetObject, view, bufferSize) {
-            log("\n--- Testes de OOB Write Direcionados (Final Tentativa) ---", 'warning');
-
-            const writeTargets = [
-                { offset: 0, value: 0xABABABAB },
-                { offset: 4, value: 0xCDEF0123 },
-                { offset: 16, value: 0x44556677 },
-                { offset: 32, value: 0x8899AABB },
-                { offset: bufferSize - 8, value: 0x11223344 },
-                { offset: bufferSize - 1, value: 0xFF },
-                // Adicionando alguns offsets fora dos limites novamente para ver erros
-                { offset: -4, value: 0xCC },
-                { offset: bufferSize + 4, value: 0xDD },
-            ];
-
-            const dataView = new DataView(view.buffer);
-
-            for (const target of writeTargets) {
-                const { offset, value } = target;
-                try {
-                    log(`Tentativa de escrita (Final) em offset ${offset} com valor 0x${value.toString(16)}`);
-                    log(`Objeto ANTES (Final): ${JSON.stringify(targetObject)}`);
-                    if (offset >= 0 && offset + 3 < bufferSize && offset % 4 === 0) {
-                        dataView.setInt32(offset, value, true);
-                    } else if (offset >= 0 && offset < bufferSize) {
-                        view[offset] = value & 0xFF;
-                    } else {
-                        view[offset] = value & 0xFF; // Tentando escrever byte a byte fora dos limites
-                    }
-                    log(`Objeto APÓS (Final): ${JSON.stringify(targetObject)}`);
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                } catch (writeError) {
-                    log(`Erro na escrita (Final) em offset ${offset}: ${writeError}`, 'error');
+                const outputDiv = document.getElementById('output');
+                if (outputDiv) {
+                    outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+                } else {
+                    console.error('Elemento #output não encontrado!');
                 }
+            } catch (e) {
+                console.error('Erro na função log:', e);
             }
-        }
+        };
 
-        async function introspectAndAttemptPrivilegedActionsFinalAttempt(targetObject) {
-            log("\n--- Introspecção e Ações Pós-Bypass CSP (Final Tentativa) ---", 'warning');
+        async function debugLogTest() {
+            log("Iniciando teste de log...", 'critical');
 
+            log("Mensagem de informação.");
+            log("Mensagem de aviso.", 'warning');
+            log("Mensagem de sucesso.", 'success');
+            log("Mensagem de erro.", 'error');
+            log("Mensagem crítica.", 'critical');
+
+            log("\n--- Preparação do objeto ---", 'warning');
+            const targetObject = { debug: true };
+            log(`Objeto de debug: ${JSON.stringify(targetObject)}`);
+
+            log("\n--- Tentativa de Bypass CSP (simples) ---", 'warning');
             try {
                 const scriptDataURI = document.createElement('script');
-                scriptDataURI.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gQ1NQIEJ5cGFzcyEgRmluYWwhJyk7' + // alert('Vupun CSP Bypass! Final!');
-                    `\n` +
-                    `log('window.location: ' + window.location.href);` +
-                    `log('document.domain: ' + document.domain);` +
-                    `log('document.referrer: ' + document.referrer);` +
-                    `log('navigator.userAgent: ' + navigator.userAgent);` +
-                    `for (let i in window) {` +
-                    `  try {` +
-                    `    if (window[i] && typeof window[i] === 'object' && window[i].constructor && window[i].constructor.name) {` +
-                    `      log('window.' + i + ' (Object): ' + window[i].constructor.name);` +
-                    `    } else if (typeof window[i] === 'function') {` +
-                    `      log('window.' + i + ' (Function)');` +
-                    `    } else {` +
-                    `      log('window.' + i + ': ' + window[i]);` +
-                    `    }` +
-                    `  } catch (e) {` +
-                    `    log('Erro ao introspecionar window.' + i + ': ' + e);` +
-                    `  }` +
-                    `  if (i.toLowerCase().includes('security') || i.toLowerCase().includes('policy') || i.toLowerCase().includes('permission')) {` +
-                    `    log('Possível objeto/API de segurança encontrado: window.' + i, 'critical');` +
-                    `    try { log(JSON.stringify(window[i])); } catch (e) { log('Erro ao stringify: ' + e); }` +
-                    `  }` +
-                    `}` +
-                    `log('Tentativa de acessar localStorage (pós-bypass): ' + JSON.stringify(localStorage));` +
-                    `log('Tentativa de acessar sessionStorage (pós-bypass): ' + JSON.stringify(sessionStorage));`;
-
-                scriptDataURI.onload = () => {
-                    log("Bypass de CSP (Final Tentativa) BEM-SUCEDIDO!", 'success');
-                    // As ações de introspecção estão no script carregado via data URI
-                };
-                scriptDataURI.onerror = () => log("Falha no Bypass de CSP (Final Tentativa).", 'error');
+                scriptDataURI.src = 'data:text/javascript;base64,YWxlcnQoJ0xvZyBUZXN0IFN1Y2Nlc3MhJyk7'; // alert('Log Test Success!');
+                scriptDataURI.onload = () => log("Bypass de CSP (simples) BEM-SUCEDIDO!", 'success');
+                scriptDataURI.onerror = () => log("Falha no Bypass de CSP (simples).", 'error');
                 document.body.appendChild(scriptDataURI);
-                await new Promise(resolve => setTimeout(resolve, 1000)); // Aumentando o timeout para introspecção
+                await new Promise(resolve => setTimeout(resolve, 500));
             } catch (error) {
-                log(`Erro na função introspectAndAttemptPrivilegedActionsFinalAttempt: ${error}`, 'error');
+                log(`Erro no bypass de CSP (simples): ${error}`, 'error');
             }
+
+            log("\nTeste de log concluído.", 'critical');
         }
 
-        function prepareDataFinalAttempt() {
-            const bufferSize = 64;
-            const buffer = new ArrayBuffer(bufferSize);
-            const view = new Uint8Array(buffer);
-
-            const targetObject = {
-                flag1: true,
-                flag2: false,
-                counter: 10,
-                name: "Test",
-                array: [1, 2, 3],
-                floatValue: 3.14,
-                longValue: 1234567890123,
-                nestedObject: { a: 1, b: "hello" },
-                privileged: false,
-                bypassMethod: "default"
-            };
-
-            log(`Objeto inicial (Final Tentativa): ${JSON.stringify(targetObject)}`);
-            return { targetObject, buffer, view, bufferSize };
-        }
-
-        async function realExploitFinalAttemptWrapper() {
-            try {
-                await finalExploitAttempt();
-            } catch (error) {
-                log(`Erro não capturado no wrapper (Final Tentativa): ${error}`, 'error');
-            }
-        }
-
-        document.addEventListener('DOMContentLoaded', realExploitFinalAttemptWrapper);
+        document.addEventListener('DOMContentLoaded', debugLogTest);
     </script>
 </body>
 </html>
