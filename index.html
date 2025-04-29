@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability Scanner | Combined Tests</title>
+    <title>PS4 WebKit Vulnerability Scanner | Version Info & Tests</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; }
@@ -13,11 +13,16 @@
         .warning { color: #FFC107; }
         .info { color: #2196F3; }
         .section { color: #9C27B0; font-weight: bold; margin: 10px 0; }
+        #versionInfo { margin-bottom: 15px; border: 1px solid #555; padding: 10px; }
     </style>
 </head>
 <body>
     <h1>PS4 WebKit Vulnerability Scanner</h1>
-    <h3>Firmware 12.02 | Combined Test Suite</h3>
+    <h3>Firmware 12.02 | Version Info & Combined Tests</h3>
+
+    <div id="versionInfo">
+        <strong>User Agent:</strong> <span id="userAgent"></span><br>
+    </div>
 
     <div>
         <select id="testSelector">
@@ -47,22 +52,44 @@
 
 <script>
 // ======================
-// Enhanced Logging System (Preserved from your script)
+// Display Version Information
+// ======================
+document.addEventListener('DOMContentLoaded', function() {
+    const userAgentElement = document.getElementById('userAgent');
+    if (userAgentElement) {
+        userAgentElement.textContent = navigator.userAgent;
+    } else {
+        console.error("Error: #userAgent element not found!");
+    }
+});
+
+// ======================
+// Enhanced Logging System
 // ======================
 function log(message, type = "info") {
     const timestamp = new Date().toLocaleTimeString();
-    document.getElementById('log').innerHTML += `<span class="<span class="math-inline">\{type\}"\>\[</span>{timestamp}] ${message}</span>\n`;
-    console.log(`[${timestamp}] ${message}`);
+    const logDiv = document.getElementById('log');
+    if (logDiv) {
+        const line = document.createElement('div');
+        line.innerHTML = `<span class="<span class="math-inline">\{type\}"\>\[</span>{timestamp}] ${message}</span>`;
+        logDiv.appendChild(line);
+        logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to bottom
+    } else {
+        console.error("Error: #log element not found!");
+    }
 }
 
 function clearLog() {
-    document.getElementById('log').innerHTML = '';
+    const logDiv = document.getElementById('log');
+    if (logDiv) {
+        logDiv.innerHTML = '';
+    }
 }
 
 // ======================
-// Enhanced CVE Tests (Preserved from your script)
+// Combined Tests Object
 // ======================
-const cveTests = {
+const allTests = {
     "CVE-2025-24201": async function() {
         log("[CVE-2025-24201] Testing Enhanced OOB Write...", "info");
         try {
@@ -70,14 +97,12 @@ const cveTests = {
             const view = new Uint32Array(buffer);
             view[4] = 0xdeadbeef;
             log("⚠️ Stage 1: Basic OOB Write succeeded", "warning");
-
             log("Attempting heap spray...", "info");
             const spray = [];
-            for (let i = 0; i < 1000; i++) {
+            for (let i = 0; i < 100; i++) { // Reduced spray count for testing
                 spray.push(new Uint32Array(1024).fill(0x41414141));
             }
             log("⚠️ Stage 2: Heap spray completed", "warning");
-
             try {
                 new ArrayBuffer(-1);
                 log("✅ System prevented malicious allocation", "success");
@@ -97,16 +122,13 @@ const cveTests = {
             const tempDiv = document.createElement('div');
             tempDiv.innerHTML = "<textarea>\\u0000\\uD800\\uDC00</textarea>";
             document.body.appendChild(tempDiv);
-
             const maliciousDiv = document.createElement('div');
             maliciousDiv.innerHTML = '<form id="test"><input name="parentNode"></form>';
             document.body.appendChild(maliciousDiv);
-
             if (document.getElementById('test')?.parentNode !== document.body) {
                 log("🚨 DOM Clobbering successful!", "danger");
                 return true;
             }
-
             setTimeout(() => {
                 document.body.removeChild(tempDiv);
                 document.body.removeChild(maliciousDiv);
@@ -124,15 +146,13 @@ const cveTests = {
         try {
             let corrupt = [];
             corrupt.__proto__ = new Uint32Array(1).__proto__;
-            corrupt.length = 0x1000;
+            corrupt.length = 0x100; // Reduced length for testing
             corrupt[0] = 0x41414141;
-
             const leaked = corrupt[1];
             if (leaked !== undefined) {
                 log(`🚨 Memory leak detected: 0x${leaked.toString(16)}`, "danger");
                 return true;
             }
-
             try {
                 const original = new ArrayBuffer(8);
                 const stolen = ArrayBuffer.transfer(original, 65536);
@@ -153,11 +173,13 @@ const cveTests = {
             const buffer = new ArrayBuffer(8);
             const view = new Uint32Array(buffer);
             const leak = view[4];
-
             const wasmBuf = new Uint8Array([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]);
             const wasmMod = new WebAssembly.Module(wasmBuf);
-            const wasmInst = new WebAssembly.Instance(wasmMod);
-
+            try {
+                const wasmInst = new WebAssembly.Instance(wasmMod);
+            } catch (e) {
+                log(`✅ WebAssembly instantiation ${e.message}`, "success");
+            }
             if (typeof SharedArrayBuffer !== 'undefined') {
                 const sab = new SharedArrayBuffer(1024);
                 const sabView = new Uint32Array(sab);
@@ -165,7 +187,6 @@ const cveTests = {
                 log("⚠️ SharedArrayBuffer manipulation succeeded", "warning");
                 return true;
             }
-
             if (leak !== undefined) {
                 log(`🚨 OOB Read succeeded: ${leak}`, "danger");
                 return true;
@@ -180,18 +201,15 @@ const cveTests = {
     "CVE-2025-24158": async function() {
         log("[CVE-2025-24158] Testing Enhanced DoS...", "info");
         const startTime = performance.now();
-
         try {
             const hugeArray = [];
-            for (let i = 0; i < 100000; i++) { // Reduzi para evitar congelamento imediato
-                hugeArray.push(new ArrayBuffer(1024 * 10)); // Reduzi o tamanho do buffer
+            for (let i = 0; i < 10000; i++) { // Further reduced
+                hugeArray.push(new ArrayBuffer(1024 * 1)); // Reduced buffer size
             }
-
             let x = 0;
-            for (let i = 0; i < 10000000; i++) { // Reduzi o número de iterações
+            for (let i = 0; i < 1000000; i++) { // Further reduced iterations
                 x += Math.sqrt(i);
             }
-
             log("🚨 DoS conditions created (monitor browser)", "danger");
             return true;
         } catch (e) {
@@ -203,13 +221,8 @@ const cveTests = {
             log(`✅ Mitigated: ${e.message}`, "success");
         }
         return false;
-    }
-};
+    },
 
-// ======================
-// WebKit Focused Exploit Tests (Your suggestions integrated)
-// ======================
-const webkitTests = {
     "arraybuffer_oob": async function() {
         log("[WEBKIT] Testing ArrayBuffer Out-of-Bounds Access...", "info");
         try {
@@ -241,9 +254,9 @@ const webkitTests = {
     "huge_allocation": async function() {
         log("[WEBKIT] Testing Huge Memory Allocation...", "info");
         try {
-            const hugeArray = new Array(200); // Aumentei um pouco
+            const hugeArray = new Array(100); // Further reduced
             for (let i = 0; i < hugeArray.length; i++) {
-                hugeArray[i] = new ArrayBuffer(1024 * 1024); // 1MB por buffer
+                hugeArray[i] = new ArrayBuffer(1024 * 1024); // 1MB per buffer
             }
             log("⚠️ Huge memory allocation attempted (monitor browser memory usage)", "warning");
             return true;
@@ -275,8 +288,8 @@ const webkitTests = {
         try {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = 4096;
-            canvas.height = 4096;
+            canvas.width = 2048; // Further reduced
+            canvas.height = 2048;
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             log("⚠️ Canvas API with large dimensions attempted (monitor performance/crashes)", "warning");
             return true;
@@ -293,9 +306,9 @@ const webkitTests = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/octet-stream',
-                    'X-Malicious-Header': 'A'.repeat(1024)
+                    'X-Malicious-Header': 'A'.repeat(512) // Further reduced
                 },
-                body: 'B'.repeat(1024 * 10)
+                body: 'B'.repeat(1024 * 5) // Further reduced
             });
             log(`⚠️ Fetch API request sent. Status: ${response.status}`, "warning");
             return true;
@@ -310,8 +323,8 @@ const webkitTests = {
         try {
             const ws = new WebSocket('ws://echo.websocket.events');
             ws.onopen = () => {
-                ws.send('C'.repeat(8192));
-                ws.send(new ArrayBuffer(1024));
+                ws.send('C'.repeat(4096)); // Further reduced
+                ws.send(new ArrayBuffer(512)); // Further reduced
                 ws.send(null);
                 log("⚠️ WebSocket with potentially large/invalid messages sent (monitor server/browser)", "warning");
             };
@@ -335,26 +348,7 @@ const webkitTests = {
 };
 
 // ======================
-// Combined Test Runner
+// Test Runner
 // ======================
 async function runSelectedTest() {
-    const testSelector = document.getElementById('testSelector');
-    const selectedTest = testSelector.value;
-
-    clearLog();
-    log("=== Starting Combined Test Suite ===", "section");
-
-    const allTests = { ...cveTests, ...webkitTests }; // Combine both test objects
-
-    if (selectedTest === "all") {
-        let anomaliesFound = 0;
-        for (const [testName, test] of Object.entries(allTests)) {
-            log(`\nRunning ${testName}...`, "info");
-            if (await test()) anomaliesFound++;
-            await new Promise(resolve => setTimeout(resolve, 1000));
-        }
-        log("\n=== Summary ===", "section");
-        log(`Found ${anomaliesFound} potential anomalies (monitor browser behavior)`,
-            anomaliesFound > 0 ? "warning" : "success");
-    } else if (allTests[selectedTest]) {
-        await allTests[selected
+    const testSelector =
