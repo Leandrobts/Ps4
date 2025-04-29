@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability Scanner | Impact Demonstration</title>
+    <title>PS4 WebKit Vulnerability Scanner | Impact Demonstration (POC)</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; margin-top: 15px; }
@@ -14,11 +14,12 @@
         .warning { color: #FFC107; }
         .info { color: #2196F3; }
         .section { color: #9C27B0; font-weight: bold; margin: 10px 0; }
+        .poc-potential { color: #FF9800; font-weight: bold; }
     </style>
 </head>
 <body>
     <h1>PS4 WebKit Vulnerability Scanner</h1>
-    <h3>Firmware 12.00 | Impact Demonstration & Detailed Logging</h3>
+    <h3>Firmware 12.00 | Impact Demonstration (POC Generation)</h3>
 
     <div id="browserInfo">
         <strong>User Agent:</strong> <span id="userAgent"></span><br>
@@ -29,12 +30,12 @@
 
     <div>
         <select id="testSelector">
-            <option value="all">Run All Impact Tests</option>
-            <option value="oob_write_exploit">Attempt ArrayBuffer OOB Write Exploit</option>
-            <option value="huge_allocation_impact">Test Huge Memory Allocation Impact</option>
-            <option value="canvas_memory_exhaustion">Test Canvas Memory Exhaustion</option>
-            <option value="fetch_dos">Attempt Fetch API DoS</option>
-            <option value="websocket_flood">Attempt WebSocket Flood</option>
+            <option value="all">Run All Impact Tests (POC)</option>
+            <option value="oob_write_poc">Attempt ArrayBuffer OOB Write Exploit (POC)</option>
+            <option value="huge_allocation_poc">Test Huge Memory Allocation Impact (POC)</option>
+            <option value="canvas_exhaustion_poc">Test Canvas Memory Exhaustion (POC)</option>
+            <option value="fetch_dos_poc">Attempt Fetch API DoS (POC)</option>
+            <option value="websocket_flood_poc">Attempt WebSocket Flood (POC)</option>
         </select>
         <button onclick="runSelectedTest()">Run Selected Test</button>
         <button onclick="clearLog()">Clear Log</button>
@@ -84,95 +85,124 @@ function clearLog() {
 }
 
 // ======================
-// Impact Demonstration Tests
+// Impact Demonstration Tests (POC Focused)
 // ======================
 const impactTests = {
-    "oob_write_exploit": async function() {
-        log("[EXPLOIT] Attempting ArrayBuffer OOB Write Exploit...", "info");
+    "oob_write_poc": async function() {
+        log("[EXPLOIT] Attempting ArrayBuffer OOB Write Exploit (POC)...", "info");
         try {
             const buffer = new ArrayBuffer(10);
             const view = new Uint8Array(buffer);
+            const writeValue = 0x42; // Valor específico para escrita
 
-            // Tentativa de escrever além dos limites
-            for (let i = 0; i < 20; i++) {
-                view[i] = 0x41;
-            }
-            log("⚠️ Attempted OOB write. Monitoring browser for instability or crash...", "warning");
-
-            // Adicionando uma pequena pausa para observar o comportamento
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // Tentando ler os dados fora dos limites para ver se algo foi sobrescrito
+            log(`[OOB] Writing value 0x${writeValue.toString(16)} at index 15 (out of bounds)...`, "info");
             try {
-                const oobValue = view[15];
-                log(`⚠️ Read OOB value: ${oobValue}. This might indicate a vulnerability.`, "warning");
-                return true; // Indica potencial vulnerabilidade
+                view[15] = writeValue;
+                log("⚠️ OOB write successful (no error thrown). This is suspicious!", "warning");
             } catch (e) {
-                log(`✅ OOB read resulted in error: ${e.message}`, "success");
+                log(`✅ OOB write attempt resulted in error: ${e.message}`, "success");
             }
+
+            // Tentando ler valores em áreas próximas para verificar sobrescrita
+            for (let i = 5; i < 20; i++) {
+                try {
+                    const readValue = view[i];
+                    log(`[OOB] Reading index ${i}: 0x${readValue.toString(16)}`, "info");
+                    if (i > 9 && readValue === writeValue) {
+                        log(`<span class="poc-potential">🚩 Potential OOB Write Impact: Value 0x${writeValue.toString(16)} observed at index ${i} (out of bounds)!</span>`, "warning");
+                    }
+                } catch (e) {
+                    log(`✅ OOB read at index ${i} resulted in error: ${e.message}`, "success");
+                }
+            }
+
+            log("⚠️ Monitoring browser for instability or crash after OOB write...", "warning");
+            await new Promise(resolve => setTimeout(resolve, 5000)); // Mais tempo para observar
 
         } catch (e) {
-            log(`✅ Test error: ${e.message}`, "success");
+            log(`❌ Test error: ${e.message}`, "danger");
         }
-        return false;
+        return false; // Retornar false por padrão, o log indicará o potencial POC
     },
 
-    "huge_allocation_impact": async function() {
-        log("[IMPACT] Testing Huge Memory Allocation Impact...", "info");
+    "huge_allocation_poc": async function() {
+        log("[IMPACT] Testing Huge Memory Allocation Impact (POC)...", "info");
         try {
             const allocations = [];
-            for (let i = 0; i < 500; i++) { // Aumentando a tentativa de alocação
-                allocations.push(new ArrayBuffer(1024 * 1024)); // 1MB per buffer
+            const numAllocations = 700; // Aumentando ainda mais
+            for (let i = 0; i < numAllocations; i++) {
+                allocations.push(new ArrayBuffer(1024 * 1024)); // 1MB
                 log(`[ALLOC] Allocated ${i + 1}MB`, "info");
-                await new Promise(resolve => setTimeout(resolve, 10)); // Pequena pausa entre alocações
+                // Reduzindo a pausa para tentar sobrecarregar mais rápido
+                await new Promise(resolve => setTimeout(resolve, 5));
+                if (i > numAllocations - 10) {
+                    log("⚠️ Approaching high memory usage. Monitoring for instability...", "warning");
+                }
             }
-            log("⚠️ Huge memory allocation sequence completed. Monitor browser for crashes or extreme slowness.", "warning");
-            return true; // Indica que a alocação massiva foi tentada
+            log(`<span class="poc-potential">🚩 Attempted to allocate ${numAllocations}MB. Observe browser for crash or extreme slowness as potential DoS.</span>`, "warning");
+            return true;
         } catch (e) {
             log(`✅ Allocation error: ${e.message}`, "success");
             return false;
+        } finally {
+            log("[ALLOC] Attempting to release allocated memory...", "info");
+            allocations.length = 0; // Tentando liberar a memória
+            await new Promise(resolve => setTimeout(resolve, 2000));
+            log("[ALLOC] Memory release attempted. Observe if memory usage returns to normal.", "info");
         }
     },
 
-    "canvas_memory_exhaustion": async function() {
-        log("[IMPACT] Testing Canvas Memory Exhaustion...", "info");
+    "canvas_exhaustion_poc": async function() {
+        log("[IMPACT] Testing Canvas Memory Exhaustion (POC)...", "info");
         try {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            let width = 2048;
-            let height = 2048;
-            for (let i = 0; i < 10; i++) {
+            let width = 1024; // Começando menor e aumentando mais rápido
+            let height = 1024;
+            for (let i = 0; i < 15; i++) {
                 width *= 2;
                 height *= 2;
                 canvas.width = width;
                 canvas.height = height;
-                const imageData = ctx.getImageData(0, 0, width, height);
-                log(`[CANVAS] Created image data: ${width}x${height}`, "info");
-                await new Promise(resolve => setTimeout(resolve, 50));
+                try {
+                    const imageData = ctx.getImageData(0, 0, width, height);
+                    log(`[CANVAS] Created image data: ${width}x${height}`, "info");
+                    await new Promise(resolve => setTimeout(resolve, 20));
+                } catch (e) {
+                    log(`<span class="poc-potential">🚩 Canvas getImageData error at ${width}x${height}: ${e.message}. Potential memory exhaustion leading to crash.</span>`, "danger");
+                    break; // Parar se houver erro
+                }
             }
             log("⚠️ Attempted to exhaust Canvas memory. Monitor for crashes.", "warning");
             return true;
         } catch (e) {
-            log(`✅ Canvas test error: ${e.message}`, "success");
+            log(`❌ Canvas test error: ${e.message}`, "danger");
             return false;
         }
     },
 
-    "fetch_dos": async function() {
-        log("[IMPACT] Attempting Fetch API DoS...", "info");
+    "fetch_dos_poc": async function() {
+        log("[IMPACT] Attempting Fetch API DoS (POC)...", "info");
         const startTime = Date.now();
-        let requestsSent = 0;
+        const numRequests = 100; // Aumentando o número de requisições
+        let errors = 0;
         try {
-            for (let i = 0; i < 50; i++) { // Tentando várias requisições rápidas
-                fetch('http://example.com/nonexistent', { mode: 'no-cors' }) // Usando no-cors para evitar problemas de CORS
-                    .then(response => log(`[FETCH] Response ${response.status}`, "info"))
-                    .catch(error => log(`[FETCH] Error: ${error}`, "warning"));
-                requestsSent++;
+            for (let i = 0; i < numRequests; i++) {
+                fetch('http://nonexistent.sony.com/' + Math.random(), { mode: 'no-cors' }) // Tentando um domínio mais "relevante" e tornando as URLs únicas
+                    .then(response => log(`[FETCH] Response ${response.status} for request ${i + 1}`, "info"))
+                    .catch(error => {
+                        log(`[FETCH] Error for request ${i + 1}: ${error}`, "warning");
+                        errors++;
+                        if (errors > 20) {
+                            log(`<span class="poc-potential">🚩 High number of Fetch errors (${errors}/${numRequests}). Potential DoS vulnerability.</span>`, "warning");
+                        }
+                    });
+                await new Promise(resolve => setTimeout(resolve, 10)); // Mantendo a rapidez
             }
-            log(`⚠️ Sent ${requestsSent} rapid Fetch requests. Monitor for browser slowdown or unresponsiveness.`, "warning");
+            log(`⚠️ Sent ${numRequests} rapid Fetch requests. Monitor for browser slowdown or unresponsiveness.`, "warning");
             return true;
         } catch (e) {
-            log(`✅ Fetch test error: ${e.message}`, "success");
+            log(`❌ Fetch test error: ${e.message}`, "danger");
             return false;
         } finally {
             const endTime = Date.now();
@@ -180,32 +210,45 @@ const impactTests = {
         }
     },
 
-    "websocket_flood": async function() {
-        log("[IMPACT] Attempting WebSocket Flood...", "info");
+    "websocket_flood_poc": async function() {
+        log("[IMPACT] Attempting WebSocket Flood (POC)...", "info");
         try {
             const ws = new WebSocket('ws://echo.websocket.events');
-            let messagesSent = 0;
+            const numMessages = 150; // Aumentando o número de mensagens
+            let sentCount = 0;
+
             ws.onopen = () => {
-                for (let i = 0; i < 100; i++) { // Enviando várias mensagens rapidamente
-                    ws.send('Flood'.repeat(100));
-                    messagesSent++;
+                log("[WS] WebSocket connection opened.", "info");
+                for (let i = 0; i < numMessages; i++) {
+                    const message = 'POC Flood Message '.repeat(50); // Mensagens maiores
+                    ws.send(message);
+                    sentCount++;
+                    log(`[WS] Sent message ${i + 1} (${message.length} bytes)`, "info");
                 }
-                log(`[WS] Sent ${messagesSent} messages. Monitor for browser instability or connection issues.`, "warning");
+                log(`⚠️ Sent ${sentCount} WebSocket messages. Monitoring for instability.`, "warning");
             };
+
             ws.onerror = (error) => {
-                log(`[WS] Error: ${error}`, "danger");
+                log(`<span class="poc-potential">🚩 WebSocket error: ${error}. Could indicate vulnerability in handling connections or messages.</span>`, "danger");
             };
+
+            ws.onclose = () => {
+                log("[WS] WebSocket connection closed.", "info");
+            };
+
+            // Mantendo um timeout para não travar a página indefinidamente
             return new Promise((resolve) => {
                 setTimeout(() => {
                     if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
                         ws.close();
-                        log("[WS] Closing WebSocket connection.", "info");
+                        log("[WS] Closing WebSocket connection after timeout.", "info");
                     }
                     resolve(true);
-                }, 10000); // Tempo limite para o teste
+                }, 15000);
             });
+
         } catch (e) {
-            log(`✅ WebSocket test error: ${e.message}`, "success");
+            log(`❌ WebSocket test error: ${e.message}`, "danger");
             return false;
         }
     }
@@ -219,20 +262,18 @@ async function runSelectedTest() {
     const selectedTest = testSelector.value;
 
     clearLog();
-    log("=== Starting Impact Demonstration Tests ===", "section");
+    log("=== Starting Impact Demonstration Tests (POC Generation) ===", "section");
 
     if (selectedTest === "all") {
-        let impactsObserved = 0;
         for (const [testName, test] of Object.entries(impactTests)) {
             log(`\nRunning ${testName}...`, "info");
-            if (await test()) impactsObserved++;
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Aumentando a pausa para observação
+            await test();
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Pausa entre os testes
         }
-        log("\n=== Summary ===", "section");
-        log(`Observed potential impacts in ${impactsObserved} tests (monitor browser behavior)`,
-            impactsObserved > 0 ? "warning" : "success");
+        log("\n=== POC Generation Completed. Review logs for potential vulnerabilities. ===", "section");
     } else if (impactTests[selectedTest]) {
         await impactTests[selectedTest]();
+        log("\n=== POC Generation Completed for selected test. Review logs. ===", "section");
     } else {
         log(`Error: Test "${selectedTest}" not found.`, "danger");
     }
