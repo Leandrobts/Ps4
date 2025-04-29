@@ -2,130 +2,37 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Combined Exploit POC (v12.00) - Enhanced Logging</title>
-    <style>
-        body { font-family: monospace; white-space: pre-wrap; }
-        #output { margin-top: 20px; padding: 10px; border: 1px solid #ccc; background-color: #f8f8f8; }
-        .critical { color: magenta; font-weight: bold; }
-        .warning { color: orange; }
-        .success { color: green; }
-        .error { color: red; }
-        .info { color: blue; }
-    </style>
+    <title>PS4 WebKit Malicious Code Execution POC (data: URI)</title>
 </head>
 <body>
-    <h1>PS4 WebKit Combined Exploit POC (v12.00) - Enhanced Logging</h1>
+    <h1>POC: Execução de Código Malicioso via data: URI</h1>
     <div id="output"></div>
 
     <script>
-        const log = (message, type = 'info') => {
-            const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+        const log = (message) => {
+            document.getElementById('output').innerHTML += message + "<br>";
         };
 
-        async function enhancedCombinedExploit() {
-            log("Iniciando Testes Aprimorados Combinados (OOB Write e Bypass de CSP)...", 'critical');
-
-            // ====================== Fase 1: Testes Focados de OOB Write ======================
-            log("\nFase 1: Testes Focados de OOB Write...", 'warning');
-            const bufferSize = 32; // Usando o tamanho do buffer dos logs anteriores
-            const writeOffsets = [32, 33, 64, -1]; // Testando offsets próximos ao limite e um negativo
-            const writeValue = 0xAA; // Valor para escrita
-            const readOffsets = [0, 1, bufferSize - 1, bufferSize, bufferSize + 1]; // Lendo dentro e fora dos limites
-
-            log(`ArrayBuffer criado com tamanho: ${bufferSize}`, 'info');
-            log(`Valor de escrita: 0x${writeValue.toString(16)}`, 'info');
-            log(`Offsets de escrita a serem testados: ${writeOffsets.join(', ')}`, 'info');
-            log(`Offsets de leitura a serem testados após cada escrita: ${readOffsets.join(', ')}`, 'info');
-
-            for (const writeOffset of writeOffsets) {
-                log(`\n--- Testando escrita no offset: ${writeOffset} ---`, 'warning');
+        function executeMaliciousCode() {
+            log("Tentando executar código malicioso via data: URI...");
+            const maliciousScript = document.createElement('script');
+            // Este é um exemplo de código malicioso: tenta acessar localStorage de outra origem (falhará devido ao sandbox, mas demonstra execução)
+            const maliciousCode = `
                 try {
-                    const buffer = new ArrayBuffer(bufferSize);
-                    const view = new Uint8Array(buffer);
-                    view[writeOffset] = writeValue;
-                    log(`  Escrita no offset ${writeOffset} aparentemente bem-sucedida.`, 'success');
-
-                    for (const readOffset of readOffsets) {
-                        try {
-                            const readValue = view[readOffset];
-                            log(`    Leitura no offset: ${readOffset}, valor: 0x${readValue.toString(16)}`, 'info');
-                            if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset >= bufferSize) {
-                                log(`<span class="critical">POSSÍVEL CORRUPÇÃO (write=${writeOffset}, read=${readOffset})</span>`, 'critical');
-                            } else if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset < 0) {
-                                log(`<span class="critical">POSSÍVEL CORRUPÇÃO (write=${writeOffset}, read=${readOffset}, offset negativo)</span>`, 'critical');
-                            }
-                        } catch (readError) {
-                            log(`    Erro ao ler no offset: ${readOffset}: ${readError.message}`, 'error');
-                        }
-                    }
-                    // Pequeno delay após cada tentativa
-                    await new Promise(resolve => setTimeout(resolve, 250));
-                } catch (writeError) {
-                    log(`  Erro ao escrever no offset ${writeOffset}: ${writeError.message}`, 'error');
-                }
-            }
-
-            // ====================== Fase 2: Testes Abrangentes de Bypass de CSP ======================
-            log("\nFase 2: Testes Abrangentes de Bypass de CSP...", 'warning');
-
-            const cspBypassAttempts = [
-                { type: 'data', uri: 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gQ1NQIEJ5cGFzcyEgZGF0YTp1cmkpOw==' },
-                { type: 'blob', code: 'alert("Vupun CSP Bypass! blob:uri");' },
-                { type: 'javascript_onload', code: 'alert("Vupun CSP Bypass! onload attribute");' },
-                // Tentativa com javascript: URI (pode depender da configuração)
-                { type: 'javascript_uri', uri: 'javascript:alert("Vupun CSP Bypass! javascript: URI");', element: 'a', text: 'Clique aqui (javascript: URI)' }
-            ];
-
-            for (const attempt of cspBypassAttempts) {
-                log(`\n--- Tentando Bypass de CSP via: ${attempt.type} ---`, 'info');
-                try {
-                    if (attempt.type === 'data') {
-                        const script = document.createElement('script');
-                        script.src = attempt.uri;
-                        script.onload = () => log(`<span class="success">Bypass de CSP via ${attempt.type} BEM-SUCEDIDO!</span>`, 'success');
-                        script.onerror = () => log(`<span class="error">Falha no Bypass de CSP via ${attempt.type}.</span>`, 'error');
-                        document.body.appendChild(script);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    } else if (attempt.type === 'blob') {
-                        const blob = new Blob([attempt.code], { type: 'text/javascript' });
-                        const url = URL.createObjectURL(blob);
-                        const script = document.createElement('script');
-                        script.src = url;
-                        script.onload = () => {
-                            log(`<span class="success">Bypass de CSP via ${attempt.type} BEM-SUCEDIDO!</span>`, 'success');
-                            URL.revokeObjectURL(url);
-                        };
-                        script.onerror = () => log(`<span class="error">Falha no Bypass de CSP via ${attempt.type}.</span>`, 'error');
-                        document.body.appendChild(script);
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-                    } else if (attempt.type === 'javascript_onload') {
-                        const div = document.createElement('div');
-                        div.setAttribute('onload', attempt.code);
-                        document.body.appendChild(div);
-                        log(`Elemento div com onload injetado. Verifique o alerta.`);
-                        // Para garantir a execução, podemos tentar manipular o DOM
-                        div.innerHTML = ' ';
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                    } else if (attempt.type === 'javascript_uri') {
-                        const link = document.createElement(attempt.element);
-                        link.href = attempt.uri;
-                        link.textContent = attempt.text;
-                        document.body.appendChild(link);
-                        log(`Link com ${attempt.type} injetado. Clique para testar.`);
-                        // A execução deste requer interação do usuário.
-                        await new Promise(resolve => setTimeout(resolve, 2000));
-                        link.remove(); // Limpar o link após um tempo
-                    }
+                    localStorage.setItem('malicious_data', 'attacked!');
+                    log("Código malicioso executado: Tentativa de acessar localStorage.");
                 } catch (e) {
-                    log(`<span class='error'>Erro ao tentar bypass via ${attempt.type}: ${e.message}</span>`, 'error');
+                    log("Código malicioso executado: Erro ao acessar localStorage (esperado no sandbox).");
                 }
-            }
-
-            log("\nTestes Aprimorados Combinados Concluídos. Verifique a saída para logs detalhados.", 'critical');
+                // Aqui, um atacante poderia incluir código para roubar dados, fazer requisições maliciosas, etc.
+                alert('CÓDIGO MALICIOSO EXECUTADO!');
+            `;
+            const base64MaliciousCode = btoa(maliciousCode);
+            maliciousScript.src = 'data:text/javascript;base64,' + base64MaliciousCode;
+            document.body.appendChild(maliciousScript);
         }
 
-        document.addEventListener('DOMContentLoaded', enhancedCombinedExploit);
+        document.addEventListener('DOMContentLoaded', executeMaliciousCode);
     </script>
 </body>
 </html>
