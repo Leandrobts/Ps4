@@ -2,187 +2,22 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Security Scanner | HackerOne Report</title>
+    <title>PS4 WebKit Security Scanner | CVE Tests</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; }
-        button { background: #4CAF50; color: white; border: none; padding: 10px 20px; margin: 5px; border-radius: 5px; }
+        button { background: #4CAF50; color: white; border: none; padding: 8px 15px; margin: 5px; border-radius: 3px; }
+        select { background: #222; color: #0f0; border: 1px solid #333; padding: 5px; margin: 5px; }
         .success { color: #4CAF50; }
         .danger { color: #f44336; }
         .warning { color: #FFC107; }
         .info { color: #2196F3; }
-        .section { color: #9C27B0; font-weight: bold; margin: 15px 0; }
+        .section { color: #9C27B0; font-weight: bold; margin: 10px 0; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Security Scanner</h1>
-    <h3>Firmware 12.02 | CVE Tests + Memory Analysis</h3>
+    <h1>PS4 WebKit CVE Scanner</h1>
+    <h3>Firmware 12.02 | Selective Tests</h3>
     
-    <button onclick="runFullScan()">Run Complete Scan</button>
-    <button onclick="clearLog()">Clear Log</button>
-    
-    <div id="log"></div>
-
-<script>
-// ======================
-// Enhanced Logging System
-// ======================
-function log(message, type = "info") {
-    const timestamp = new Date().toLocaleTimeString();
-    const logElement = document.getElementById('log');
-    logElement.innerHTML += `<span class="${type}">[${timestamp}] ${message}</span>\n`;
-    logElement.scrollTop = logElement.scrollHeight;
-}
-
-function clearLog() {
-    document.getElementById('log').innerHTML = '';
-}
-
-// ======================
-// CVE-Specific Tests
-// ======================
-const cveTests = {
-    // CVE-2025-24201 (OOB Write)
- testOOBWrite: function() {
-    log("[CVE-2025-24201] Testing OOB Write...", "info");
-    try {
-        const buffer = new ArrayBuffer(8);
-        const view = new Uint32Array(buffer);
-        
-        // Tentativa controlada de OOB write
-        view[4] = 0xdeadbeef; // Escrita fora dos limites
-        log(`Valor escrito: 0x${view[4].toString(16)}`, "info");
-        
-        // Verifica se outros dados foram corrompidos
-        const leak = new Uint32Array(buffer)[0];
-        if (leak !== 0) {
-            log(`🚨 Dados vazados: 0x${leak.toString(16)}`, "danger");
-            return true;
-        }
-    } catch (e) {
-        log(`✅ OOB Write bloqueado: ${e.message}`, "success");
-    }
-    return false;
-    }
-
-    // CVE-2024-27856 (Crash/RCE)
-    testUnsafeTextRendering: function() {
-        log("[CVE-2024-27856] Testing Text Rendering Crash...", "info");
-        try {
-            document.body.innerHTML = "<textarea>\\u0000\\uD800\\uDC00</textarea>";
-            log("✅ No crash detected", "success");
-            return false;
-        } catch (e) {
-            log("🚨 POTENTIAL CRASH/RCE VULNERABILITY", "danger");
-            return true;
-        }
-    },
-
-    // CVE-2024-54543 (Memory Corruption)
-    testMemoryCorruption: function() {
-        log("[CVE-2024-54543] Testing Memory Corruption...", "info");
-        try {
-            let corrupt = [];
-            corrupt.__proto__ = new Uint32Array(1).__proto__;
-            corrupt.length = 0x1000;
-            corrupt[0] = 0x41414141;
-            log("⚠️ Possible memory corruption primitive", "warning");
-            return true;
-        } catch (e) {
-            log("✅ Memory corruption mitigated", "success");
-            return false;
-        }
-    },
-
-    // CVE-2024-54658 (OOB Read)
-    testOOBRead: function() {
-        log("[CVE-2024-54658] Testing Out-of-Bounds Read...", "info");
-        try {
-            const buffer = new ArrayBuffer(8);
-            const view = new Uint32Array(buffer);
-            const leak = view[4]; // Intentional OOB read
-            log(`⚠️ Possible OOB Read: ${leak}`, "warning");
-            return true;
-        } catch (e) {
-            log("✅ OOB Read mitigated", "success");
-            return false;
-        }
-    },
-
-    // CVE-2025-24143 (Fingerprinting)
-    testFingerprinting: function() {
-        log("[CVE-2025-24143] Testing Filesystem Fingerprinting...", "info");
-        try {
-            const start = performance.now();
-            new File([""], "/etc/passwd");
-            const time = performance.now() - start;
-            if (time > 100) {
-                log("⚠️ Possible filesystem detection via timing", "warning");
-                return true;
-            }
-            log("✅ Filesystem fingerprinting mitigated", "success");
-            return false;
-        } catch (e) {
-            log("✅ Filesystem access blocked", "success");
-            return false;
-        }
-    },
-
-    // CVE-2025-24158 (DoS)
-    testDoS: function() {
-        log("[CVE-2025-24158] Testing DoS Vulnerability...", "info");
-        try {
-            const hugeArray = new Array(2**24).fill(0);
-            hugeArray.length = 2**32 - 1;
-            log("🚨 POTENTIAL DoS VULNERABILITY", "danger");
-            return true;
-        } catch (e) {
-            log("✅ DoS mitigated", "success");
-            return false;
-        }
-    }
-};
-
-// ======================
-// Core Security Tests
-// ======================
-const coreTests = {
-    // ... (Seus testes existentes de memory corruption, ASLR, etc.)
-    // ... (Adicionei os testes CVE acima)
-};
-
-// ======================
-// Main Test Runner
-// ======================
-async function runFullScan() {
-    clearLog();
-    log("=== PS4 WebKit Security Scan ===", "section");
-    log("Target: Firmware 12.02 | Mode: HackerOne Report", "info");
-
-    let vulnerabilitiesFound = 0;
-
-    // Run CVE Tests
-    for (const [cve, test] of Object.entries(cveTests)) {
-        if (await test()) vulnerabilitiesFound++;
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    // Run Core Tests
-    for (const [testName, test] of Object.entries(coreTests)) {
-        if (await test.run()) vulnerabilitiesFound++;
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    // Final Report
-    log("\n=== Scan Results ===", "section");
-    if (vulnerabilitiesFound > 0) {
-        log(`🚨 ${vulnerabilitiesFound} POTENTIAL VULNERABILITIES FOUND`, "danger");
-        log("Document these for HackerOne reporting:", "warning");
-        log("1. Firmware version\n2. Exact test steps\n3. Screenshots/logs", "info");
-    } else {
-        log("✅ No immediate vulnerabilities detected", "success");
-    }
-}
-</script>
-</body>
-</html>
+    <div>
+        <select id="testSelector
