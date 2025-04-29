@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 Kernel Exploit Scanner | FW 12.02</title>
+    <title>PS4 WebKit Security Scanner | FW 12.02</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; }
@@ -16,18 +16,17 @@
     </style>
 </head>
 <body>
-    <h1>PS4 Kernel Exploit Scanner</h1>
-    <h3>Firmware 12.02 | libkernel_web.sprx.elf Offsets</h3>
+    <h1>PS4 WebKit Security Scanner</h1>
+    <h3>Firmware 12.02 | Safe Mode</h3>
     
     <div>
         <select id="testSelector">
-            <option value="all">Run All Kernel Tests</option>
-            <option value="kernel_read">Kernel Memory Read</option>
-            <option value="kernel_write">Kernel Memory Write</option>
-            <option value="syscall_hijack">Syscall Hijack</option>
-            <option value="rop_chain">ROP Chain Test</option>
+            <option value="all">Run All Tests</option>
+            <option value="memory">Memory Tests</option>
+            <option value="dom">DOM Tests</option>
+            <option value="syscall">Syscall Tests</option>
         </select>
-        <button onclick="runSelectedTest()">Execute</button>
+        <button onclick="runSelectedTest()">Run Test</button>
         <button onclick="clearLog()">Clear Log</button>
     </div>
     
@@ -35,110 +34,90 @@
 
 <script>
 // ======================
-// Kernel Offsets (from libkernel_web.sprx.elf)
+// Enhanced Logging System
 // ======================
-const KERNEL = {
-    base: 0x200000, // Base address adjusted for PS4 12.02
-    syscalls: {
-        read: 0x3F8,  // sys_read offset
-        write: 0x401, // sys_write offset
-        mmap: 0x11D   // sys_mmap offset
-    },
-    gadgets: {
-        pop_rdi: 0x18A5F, // pop rdi; ret
-        pop_rsi: 0x2389C, // pop rsi; ret
-        pop_rdx: 0x34567, // pop rdx; ret
-        ret: 0x00123      // ret
-    }
-};
+function log(message, type = "info") {
+    const timestamp = new Date().toLocaleTimeString();
+    const logElement = document.getElementById('log');
+    logElement.innerHTML += `<span class="${type}">[${timestamp}] ${message}</span>\n`;
+}
+
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
+}
 
 // ======================
-// Enhanced Exploit Tests
+// Safe Test Functions
 // ======================
-const kernelTests = {
-    "kernel_read": function() {
-        log("[KERNEL] Testing OOB Read via libkernel...", "info");
+const safeTests = {
+    "memory": function() {
+        log("[MEMORY] Testing basic allocations...", "info");
         try {
-            // Use ArrayBuffer to simulate kernel memory access
-            const kernelBuf = new ArrayBuffer(64);
-            const kernelView = new Uint32Array(kernelBuf);
+            // Safe array buffer test
+            const buffer = new ArrayBuffer(8);
+            const view = new Uint32Array(buffer);
+            view[0] = 0x12345678;
             
-            // Attempt to read from kernel offset 0x18A5F (pop_rdi gadget)
-            const gadgetAddr = KERNEL.base + KERNEL.gadgets.pop_rdi;
-            kernelView[0] = gadgetAddr;
-            
-            // Simulate read primitive
-            const leaked = kernelView[1];
-            if (leaked !== undefined) {
-                log(`🚨 Kernel read successful at 0x${gadgetAddr.toString(16)}: 0x${leaked.toString(16)}`, "danger");
-                return true;
+            if (view[0] === 0x12345678) {
+                log("✅ Basic memory operations working", "success");
+            } else {
+                log("⚠️ Memory corruption detected", "warning");
             }
-        } catch (e) {
-            log(`✅ Mitigated: ${e.message}`, "success");
-        }
-        return false;
-    },
-
-    "kernel_write": function() {
-        log("[KERNEL] Testing OOB Write via libkernel...", "info");
-        try {
-            // Target syscall table (simulated)
-            const syscallTable = new ArrayBuffer(1024);
-            const syscallView = new Uint32Array(syscallTable);
-            
-            // Overwrite sys_read pointer (offset 0x3F8)
-            const targetAddr = KERNEL.base + KERNEL.syscalls.read;
-            syscallView[KERNEL.syscalls.read] = 0x41414141; // Malicious pointer
-            
-            log(`⚠️ Wrote to syscall table at 0x${targetAddr.toString(16)}`, "warning");
-            return true;
-        } catch (e) {
-            log(`✅ Mitigated: ${e.message}`, "success");
             return false;
+        } catch (e) {
+            log(`❌ Memory test failed: ${e.message}`, "danger");
+            return true;
         }
     },
-
-    "syscall_hijack": function() {
-        log("[KERNEL] Testing Syscall Hijack...", "info");
+    
+    "dom": function() {
+        log("[DOM] Testing basic DOM operations...", "info");
         try {
-            // Attempt to call sys_mmap with malicious args
-            const wasmCode = new Uint8Array([
-                0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00
-            ]);
+            const testDiv = document.createElement('div');
+            testDiv.id = 'test-div';
+            document.body.appendChild(testDiv);
             
-            const wasmModule = new WebAssembly.Module(wasmCode);
-            const wasmInstance = new WebAssembly.Instance(wasmModule);
-            
-            // If we get here, WASM is enabled (unlikely on PS4)
-            log("🚨 WASM enabled - potential syscall hijack", "danger");
-            return true;
-        } catch (e) {
-            log(`✅ Mitigated: ${e.message.includes("WebAssembly") ? 
-                "WASM disabled" : e.message}`, "success");
+            if (document.getElementById('test-div')) {
+                log("✅ DOM operations working", "success");
+                document.body.removeChild(testDiv);
+            } else {
+                log("⚠️ DOM manipulation failed", "warning");
+            }
             return false;
+        } catch (e) {
+            log(`❌ DOM test failed: ${e.message}`, "danger");
+            return true;
         }
     },
-
-    "rop_chain": function() {
-        log("[KERNEL] Testing ROP Chain Execution...", "info");
+    
+    "syscall": function() {
+        log("[SYSCALL] Testing system interactions...", "info");
         try {
-            // Simulate ROP chain
-            const rop = [
-                KERNEL.base + KERNEL.gadgets.pop_rdi,
-                0x1,                              // fd = stdout
-                KERNEL.base + KERNEL.gadgets.pop_rsi,
-                KERNEL.base + 0x50000,            // buf
-                KERNEL.base + KERNEL.gadgets.pop_rdx,
-                0x8,                              // count
-                KERNEL.base + KERNEL.syscalls.write
-            ];
+            // Just test if we can create a worker
+            const worker = new Worker(URL.createObjectURL(
+                new Blob(["self.postMessage('ok');"])
+            );
             
-            const ropBuffer = new Uint32Array(rop);
-            log(`⚠️ ROP chain prepared (${rop.length} gadgets)`, "warning");
-            return true;
+            return new Promise((resolve) => {
+                worker.onmessage = function(e) {
+                    if (e.data === 'ok') {
+                        log("✅ Basic workers working", "success");
+                        resolve(false);
+                    } else {
+                        log("⚠️ Worker communication issue", "warning");
+                        resolve(true);
+                    }
+                    worker.terminate();
+                };
+                
+                setTimeout(() => {
+                    log("❌ Worker timeout", "danger");
+                    resolve(true);
+                }, 1000);
+            });
         } catch (e) {
-            log(`✅ Mitigated: ${e.message}`, "success");
-            return false;
+            log(`❌ Worker test failed: ${e.message}`, "danger");
+            return Promise.resolve(true);
         }
     }
 };
@@ -151,28 +130,24 @@ async function runSelectedTest() {
     const selectedTest = testSelector.value;
     
     clearLog();
-    log("=== Kernel Exploit Tests ===", "section");
-    log(`Using libkernel_web.sprx.elf offsets | FW 12.02`, "info");
+    log("=== Starting Tests ===", "section");
+    log("Running in safe mode - no kernel tests", "info");
 
     if (selectedTest === "all") {
-        let vulnerabilities = 0;
-        for (const [testName, test] of Object.entries(kernelTests)) {
+        let failures = 0;
+        for (const [testName, test] of Object.entries(safeTests)) {
             log(`\nRunning ${testName}...`, "info");
-            if (await test()) vulnerabilities++;
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            if (await test()) failures++;
+            await new Promise(resolve => setTimeout(resolve, 500));
         }
         log("\n=== Summary ===", "section");
-        log(`Found ${vulnerabilities} potential kernel vulnerabilities`, 
-            vulnerabilities > 0 ? "danger" : "success");
+        log(`Completed with ${failures} failures`, 
+            failures > 0 ? "warning" : "success");
     } else {
-        await kernelTests[selectedTest]();
+        await safeTests[selectedTest]();
     }
     
-    log("\nTest completed. Check console for details.", "info");
-}
-
-function clearLog() {
-    document.getElementById('log').innerHTML = '';
+    log("\nTest completed.", "info");
 }
 </script>
 </body>
