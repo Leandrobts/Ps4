@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability Scanner | FW 12.02</title>
+    <title>PS4 WebKit Vulnerability Scanner | Combined Tests</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; }
@@ -17,43 +17,197 @@
 </head>
 <body>
     <h1>PS4 WebKit Vulnerability Scanner</h1>
-    <h3>Firmware 12.02 | WebKit Focused Tests</h3>
+    <h3>Firmware 12.02 | Combined Test Suite</h3>
 
     <div>
         <select id="testSelector">
-            <option value="all">Run All WebKit Tests</option>
-            <option value="arraybuffer_oob">ArrayBuffer Out-of-Bounds Access</option>
-            <option value="dataview_oob">DataView Out-of-Bounds Access</option>
-            <option value="huge_allocation">Huge Memory Allocation</option>
-            <option value="wasm_exploit">WebAssembly Malicious Module (if enabled)</option>
-            <option value="canvas_exploit">Canvas API Manipulation</option>
-            <option value="fetch_api_exploit">Fetch API with Malicious Headers/Body</option>
-            <option value="websocket_exploit">WebSocket Unusual Messages</option>
+            <option value="all">Run All Tests</option>
+            <optgroup label="Enhanced CVE Tests">
+                <option value="CVE-2025-24201">CVE-2025-24201 (OOB Write - Enhanced)</option>
+                <option value="CVE-2024-27856">CVE-2024-27856 (Unicode Crash - Enhanced)</option>
+                <option value="CVE-2024-54543">CVE-2024-54543 (Memory Corruption - Enhanced)</option>
+                <option value="CVE-2024-54658">CVE-2024-54658 (OOB Read - Enhanced)</option>
+                <option value="CVE-2025-24158">CVE-2025-24158 (DoS - Enhanced)</option>
+            </optgroup>
+            <optgroup label="WebKit Focused Tests">
+                <option value="arraybuffer_oob">ArrayBuffer Out-of-Bounds Access</option>
+                <option value="dataview_oob">DataView Out-of-Bounds Access</option>
+                <option value="huge_allocation">Huge Memory Allocation</option>
+                <option value="wasm_exploit">WebAssembly Malicious Module (if enabled)</option>
+                <option value="canvas_exploit">Canvas API Manipulation</option>
+                <option value="fetch_api_exploit">Fetch API with Malicious Headers/Body</option>
+                <option value="websocket_exploit">WebSocket Unusual Messages</option>
+            </optgroup>
         </select>
-        <button onclick="runSelectedTest()">Execute</button>
+        <button onclick="runSelectedTest()">Run Selected Test</button>
         <button onclick="clearLog()">Clear Log</button>
     </div>
 
     <div id="log"></div>
 
 <script>
-function log(message, className = '') {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        const line = document.createElement('div');
-        line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        if (className) {
-            line.className = className;
-        }
-        logDiv.appendChild(line);
-        logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll to bottom
-    } else {
-        console.error("Error: #log element not found!");
-    }
+// ======================
+// Enhanced Logging System (Preserved from your script)
+// ======================
+function log(message, type = "info") {
+    const timestamp = new Date().toLocaleTimeString();
+    document.getElementById('log').innerHTML += `<span class="<span class="math-inline">\{type\}"\>\[</span>{timestamp}] ${message}</span>\n`;
+    console.log(`[${timestamp}] ${message}`);
+}
+
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
 }
 
 // ======================
-// WebKit Focused Exploit Tests
+// Enhanced CVE Tests (Preserved from your script)
+// ======================
+const cveTests = {
+    "CVE-2025-24201": async function() {
+        log("[CVE-2025-24201] Testing Enhanced OOB Write...", "info");
+        try {
+            const buffer = new ArrayBuffer(8);
+            const view = new Uint32Array(buffer);
+            view[4] = 0xdeadbeef;
+            log("⚠️ Stage 1: Basic OOB Write succeeded", "warning");
+
+            log("Attempting heap spray...", "info");
+            const spray = [];
+            for (let i = 0; i < 1000; i++) {
+                spray.push(new Uint32Array(1024).fill(0x41414141));
+            }
+            log("⚠️ Stage 2: Heap spray completed", "warning");
+
+            try {
+                new ArrayBuffer(-1);
+                log("✅ System prevented malicious allocation", "success");
+            } catch (e) {
+                log(`🚨 Stage 3: Crash triggered - ${e.message}`, "danger");
+                return true;
+            }
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+        }
+        return false;
+    },
+
+    "CVE-2024-27856": async function() {
+        log("[CVE-2024-27856] Testing Enhanced Unicode Crash...", "info");
+        try {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = "<textarea>\\u0000\\uD800\\uDC00</textarea>";
+            document.body.appendChild(tempDiv);
+
+            const maliciousDiv = document.createElement('div');
+            maliciousDiv.innerHTML = '<form id="test"><input name="parentNode"></form>';
+            document.body.appendChild(maliciousDiv);
+
+            if (document.getElementById('test')?.parentNode !== document.body) {
+                log("🚨 DOM Clobbering successful!", "danger");
+                return true;
+            }
+
+            setTimeout(() => {
+                document.body.removeChild(tempDiv);
+                document.body.removeChild(maliciousDiv);
+                log("✅ No crash detected", "success");
+            }, 1000);
+        } catch (e) {
+            log(`🚨 Crash detected: ${e.message}`, "danger");
+            return true;
+        }
+        return false;
+    },
+
+    "CVE-2024-54543": async function() {
+        log("[CVE-2024-54543] Testing Enhanced Memory Corruption...", "info");
+        try {
+            let corrupt = [];
+            corrupt.__proto__ = new Uint32Array(1).__proto__;
+            corrupt.length = 0x1000;
+            corrupt[0] = 0x41414141;
+
+            const leaked = corrupt[1];
+            if (leaked !== undefined) {
+                log(`🚨 Memory leak detected: 0x${leaked.toString(16)}`, "danger");
+                return true;
+            }
+
+            try {
+                const original = new ArrayBuffer(8);
+                const stolen = ArrayBuffer.transfer(original, 65536);
+                log("⚠️ ArrayBuffer transfer succeeded", "warning");
+                return true;
+            } catch (e) {
+                log("✅ ArrayBuffer transfer blocked", "success");
+            }
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+        }
+        return false;
+    },
+
+    "CVE-2024-54658": async function() {
+        log("[CVE-2024-54658] Testing Enhanced OOB Read...", "info");
+        try {
+            const buffer = new ArrayBuffer(8);
+            const view = new Uint32Array(buffer);
+            const leak = view[4];
+
+            const wasmBuf = new Uint8Array([0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00]);
+            const wasmMod = new WebAssembly.Module(wasmBuf);
+            const wasmInst = new WebAssembly.Instance(wasmMod);
+
+            if (typeof SharedArrayBuffer !== 'undefined') {
+                const sab = new SharedArrayBuffer(1024);
+                const sabView = new Uint32Array(sab);
+                sabView[0] = 0x1337beef;
+                log("⚠️ SharedArrayBuffer manipulation succeeded", "warning");
+                return true;
+            }
+
+            if (leak !== undefined) {
+                log(`🚨 OOB Read succeeded: ${leak}`, "danger");
+                return true;
+            }
+            log("✅ No OOB Read detected", "success");
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+        }
+        return false;
+    },
+
+    "CVE-2025-24158": async function() {
+        log("[CVE-2025-24158] Testing Enhanced DoS...", "info");
+        const startTime = performance.now();
+
+        try {
+            const hugeArray = [];
+            for (let i = 0; i < 100000; i++) { // Reduzi para evitar congelamento imediato
+                hugeArray.push(new ArrayBuffer(1024 * 10)); // Reduzi o tamanho do buffer
+            }
+
+            let x = 0;
+            for (let i = 0; i < 10000000; i++) { // Reduzi o número de iterações
+                x += Math.sqrt(i);
+            }
+
+            log("🚨 DoS conditions created (monitor browser)", "danger");
+            return true;
+        } catch (e) {
+            const endTime = performance.now();
+            if (endTime - startTime > 5000) {
+                log("⚠️ Browser frozen for 5+ seconds", "warning");
+                return true;
+            }
+            log(`✅ Mitigated: ${e.message}`, "success");
+        }
+        return false;
+    }
+};
+
+// ======================
+// WebKit Focused Exploit Tests (Your suggestions integrated)
 // ======================
 const webkitTests = {
     "arraybuffer_oob": async function() {
@@ -87,7 +241,7 @@ const webkitTests = {
     "huge_allocation": async function() {
         log("[WEBKIT] Testing Huge Memory Allocation...", "info");
         try {
-            const hugeArray = new Array(100); // Ainda mais reduzido para teste inicial
+            const hugeArray = new Array(200); // Aumentei um pouco
             for (let i = 0; i < hugeArray.length; i++) {
                 hugeArray[i] = new ArrayBuffer(1024 * 1024); // 1MB por buffer
             }
@@ -121,8 +275,8 @@ const webkitTests = {
         try {
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d');
-            canvas.width = 2048; // Ainda mais reduzido
-            canvas.height = 2048;
+            canvas.width = 4096;
+            canvas.height = 4096;
             const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
             log("⚠️ Canvas API with large dimensions attempted (monitor performance/crashes)", "warning");
             return true;
@@ -139,9 +293,9 @@ const webkitTests = {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/octet-stream',
-                    'X-Malicious-Header': 'A'.repeat(512) // Ainda mais reduzido
+                    'X-Malicious-Header': 'A'.repeat(1024)
                 },
-                body: 'B'.repeat(1024 * 5) // Ainda mais reduzido
+                body: 'B'.repeat(1024 * 10)
             });
             log(`⚠️ Fetch API request sent. Status: ${response.status}`, "warning");
             return true;
@@ -156,8 +310,8 @@ const webkitTests = {
         try {
             const ws = new WebSocket('ws://echo.websocket.events');
             ws.onopen = () => {
-                ws.send('C'.repeat(4096)); // Ainda mais reduzido
-                ws.send(new ArrayBuffer(512)); // Ainda mais reduzido
+                ws.send('C'.repeat(8192));
+                ws.send(new ArrayBuffer(1024));
                 ws.send(null);
                 log("⚠️ WebSocket with potentially large/invalid messages sent (monitor server/browser)", "warning");
             };
@@ -180,37 +334,27 @@ const webkitTests = {
     }
 };
 
-function clearLog() {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        logDiv.innerHTML = '';
-    }
-}
-
+// ======================
+// Combined Test Runner
+// ======================
 async function runSelectedTest() {
     const testSelector = document.getElementById('testSelector');
     const selectedTest = testSelector.value;
 
     clearLog();
-    log("=== WebKit Vulnerability Tests ===", "section");
-    log(`Focusing on browser-level vulnerabilities | FW 12.02`, "info");
+    log("=== Starting Combined Test Suite ===", "section");
+
+    const allTests = { ...cveTests, ...webkitTests }; // Combine both test objects
 
     if (selectedTest === "all") {
-        let vulnerabilities = 0;
-        for (const [testName, test] of Object.entries(webkitTests)) {
+        let anomaliesFound = 0;
+        for (const [testName, test] of Object.entries(allTests)) {
             log(`\nRunning ${testName}...`, "info");
-            if (await test()) vulnerabilities++;
+            if (await test()) anomaliesFound++;
             await new Promise(resolve => setTimeout(resolve, 1000));
         }
         log("\n=== Summary ===", "section");
-        log(`Found ${vulnerabilities} potential WebKit anomalies (monitor browser behavior)`,
-            vulnerabilities > 0 ? "warning" : "success");
-    } else {
-        await webkitTests[selectedTest]();
-    }
-
-    log("\nTest completed. Check console and browser behavior for anomalies.", "info");
-}
-</script>
-</body>
-</html>
+        log(`Found ${anomaliesFound} potential anomalies (monitor browser behavior)`,
+            anomaliesFound > 0 ? "warning" : "success");
+    } else if (allTests[selectedTest]) {
+        await allTests[selected
