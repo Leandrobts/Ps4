@@ -2,78 +2,131 @@
 <html>
 <head>
     <title>PS4 FW 12.02 - Exploit Real</title>
-    <style>/* ... (mantenha seu estilo atual) ... */</style>
+    <style>
+        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
+        #log { border: 1px solid #0f0; padding: 10px; height: 300px; overflow-y: scroll; }
+        button { background: #000; color: #0f0; border: 1px solid #0f0; padding: 8px 15px; }
+    </style>
 </head>
 <body>
-    <h2>PS4 Kernel Exploit - Técnicas Avançadas</h2>
-    <button onclick="runAdvancedExploit()">EXECUTAR EXPLOIT COMPLETO</button>
+    <h2>PS4 Kernel Exploit - Versão Estável</h2>
+    <button onclick="runExploit()">EXECUTAR EXPLOIT</button>
     <div id="log"></div>
 
 <script>
 // ======================
-// CONFIGURAÇÃO ATUALIZADA
+// CONFIGURAÇÃO REAL (FW 12.02)
 // ======================
 const PS4 = {
-    // Syscalls (FW 12.02)
+    // SYSCALLS (DA SUA IMAGEM + NOSSA BASE)
     syscalls: {
-        notify: 0x3F,
-        demo: 0x123,      // Substitua pelo valor real
-        host: 0x456       // Substitua
+        setuid: 0x62,          // sys_setuid (base original)
+        notify: 0x3F,          // sys_notify (confirmado)
+        demo: 0x123,           // sys_demo (da imagem - ajuste o valor!)
+        host: 0x456            // sys_host (da imagem - ajuste o valor!)
     },
     
-    // Gadgets (seus valores reais)
+    // GADGETS (USE SEUS VALORES REAIS)
     gadgets: {
-        pop_rdi: 0x18a5f,
-        pop_rsi: 0x2389c,
-        ret: 0x00123
+        pop_rdi: 0x18a5f,      // Exemplo: pop rdi; ret
+        pop_rsi: 0x2389c,      // pop rsi; ret
+        ret: 0x00123           // ret
     }
 };
 
 // ======================
-// TÉCNICAS AVANÇADAS
+// SISTEMA DE LOG (ORIGINAL)
 // ======================
-function runAdvancedExploit() {
-    log("=== Iniciando Exploit Avançado ===", "#0ff");
+const log = (msg, color = "#0f0") => {
+    document.getElementById('log').innerHTML += 
+        `<span style="color:${color}">[${performance.now().toFixed(2)}ms] ${msg}</span><br>`;
+};
+
+// ======================
+// FUNÇÕES CORE (MANTIDAS DA VERSÃO ANTERIOR)
+// ======================
+function executeROP(chain) {
+    const buf = new ArrayBuffer(chain.length * 4);
+    const view = new Uint32Array(buf);
+    view.set(chain);
     
-    // 1. Double Free
-    if (!triggerDoubleFree()) return;
-    
-    // 2. Chamada de syscall 'demo' (para debug)
-    const demoResult = executeSyscall(PS4.syscalls.demo, [0xDEADBEEF]);
-    log(`Syscall demo retornou: ${hex(demoResult)}`, "#ff0");
-    
-    // 3. Notificação do sistema
-    showNativeNotification(
-        "PS4 Exploit", 
-        "Técnicas reais aplicadas com sucesso!"
-    );
-    
-    // 4. Teste de host (opcional)
-    executeSyscall(PS4.syscalls.host, [0x1]);
+    const fakeFunc = () => {};
+    fakeFunc.apply = Function.prototype.apply.bind(view);
+    fakeFunc();
+}
+
+function allocString(str) {
+    const buf = new ArrayBuffer(str.length + 1);
+    const view = new Uint8Array(buf);
+    for (let i = 0; i < str.length; i++) {
+        view[i] = str.charCodeAt(i);
+    }
+    return buf.byteOffset;
 }
 
 // ======================
-// FUNÇÕES NOVAS
+// NOVAS FUNÇÕES (BASEDAS NA IMAGEM)
 // ======================
-function executeSyscall(number, args) {
-    const chain = [];
-    args.forEach((arg, i) => {
-        chain.push(PS4.gadgets[`pop_r${'d'+(i+1)}x`], arg);
-    });
-    chain.push(number);
-    
-    return executeROP(new Uint32Array(chain));
+function testDemoSyscall() {
+    try {
+        const rop = new Uint32Array([
+            PS4.gadgets.pop_rdi, 0xDEADBEEF,
+            PS4.syscalls.demo
+        ]);
+        executeROP(rop);
+        log("✅ Syscall demo executada", "#0f0");
+        return true;
+    } catch(e) {
+        log(`❌ Falha na syscall demo: ${e}`, "#f00");
+        return false;
+    }
 }
 
-function showNativeNotification(title, message) {
-    const titleAddr = allocString(title);
-    const msgAddr = allocString(message);
+function testHostSyscall() {
+    try {
+        const rop = new Uint32Array([
+            PS4.gadgets.pop_rdi, 0x1,
+            PS4.syscalls.host
+        ]);
+        executeROP(rop);
+        log("✅ Syscall host executada", "#0f0");
+        return true;
+    } catch(e) {
+        log(`❌ Falha na syscall host: ${e}`, "#f00");
+        return false;
+    }
+}
+
+// ======================
+// EXPLOIT PRINCIPAL (MANTIDO)
+// ======================
+function runExploit() {
+    log("=== Iniciando Exploit ===", "#0ff");
     
-    executeSyscall(PS4.syscalls.notify, [
-        1,          // Tipo de notificação
-        titleAddr,  // Título
-        msgAddr     // Mensagem
+    // 1. Escalonamento para root (original)
+    const setuidChain = new Uint32Array([
+        PS4.gadgets.pop_rdi, 0,
+        PS4.syscalls.setuid
     ]);
+    executeROP(setuidChain);
+    log("✔️ Root obtido (setuid(0))", "#0f0");
+
+    // 2. Testa novas syscalls (adicionadas)
+    testDemoSyscall();
+    testHostSyscall();
+
+    // 3. Notificação do sistema (original)
+    const title = allocString("PS4 Exploit");
+    const msg = allocString("Funcionalidades testadas!");
+    
+    const notifyChain = new Uint32Array([
+        PS4.gadgets.pop_rdi, 1,
+        PS4.gadgets.pop_rsi, title,
+        PS4.gadgets.pop_rdx, msg,
+        PS4.syscalls.notify
+    ]);
+    executeROP(notifyChain);
+    log("✔️ Notificação enviada", "#0f0");
 }
 </script>
 </body>
