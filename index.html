@@ -2,15 +2,25 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability Scanner | Minimal Test</title>
+    <title>PS4 WebKit Vulnerability Scanner | Advanced Test</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { background: #111; border: 1px solid #333; padding: 15px; height: 300px; overflow-y: auto; white-space: pre-wrap; margin-top: 15px; }
+        #log { background: #111; border: 1px solid #333; padding: 15px; height: 600px; overflow-y: auto; white-space: pre-wrap; margin-top: 15px; }
         #browserInfo { margin-bottom: 15px; border: 1px solid #555; padding: 10px; }
+        button { background: #4CAF50; color: white; border: none; padding: 8px 15px; margin: 5px; border-radius: 3px; }
+        select { background: #222; color: #0f0; border: 1px solid #333; padding: 5px; margin: 5px; }
+        .success { color: #4CAF50; }
+        .danger { color: #f44336; }
+        .warning { color: #FFC107; }
+        .info { color: #2196F3; }
+        .section { color: #9C27B0; font-weight: bold; margin: 10px 0; }
+        .poc-potential { color: #FF9800; font-weight: bold; }
+        .defense-bypass { color: #00BCD4; font-weight: bold; }
+        .privilege-escalation { color: #FF4081; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Vulnerability Scanner | Minimal Test</h1>
+    <h1>PS4 WebKit Vulnerability Scanner | Advanced Test</h1>
 
     <div id="browserInfo">
         <strong>User Agent:</strong> <span id="userAgent"></span><br>
@@ -18,23 +28,22 @@
     </div>
 
     <div>
-        <button onclick="runMinimalTest()">Run Minimal Test</button>
-        <div id="log"></div>
+        <select id="testSelector">
+            <option value="all_advanced_poc">Run All Advanced POC Tests</option>
+            <option value="oob_write_basic">Attempt Basic ArrayBuffer OOB Write</option>
+            <option value="csp_bypass_detailed">Detailed CSP Bypass Attempts</option>
+            <option value="cors_bypass_investigate">Investigate Cross-Origin Bypass</option>
+        </select>
+        <button onclick="runSelectedTest()">Run Selected Test</button>
+        <button onclick="clearLog()">Clear Log</button>
     </div>
 
-<script>
-function log(message) {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        const line = document.createElement('div');
-        line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        logDiv.appendChild(line);
-        logDiv.scrollTop = logDiv.scrollHeight;
-    } else {
-        console.error("Error: #log element not found!");
-    }
-}
+    <div id="log"></div>
 
+<script>
+// ======================
+// Collect Browser Information (unchanged)
+// ======================
 document.addEventListener('DOMContentLoaded', function() {
     const userAgentElement = document.getElementById('userAgent');
     const platformElement = document.getElementById('platform');
@@ -53,19 +62,214 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 });
 
-async function runMinimalTest() {
-    log("=== Starting Minimal Test ===");
-    log("Attempting basic OOB write...");
-    try {
-        const buffer = new ArrayBuffer(10);
-        const view = new Uint8Array(buffer);
-        view[15] = 123;
-        log("OOB write attempted.");
-        log(`Value at index 15: ${view[15]}`); // This might error
-    } catch (e) {
-        log(`Error during OOB write: ${e.message}`);
+// ======================
+// Logging Function (unchanged)
+// ======================
+function log(message, type = '') {
+    const logDiv = document.getElementById('log');
+    if (logDiv) {
+        const line = document.createElement('div');
+        line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+        if (type) {
+            line.className = type;
+        }
+        logDiv.appendChild(line);
+        logDiv.scrollTop = logDiv.scrollHeight;
+    } else {
+        console.error("Error: #log element not found!");
     }
-    log("=== Minimal Test Completed ===");
+}
+
+function clearLog() {
+    const logDiv = document.getElementById('log');
+    if (logDiv) {
+        logDiv.innerHTML = '';
+    }
+}
+
+// ======================
+// Advanced POC Tests (CSP and CORS)
+// ======================
+const pocTests = {
+    "oob_write_basic": async function() {
+        log("[EXPLOIT] Attempt Basic ArrayBuffer OOB Write...", "info");
+        try {
+            const buffer = new ArrayBuffer(10);
+            const view = new Uint8Array(buffer);
+            const writeIndex = 15;
+            const writeValue = 0xAA;
+
+            log(`[OOB] Writing 0x${writeValue.toString(16)} at index ${writeIndex}...`, "info");
+            try {
+                view[writeIndex] = writeValue;
+                log("⚠️ OOB write successful (no error thrown).", "warning");
+                try {
+                    const readValue = view[writeIndex];
+                    log(`[OOB] Value read at index ${writeIndex}: 0x${readValue.toString(16)}`, "info");
+                    if (readValue === writeValue) {
+                        log("<span class='poc-potential'>🚩 OOB Write confirmed.</span>", "danger");
+                    }
+                } catch (readError) {
+                    log(`✅ Error reading OOB index: ${readError.message}`, "success");
+                }
+            } catch (e) {
+                log(`✅ OOB write error: ${e.message}`, "success");
+            }
+        } catch (e) {
+            log(`❌ Test error: ${e.message}`, "danger");
+        }
+        return false;
+    },
+
+    "csp_bypass_detailed": async function() {
+        log("[PRIV-ESC] Detailed CSP Bypass Attempts...", "info");
+        let inlineScriptSuccess = false;
+        try {
+            const script = document.createElement('script');
+            script.textContent = 'window.injectedByCSPBypassDetailed = true;';
+            document.body.appendChild(script);
+            inlineScriptSuccess = window.injectedByCSPBypassDetailed === true;
+            document.body.removeChild(script);
+        } catch (e) {
+            log(`[CSP-DETAILED] Error injecting inline script: ${e.message}`, "warning");
+        }
+        if (inlineScriptSuccess) {
+            log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 Potential CSP Bypass (Detailed): Executed inline script.</span>`, "danger");
+        } else {
+            log("[CSP-DETAILED] Attempted inline script injection.", "info");
+        }
+
+        // Attempting to load from data: URI
+        try {
+            const scriptDataURI = document.createElement('script');
+            scriptDataURI.src = 'data:text/javascript;base64,d2luZG93LmluamVjdGVkRGF0YVVSSSA9IHRydWU7';
+            document.body.appendChild(scriptDataURI);
+            if (window.injectedDataURI) {
+                log(`<span class="poc-potential defense-bypass privilege-escalation">⚠️ Potential CSP Bypass (Data URI): Executed script from data URI.</span>`, "warning");
+            } else {
+                log("[CSP-DETAILED] Attempted script from data URI.", "info");
+            }
+            document.body.removeChild(scriptDataURI);
+        } catch (e) {
+            log(`[CSP-DETAILED] Error injecting script from data URI: ${e.message}`, "warning");
+        }
+
+        // Attempting to load from blob: URI
+        try {
+            const blob = new Blob(['window.injectedBlobURI = true;'], { type: 'text/javascript' });
+            const blobURL = URL.createObjectURL(blob);
+            const scriptBlobURI = document.createElement('script');
+            scriptBlobURI.src = blobURL;
+            document.body.appendChild(scriptBlobURI);
+            scriptBlobURI.onload = () => {
+                if (window.injectedBlobURI) {
+                    log(`<span class="poc-potential defense-bypass privilege-escalation">⚠️ Potential CSP Bypass (Blob URI): Executed script from Blob URI.</span>`, "warning");
+                } else {
+                    log("[CSP-DETAILED] Attempted script from Blob URI.", "info");
+                }
+                URL.revokeObjectURL(blobURL);
+                document.body.removeChild(scriptBlobURI);
+            };
+            scriptBlobURI.onerror = () => {
+                log("[CSP-DETAILED] Error loading script from Blob URI (might be blocked by CSP).", "info");
+            };
+        } catch (e) {
+            log(`[CSP-DETAILED] Error creating Blob URI: ${e.message}`, "warning");
+        }
+
+        log("[CSP-DETAILED] Attempted various CSP bypass techniques.", "info");
+        return true;
+    },
+
+    "cors_bypass_investigate": async function() {
+        log("[PRIV-ESC] Investigating Cross-Origin Bypass...", "info");
+        try {
+            const iframe = document.createElement('iframe');
+            iframe.src = 'http://example.com';
+            iframe.style.display = 'none';
+            document.body.appendChild(iframe);
+
+            iframe.onload = function() {
+                setTimeout(() => {
+                    try {
+                        const win = iframe.contentWindow;
+                        if (win) {
+                            try {
+                                const title = win.document.title;
+                                log(`[CORS] Iframe title from example.com: ${title}`, "info");
+                            } catch (e) {
+                                log(`[CORS] Error accessing iframe title: ${e.message}`, "warning");
+                            }
+                            try {
+                                // Attempt to send a postMessage and listen for a response
+                                const messageToSend = 'Cross-Origin Test';
+                                win.postMessage(messageToSend, '*');
+                                const messageListener = (event) => {
+                                    if (event.origin === 'http://example.com') {
+                                        log(`[CORS] Received message from iframe: ${event.data}`, "info");
+                                        if (event.data === 'Response to Cross-Origin Test') {
+                                            log(`<span class="poc-potential defense-bypass privilege-escalation">⚠️ Potential CORS Interaction: Received expected postMessage response.</span>`, "warning");
+                                        }
+                                        window.removeEventListener('message', messageListener); // Clean up listener
+                                    }
+                                };
+                                window.addEventListener('message', messageListener);
+                            } catch (e) {
+                                log(`[CORS] Error with postMessage: ${e.message}`, "warning");
+                            }
+                        }
+                    } catch (e) {
+                        log(`[CORS] Error interacting with iframe: ${e.message}`, "warning");
+                    } finally {
+                        document.body.removeChild(iframe);
+                    }
+                }, 2000);
+            };
+        } catch (e) {
+            log(`❌ Test error: ${e.message}`, "danger");
+        }
+        return true;
+    },
+
+    "all_advanced_poc": async function() {
+        log("=== Running All Advanced POC Tests ===", "section");
+        await pocTests["oob_write_basic"]();
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        await pocTests["csp_bypass_detailed"]();
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        await pocTests["cors_bypass_investigate"]();
+        await new Promise(resolve => setTimeout(resolve, 10000));
+        log("\n=== All Advanced POC Tests Completed. Review logs and browser behavior thoroughly. ===", "section");
+    }
+};
+
+// ======================
+// Test Runner (Advanced)
+// ======================
+async function runSelectedTest() {
+    const testSelector = document.getElementById('testSelector');
+    const selectedTest = testSelector.value;
+
+    clearLog();
+    log("=== Starting Advanced POC Tests ===", "section");
+
+    if (selectedTest === "all_advanced_poc") {
+        await pocTests["all_advanced_poc"]();
+    } else if (pocTests[selectedTest]) {
+        await pocTests[selectedTest]();
+        log(`\n=== POC Generation Completed for "${selectedTest}". Review logs and browser behavior closely. ===`, "section");
+    } else {
+        log(`Error: Test "${selectedTest}" not found.`, "danger");
+    }
+
+    log("\nAdvanced impact demonstration tests completed.", "info");
+}
+
+function clearLog() {
+    const logDiv = document.getElementById('log');
+    if (logDiv) {
+        logDiv.innerHTML = '';
+    }
 }
 </script>
 </body>
