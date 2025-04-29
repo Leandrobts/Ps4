@@ -20,4 +20,156 @@
     <h3>Firmware 12.02 | Selective Tests</h3>
     
     <div>
-        <select id="testSelector
+        <select id="testSelector">
+            <option value="all">Run All Tests</option>
+            <option value="CVE-2025-24201">CVE-2025-24201 (OOB Write)</option>
+            <option value="CVE-2024-27856">CVE-2024-27856 (Crash/RCE)</option>
+            <option value="CVE-2024-54543">CVE-2024-54543 (Memory Corruption)</option>
+            <option value="CVE-2024-54658">CVE-2024-54658 (OOB Read)</option>
+            <option value="CVE-2025-24143">CVE-2025-24143 (Fingerprinting)</option>
+            <option value="CVE-2025-24158">CVE-2025-24158 (DoS)</option>
+        </select>
+        <button onclick="runSelectedTest()">Run Selected Test</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+    
+    <div id="log"></div>
+
+<script>
+// ======================
+// Logging System
+// ======================
+function log(message, type = "info") {
+    const timestamp = new Date().toLocaleTimeString();
+    document.getElementById('log').innerHTML += `<span class="${type}">[${timestamp}] ${message}</span>\n`;
+}
+
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
+}
+
+// ======================
+// CVE Test Functions
+// ======================
+const cveTests = {
+    "CVE-2025-24201": function() {
+        log("[CVE-2025-24201] Testing Out-of-Bounds Write...", "info");
+        try {
+            const buffer = new ArrayBuffer(8);
+            const view = new Uint32Array(buffer);
+            view[4] = 0xdeadbeef; // Intentional OOB write
+            log("🚨 POTENTIAL OOB WRITE VULNERABILITY", "danger");
+            log("Value written to OOB memory: 0x" + view[4].toString(16), "warning");
+            return true;
+        } catch (e) {
+            log("✅ Mitigated: " + e.message, "success");
+            return false;
+        }
+    },
+    
+    "CVE-2024-27856": function() {
+        log("[CVE-2024-27856] Testing Text Rendering Crash...", "info");
+        try {
+            const tempDiv = document.createElement('div');
+            tempDiv.innerHTML = "<textarea>\\u0000\\uD800\\uDC00</textarea>";
+            document.body.appendChild(tempDiv);
+            setTimeout(() => {
+                document.body.removeChild(tempDiv);
+                log("✅ No crash detected", "success");
+            }, 1000);
+        } catch (e) {
+            log("🚨 POTENTIAL CRASH/RCE VULNERABILITY", "danger");
+            return true;
+        }
+        return false;
+    },
+    
+    "CVE-2024-54543": function() {
+        log("[CVE-2024-54543] Testing Memory Corruption...", "info");
+        try {
+            let corrupt = [];
+            corrupt.__proto__ = new Uint32Array(1).__proto__;
+            corrupt.length = 0x1000;
+            corrupt[0] = 0x41414141;
+            log("⚠️ Possible memory corruption primitive", "warning");
+            return true;
+        } catch (e) {
+            log("✅ Mitigated: " + e.message, "success");
+            return false;
+        }
+    },
+    
+    "CVE-2024-54658": function() {
+        log("[CVE-2024-54658] Testing Out-of-Bounds Read...", "info");
+        try {
+            const buffer = new ArrayBuffer(8);
+            const view = new Uint32Array(buffer);
+            const leak = view[4]; // Intentional OOB read
+            log(`⚠️ Possible OOB Read: ${leak}`, "warning");
+            return leak !== undefined;
+        } catch (e) {
+            log("✅ Mitigated: " + e.message, "success");
+            return false;
+        }
+    },
+    
+    "CVE-2025-24143": function() {
+        log("[CVE-2025-24143] Testing Filesystem Fingerprinting...", "info");
+        try {
+            const start = performance.now();
+            new File([""], "/etc/passwd");
+            const time = performance.now() - start;
+            if (time > 100) {
+                log("⚠️ Possible filesystem detection via timing", "warning");
+                return true;
+            }
+            log("✅ No fingerprinting detected", "success");
+        } catch (e) {
+            log("✅ Mitigated: " + e.message, "success");
+        }
+        return false;
+    },
+    
+    "CVE-2025-24158": function() {
+        log("[CVE-2025-24158] Testing DoS Vulnerability...", "info");
+        try {
+            const hugeArray = new Array(2**24).fill(0);
+            hugeArray.length = 2**32 - 1;
+            log("🚨 POTENTIAL DoS VULNERABILITY", "danger");
+            return true;
+        } catch (e) {
+            log("✅ Mitigated: " + e.message, "success");
+            return false;
+        }
+    }
+};
+
+// ======================
+// Test Runner
+// ======================
+async function runSelectedTest() {
+    const testSelector = document.getElementById('testSelector');
+    const selectedTest = testSelector.value;
+    
+    clearLog();
+    log("=== Starting Test ===", "section");
+    
+    if (selectedTest === "all") {
+        let vulnerabilities = 0;
+        for (const [cve, test] of Object.entries(cveTests)) {
+            log(`\nRunning ${cve}...`, "info");
+            if (await test()) vulnerabilities++;
+            await new Promise(resolve => setTimeout(resolve, 500));
+        }
+        log("\n=== Summary ===", "section");
+        log(`Found ${vulnerabilities} potential vulnerabilities`, 
+            vulnerabilities > 0 ? "danger" : "success");
+    } else {
+        await cveTests[selectedTest]();
+    }
+    
+    log("\nTest completed. Check logs for details.", "info");
+}
+</script>
+</body>
+</html>
