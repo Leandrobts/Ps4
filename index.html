@@ -2,65 +2,58 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Debug PrepareData</title>
-    <style>
-        body {
-            font-family: monospace;
-            white-space: pre-wrap;
-        }
-        #output {
-            margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            background-color: #f8f8f8;
-        }
-        .critical { color: magenta; font-weight: bold; }
-        .warning { color: orange; }
-        .success { color: green; }
-        .error { color: red; }
-        .info { color: blue; }
-    </style>
+    <title>PS4 WebKit Exploit - Debug OOB Write</title>
+    <style> /* ... estilos ... */ </style>
 </head>
 <body>
-    <h1>PS4 WebKit Exploit - Debug PrepareData</h1>
+    <h1>PS4 WebKit Exploit - Debug OOB Write</h1>
     <div id="output"></div>
     <script>
-        const log = (message, type = 'info') => {
-            try {
-                const outputDiv = document.getElementById('output');
-                if (outputDiv) {
-                    outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
-                } else {
-                    console.error('Elemento #output não encontrado!');
-                }
-            } catch (e) {
-                console.error('Erro na função log:', e);
-            }
-        };
+        const log = (message, type = 'info') => { /* ... função log ... */ };
 
         let globalTargetObject = {};
 
-        function prepareData() {
-            log("Função prepareData() iniciada.");
-            const bufferSize = 64;
-            const buffer = new ArrayBuffer(bufferSize);
-            const view = new Uint8Array(buffer);
-            globalTargetObject = {
-                flag1: true, flag2: false, counter: 10, name: "Test", array: [1, 2, 3],
-                floatValue: 3.14, longValue: 1234567890123, nestedObject: { a: 1, b: "hello" },
-                privileged: false, bypassMethod: "default"
-            };
-            log(`Objeto inicial (prepareData): ${JSON.stringify(globalTargetObject)}`);
-            log(`Tamanho do buffer (prepareData): ${bufferSize}`);
-            log("Função prepareData() concluída.");
-            return { buffer, view, bufferSize };
+        function prepareData() { /* ... sua função prepareData ... */ }
+
+        async function refinedOOBWriteTests(view, bufferSize) {
+            log("\n--- Função refinedOOBWriteTests() iniciada ---", 'warning');
+            const dataView = new DataView(view.buffer);
+            const writeTargets = [
+                { offset: -8, value: 0x00000000 }, { offset: -4, value: 0xFFFFFFFF },
+                { offset: 0, value: 0xABABABAB }, { offset: 4, value: 0xCDCDCDCD },
+                { offset: bufferSize - 4, value: 0xEFEFEFEF }, { offset: bufferSize, value: 0x01010101 },
+                { offset: bufferSize + 4, value: 0x02020202 },
+                { offset: -1, value: 0xAA }, { offset: bufferSize, value: 0xBB },
+                { offset: 1, value: 0xCC }, { offset: bufferSize - 1, value: 0xDD },
+            ];
+
+            for (const target of writeTargets) {
+                const { offset, value } = target;
+                log(`Tentativa de escrita em offset ${offset} com valor 0x${value.toString(16)}`);
+                log(`Objeto ANTES: ${JSON.stringify(globalTargetObject)}`);
+                try {
+                    if (offset >= 0 && offset + 3 < bufferSize && offset % 4 === 0) {
+                        dataView.setInt32(offset, value, true);
+                    } else if (offset >= 0 && offset < bufferSize) {
+                        view[offset] = value & 0xFF;
+                    } else {
+                        view[offset] = value & 0xFF;
+                    }
+                    log(`Objeto APÓS: ${JSON.stringify(globalTargetObject)}`);
+                } catch (writeError) {
+                    log(`Erro na escrita em offset ${offset}: ${writeError}`, 'error');
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            log("--- Função refinedOOBWriteTests() concluída ---", 'warning');
         }
 
         async function mainExploit() {
-            log("Iniciando mainExploit (Debug PrepareData)...", 'critical');
-            prepareData();
-            log("Função prepareData() foi chamada.");
-            log("mainExploit (Debug PrepareData) concluído.", 'critical');
+            log("Iniciando mainExploit (Debug OOB Write)...", 'critical');
+            const { buffer, view, bufferSize } = prepareData();
+            await refinedOOBWriteTests(view, bufferSize);
+            log("Função refinedOOBWriteTests() foi chamada.");
+            log("mainExploit (Debug OOB Write) concluído.", 'critical');
         }
 
         document.addEventListener('DOMContentLoaded', mainExploit);
