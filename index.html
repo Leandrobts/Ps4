@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Security Scanner | FW 12.02</title>
+    <title>PS4 WebKit Vulnerability Scanner | FW 12.02</title>
     <style>
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 500px; overflow-y: auto; white-space: pre-wrap; }
@@ -16,108 +16,141 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Security Scanner</h1>
-    <h3>Firmware 12.02 | Safe Mode</h3>
-    
+    <h1>PS4 WebKit Vulnerability Scanner</h1>
+    <h3>Firmware 12.02 | WebKit Focused Tests</h3>
+
     <div>
         <select id="testSelector">
-            <option value="all">Run All Tests</option>
-            <option value="memory">Memory Tests</option>
-            <option value="dom">DOM Tests</option>
-            <option value="syscall">Syscall Tests</option>
+            <option value="all">Run All WebKit Tests</option>
+            <option value="arraybuffer_oob">ArrayBuffer Out-of-Bounds Access</option>
+            <option value="dataview_oob">DataView Out-of-Bounds Access</option>
+            <option value="huge_allocation">Huge Memory Allocation</option>
+            <option value="wasm_exploit">WebAssembly Malicious Module (if enabled)</option>
+            <option value="canvas_exploit">Canvas API Manipulation</option>
+            <option value="fetch_api_exploit">Fetch API with Malicious Headers/Body</option>
+            <option value="websocket_exploit">WebSocket Unusual Messages</option>
         </select>
-        <button onclick="runSelectedTest()">Run Test</button>
+        <button onclick="runSelectedTest()">Execute</button>
         <button onclick="clearLog()">Clear Log</button>
     </div>
-    
+
     <div id="log"></div>
 
 <script>
 // ======================
-// Enhanced Logging System
+// WebKit Focused Exploit Tests
 // ======================
-function log(message, type = "info") {
-    const timestamp = new Date().toLocaleTimeString();
-    const logElement = document.getElementById('log');
-    logElement.innerHTML += `<span class="${type}">[${timestamp}] ${message}</span>\n`;
-}
-
-function clearLog() {
-    document.getElementById('log').innerHTML = '';
-}
-
-// ======================
-// Safe Test Functions
-// ======================
-const safeTests = {
-    "memory": function() {
-        log("[MEMORY] Testing basic allocations...", "info");
+const webkitTests = {
+    "arraybuffer_oob": async function() {
+        log("[WEBKIT] Testing ArrayBuffer Out-of-Bounds Access...", "info");
         try {
-            // Safe array buffer test
-            const buffer = new ArrayBuffer(8);
-            const view = new Uint32Array(buffer);
-            view[0] = 0x12345678;
-            
-            if (view[0] === 0x12345678) {
-                log("✅ Basic memory operations working", "success");
-            } else {
-                log("⚠️ Memory corruption detected", "warning");
-            }
-            return false;
-        } catch (e) {
-            log(`❌ Memory test failed: ${e.message}`, "danger");
+            const buffer = new ArrayBuffer(10);
+            const view = new Uint8Array(buffer);
+            view[15] = 0x41; // Tentativa de escrita fora dos limites
+            log("⚠️ ArrayBuffer OOB write might have occurred (check for browser instability)", "warning");
             return true;
+        } catch (e) {
+            log(`✅ Mitigated (expected error): ${e.message}`, "success");
+            return false;
         }
     },
-    
-    "dom": function() {
-        log("[DOM] Testing basic DOM operations...", "info");
+
+    "dataview_oob": async function() {
+        log("[WEBKIT] Testing DataView Out-of-Bounds Access...", "info");
         try {
-            const testDiv = document.createElement('div');
-            testDiv.id = 'test-div';
-            document.body.appendChild(testDiv);
-            
-            if (document.getElementById('test-div')) {
-                log("✅ DOM operations working", "success");
-                document.body.removeChild(testDiv);
-            } else {
-                log("⚠️ DOM manipulation failed", "warning");
-            }
-            return false;
-        } catch (e) {
-            log(`❌ DOM test failed: ${e.message}`, "danger");
+            const buffer = new ArrayBuffer(10);
+            const view = new DataView(buffer);
+            view.setInt32(8, 0x12345678, true); // Tentativa de escrita que ultrapassa os limites
+            log("⚠️ DataView OOB write might have occurred (check for browser instability)", "warning");
             return true;
+        } catch (e) {
+            log(`✅ Mitigated (expected error): ${e.message}`, "success");
+            return false;
         }
     },
-    
-    "syscall": function() {
-        log("[SYSCALL] Testing system interactions...", "info");
+
+    "huge_allocation": async function() {
+        log("[WEBKIT] Testing Huge Memory Allocation...", "info");
         try {
-            // Just test if we can create a worker
-            const worker = new Worker(URL.createObjectURL(
-                new Blob(["self.postMessage('ok');"])
-            );
-            
-            return new Promise((resolve) => {
-                worker.onmessage = function(e) {
-                    if (e.data === 'ok') {
-                        log("✅ Basic workers working", "success");
-                        resolve(false);
-                    } else {
-                        log("⚠️ Worker communication issue", "warning");
-                        resolve(true);
-                    }
-                    worker.terminate();
-                };
-                
-                setTimeout(() => {
-                    log("❌ Worker timeout", "danger");
-                    resolve(true);
-                }, 1000);
+            const hugeArray = new Array(1000000).fill(new ArrayBuffer(1024));
+            log("⚠️ Huge memory allocation attempted (monitor browser memory usage)", "warning");
+            return true;
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+            return false;
+        }
+    },
+
+    "wasm_exploit": async function() {
+        log("[WEBKIT] Testing WebAssembly Malicious Module...", "info");
+        try {
+            const maliciousCode = new Uint8Array([
+                0x00, 0x61, 0x73, 0x6D, 0x01, 0x00, 0x00, 0x00, 0x00, 0x04, 0x08, 0x04, 0x60, 0x00, 0x01, 0x7F, 0x00, 0x0A,
+                0x10, 0x01, 0x0A, 0x00, 0x41, 0xFA, 0x0F, 0x0B // Tentativa de instrução inválida
+            ]);
+            const module = new WebAssembly.Module(maliciousCode);
+            const instance = new WebAssembly.Instance(module);
+            log("⚠️ WebAssembly malicious module loaded (check for crashes)", "warning");
+            return true;
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+            return false;
+        }
+    },
+
+    "canvas_exploit": async function() {
+        log("[WEBKIT] Testing Canvas API Manipulation...", "info");
+        try {
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d');
+            // Tentativa de usar tamanhos extremos ou dados malformados
+            canvas.width = 4294967295; // Máximo valor de uint32
+            canvas.height = 4294967295;
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            log("⚠️ Canvas API with extreme dimensions attempted (monitor performance/crashes)", "warning");
+            return true;
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+            return false;
+        }
+    },
+
+    "fetch_api_exploit": async function() {
+        log("[WEBKIT] Testing Fetch API with Malicious Headers/Body...", "info");
+        try {
+            await fetch('http://localhost:8000/test', { // Assumindo um servidor local para teste
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/octet-stream',
+                    'X-Malicious-Header': 'A'.repeat(4096) // Header muito grande
+                },
+                body: 'B'.repeat(1024 * 1024 * 10) // Body grande
             });
+            log("⚠️ Fetch API with large headers/body sent (monitor network/browser)", "warning");
+            return true;
         } catch (e) {
-            log(`❌ Worker test failed: ${e.message}`, "danger");
-            return Promise.resolve(true);
+            log(`✅ Mitigated: ${e.message}`, "success");
+            return false;
+        }
+    },
+
+    "websocket_exploit": async function() {
+        log("[WEBKIT] Testing WebSocket Unusual Messages...", "info");
+        try {
+            const ws = new WebSocket('ws://localhost:8080'); // Assumindo um servidor WebSocket local
+            ws.onopen = () => {
+                ws.send('C'.repeat(65536)); // Mensagem grande
+                ws.send(new ArrayBuffer(1024 * 1024)); // Mensagem ArrayBuffer grande
+                ws.send(undefined); // Mensagem inválida
+                log("⚠️ WebSocket with large/invalid messages sent (monitor server/browser)", "warning");
+            };
+            ws.onerror = (error) => {
+                log(`WebSocket Error: ${error.message}`, "danger");
+            };
+            return true;
+        } catch (e) {
+            log(`✅ Mitigated: ${e.message}`, "success");
+            return false;
         }
     }
 };
@@ -128,26 +161,30 @@ const safeTests = {
 async function runSelectedTest() {
     const testSelector = document.getElementById('testSelector');
     const selectedTest = testSelector.value;
-    
+
     clearLog();
-    log("=== Starting Tests ===", "section");
-    log("Running in safe mode - no kernel tests", "info");
+    log("=== WebKit Vulnerability Tests ===", "section");
+    log(`Focusing on browser-level vulnerabilities | FW 12.02`, "info");
 
     if (selectedTest === "all") {
-        let failures = 0;
-        for (const [testName, test] of Object.entries(safeTests)) {
+        let vulnerabilities = 0;
+        for (const [testName, test] of Object.entries(webkitTests)) {
             log(`\nRunning ${testName}...`, "info");
-            if (await test()) failures++;
-            await new Promise(resolve => setTimeout(resolve, 500));
+            if (await test()) vulnerabilities++;
+            await new Promise(resolve => setTimeout(resolve, 1000));
         }
         log("\n=== Summary ===", "section");
-        log(`Completed with ${failures} failures`, 
-            failures > 0 ? "warning" : "success");
+        log(`Found ${vulnerabilities} potential WebKit anomalies (monitor browser behavior)`,
+            vulnerabilities > 0 ? "warning" : "success");
     } else {
-        await safeTests[selectedTest]();
+        await webkitTests[selectedTest]();
     }
-    
-    log("\nTest completed.", "info");
+
+    log("\nTest completed. Check console and browser behavior for anomalies.", "info");
+}
+
+function clearLog() {
+    document.getElementById('log').innerHTML = '';
 }
 </script>
 </body>
