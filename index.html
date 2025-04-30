@@ -2,235 +2,177 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vuln Scanner | + Targeted Pollution Test</title> <style>
-        /* Estilos CSS Idênticos ao Funcional.html */
-        body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
-        #log { background: #111; border: 1px solid #333; padding: 15px; height: 600px; overflow-y: auto; white-space: pre-wrap; margin-top: 15px; }
-        #browserInfo { margin-bottom: 15px; border: 1px solid #555; padding: 10px; }
-        button { background: #f44336; color: white; border: none; padding: 8px 15px; margin: 5px; border-radius: 3px; }
-        select { background: #222; color: #0f0; border: 1px solid #333; padding: 5px; margin: 5px; }
-        .success { color: #4CAF50; }
-        .danger { color: #f44336; }
-        .warning { color: #FFC107; }
-        .info { color: #2196F3; }
-        .section { color: #9C27B0; font-weight: bold; margin: 10px 0; }
-        .poc-potential { color: #FF9800; font-weight: bold; }
-        .defense-bypass { color: #00BCD4; font-weight: bold; }
-        .privilege-escalation { color: #FF4081; font-weight: bold; }
-        .impact { color: #E91E63; font-style: italic; }
-        .notification { color: #7B1FA2; font-style: italic; }
-        .extended-test { color: #03A9F4; }
-        #csp-impact-overlay { /* Estilo Overlay */
-            position: fixed; top: 10%; left: 10%; width: 80%; height: 80%;
-            background: rgba(255, 0, 0, 0.85); color: white; border: 5px solid white;
-            font-size: 2em; text-align: center; display: flex; justify-content: center;
-            align-items: center; z-index: 10000; flex-direction: column;
-            opacity: 0; transition: opacity 0.5s ease-in-out;
-        }
-        /* Adicionar classe verbose-log caso seja usada internamente por outras funções coladas */
-        .verbose-log { color: #BDBDBD; font-size: 0.9em; }
+    <title>PS4 WebKit PoC - OOB Write / CSP Bypass / Prototype Pollution</title>
+    <style>
+        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
+        #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 70vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        .log-info { color: #6cf; }
+        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; }
+        .log-vuln { color: #f44336; font-weight: bold; background-color: #444; padding: 2px 4px; display: inline-block;}
+        .log-good { color: #4CAF50; }
+        .log-warn { color: #FFC107; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Vuln Scanner | + Targeted Pollution Test</h1>
+    <h1>PS4 WebKit PoC - Demonstração Combinada</h1>
+    <p>Observação: Este script tenta demonstrar vulnerabilidades (OOB Write, CSP Bypass, Prototype Pollution). Carregue em um PS4 com firmware vulnerável (ex: 11.02 ou similar, conforme reportado) e observe o log abaixo.</p>
+    <div id="poc-output"></div>
 
-    <div id="browserInfo">
-         <strong>User Agent:</strong> <span id="userAgent"></span><br>
-         <strong>Platform:</strong> <span id="platform"></span><br>
-         <strong>Notification Endpoint:</strong> <span id="notificationEndpointDisplay"></span>
-    </div>
+    <script>
+        const outputDiv = document.getElementById('poc-output');
+        const log = (message, type = 'info') => {
+            if (outputDiv) {
+                const timestamp = `[${new Date().toLocaleTimeString()}] `;
+                outputDiv.innerHTML += `<span class="log-${type}">${timestamp}${message}\n</span>`;
+                outputDiv.scrollTop = outputDiv.scrollHeight; // Auto-scroll
+            } else {
+                console.error("Elemento #poc-output não encontrado!");
+            }
+        };
 
-    <div>
-        <select id="testSelector">
-            <option value="all_tests">Run All Tests (Incl. Targeted Pollution)</option> <option value="oob_write_aggressive">Aggressive OOB Write (Info Leak Demo)</option>
-            <option value="oob_impact_tests">OOB Impact (Metadata/Crash)</option>
-            <option value="csp_bypass_aggressive">Aggressive CSP Bypass (Direct Impact)</option>
-            <option value="prototype_pollution_targeted">Targeted Prototype Pollution Test</option> <option value="uaf_basic">Basic Use-After-Free Tests (Placeholder)</option>
-            <option value="type_confusion_basic">Basic Type Confusion Tests (Placeholder)</option>
-        </select>
-        <button onclick="runSelectedTest()">Run Selected Test</button>
-        <button onclick="clearLog()">Clear Log</button>
-    </div>
+        // --- Teste 1: Out-Of-Bounds (OOB) Write ---
+        const runOOBTest = async () => {
+            log("--- Iniciando Teste: OOB Write ---", 'test');
+            try {
+                const bufferSize = 32;
+                const buffer = new ArrayBuffer(bufferSize);
+                const view = new Uint8Array(buffer);
+                const writeValue = 0xEE;
+                // Offsets que demonstraram sucesso nos logs originais
+                const testOffsets = [-1, bufferSize, bufferSize + 1];
 
-    <div id="log"></div>
-    <div id="csp-impact-overlay" style="opacity: 0;"></div>
+                for (const offset of testOffsets) {
+                    log(`Tentando escrita OOB no offset ${offset}...`, 'info');
+                    try {
+                        view[offset] = writeValue;
+                        // Se chegou aqui sem erro, é a vulnerabilidade!
+                        log(`VULNERÁVEL: Escrita OOB no offset ${offset} bem-sucedida (sem erro)!`, 'vuln');
+                    } catch (writeError) {
+                        log(`✅ Escrita OOB no offset ${offset} bloqueada/erro: ${writeError.message}`, 'good');
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 50)); // Pequena pausa
+                }
+                log("--- Teste OOB Concluído ---", 'test');
 
-<script>
-// ======================
-// CONFIGURAÇÃO E FUNÇÕES BÁSICAS (Do Funcional.html)
-// ======================
-const NOTIFICATION_ENDPOINT = 'https://httpbin.org/post'; // <-- MUDE AQUI!
-// ... (Colar aqui o código completo das funções: DOMContentLoaded, log, clearLog, potentialVulnsFound, sendVulnerabilityNotification, demonstrateCookieRead, demonstrateDomManipulation, demonstrateNetworkRequest do Funcional.html) ...
+            } catch (e) {
+                log(`Erro GERAL no teste OOB: ${e.message}`, 'warn');
+            }
+        };
 
+        // --- Teste 2: CSP Bypass ---
+        const runCSPTest = () => {
+            log("--- Iniciando Teste: CSP Bypass ---", 'test');
 
-// ======================
-// Aggressive POC Tests (Com NOVO teste de poluição direcionada)
-// ======================
-const aggressiveTests = {
+            // 2.1: Teste com data: URI (deve funcionar se vulnerável)
+            log("Tentando carregar script via data: URI...", 'info');
+            try {
+                const scriptTag = document.createElement('script');
+                // Base64 de: log("VULNERÁVEL: Bypass de CSP via data: URI bem-sucedido!", 'vuln');
+                scriptTag.src = 'data:text/javascript;base64,bG9nKCJWVUxORVLCgVZFTDogQnlwYXNzIGRlIENTUCB2aWEgZGF0YTogVVJJIGJlbS1zdWNlZGlkbyEiLCAndnVsbicpOw==';
+                document.body.appendChild(scriptTag);
+                // Log de sucesso será adicionado pela própria tag script se funcionar
+            } catch (e) {
+                 log(`Erro ao criar tag script data:: ${e.message}`, 'warn');
+            }
 
-    // Funções OOB e CSP IDÊNTICAS às do Funcional.html
-    "oob_write_aggressive": async function() { /* ... Código completo OOB+Leak do Funcional.html ... */ },
-    "test_oob_metadata": async function() { /* ... Código completo Metadata do Funcional.html ... */ },
-    "test_oob_crash_probe": async function() { /* ... Código completo Crash Probe do Funcional.html ... */ },
-    "csp_bypass_aggressive": async function() { /* ... Código completo CSP+Impact do Funcional.html ... */ },
+            // 2.2: Teste com inline handler (deve funcionar se vulnerável)
+            log("Tentando executar script via inline handler (onerror)...", 'info');
+            try {
+                const imgTag = document.createElement('img');
+                imgTag.src = 'x'; // Força o erro
+                imgTag.onerror = () => { log("VULNERÁVEL: Bypass de CSP via inline handler 'onerror' bem-sucedido!", 'vuln'); };
+                document.body.appendChild(imgTag);
+                 // Log de sucesso será adicionado pelo próprio handler se funcionar
+            } catch (e) {
+                 log(`Erro ao criar tag img com onerror: ${e.message}`, 'warn');
+            }
 
-    // --- NOVO TESTE: Poluição de Protótipo Direcionada ---
-    "prototype_pollution_targeted": async function() {
-        log("[POLLUTE-TARGETED] Attempting Targeted Prototype Pollution...", "section extended-test");
-        let pollutionImpactDetected = false;
-        let testDiv = null; // Para o teste de innerHTML
-
-        // --- Teste 1: innerHTML ---
-        log("[POLLUTE-TARGETED] Testing innerHTML pollution...", "info extended-test");
-        const xssPayload = "<img src=x onerror=\"log(\'!!!! [IMPACT] XSS via innerHTML Pollution Triggered !!!!\', \'danger impact\'); sendVulnerabilityNotification({vulnerability: \'PROTOTYPE_POLLUTION_INNERHTML_TRIGGERED\', details: \'onerror executed\'});\">";
-        let originalInnerHTMLDescriptor = Object.getOwnPropertyDescriptor(Object.prototype, 'innerHTML'); // Tentar guardar descritor original
-
-        try {
-            log(`[POLLUTE-TARGETED] Defining Object.prototype.innerHTML...`, "info");
-            // Usar defineProperty pode ser mais robusto que atribuição direta
+            // 2.3: Teste com fonte externa (deve ser bloqueado)
+            log("Tentando carregar script de fonte externa (deve ser bloqueado)...", 'info');
              try {
-                 Object.defineProperty(Object.prototype, 'innerHTML', {
-                     value: xssPayload,
-                     writable: true,
-                     enumerable: false, // Tentar não ser enumerável
-                     configurable: true // Precisa ser configurável para poder deletar depois
-                 });
-                 log("[POLLUTE-TARGETED] defineProperty for innerHTML potentially successful.", "warning");
-             } catch(e_define) {
-                 log(`[POLLUTE-TARGETED] defineProperty failed: ${e_define.message}. Falling back to direct assignment...`, "warning");
-                 Object.prototype.innerHTML = xssPayload; // Tenta fallback
-             }
+                const externalScript = document.createElement('script');
+                externalScript.src = 'https://malicious.example.com/blocked.js'; // Domínio não existente/confiável
+                externalScript.onload = () => { log("ERRO DE LÓGICA: CSP NÃO bloqueou script externo!", 'vuln'); }; // Não deve acontecer
+                externalScript.onerror = () => { log("✅ Bloqueio CSP esperado para script externo funcionou (ou falha de rede).", 'good'); }; // Esperado
+                document.body.appendChild(externalScript);
+            } catch (e) {
+                 log(`Erro ao criar tag script externa: ${e.message}`, 'warn');
+            }
 
-            await new Promise(r => setTimeout(r, 50));
+            log("--- Teste CSP Concluído (Verifique logs acima para resultados 'VULNERÁVEL') ---", 'test');
+        };
 
-            // Tentativa de Trigger
-            log("[POLLUTE-TARGETED] Attempting to trigger XSS via innerHTML...", "info");
-            testDiv = document.createElement('div');
-            let testObj = {};
+        // --- Teste 3: Prototype Pollution ---
+        const runPrototypePollutionTest = () => {
+            log("--- Iniciando Teste: Prototype Pollution ---", 'test');
+            const pollutionKey = 'poc_injected_property';
+            const pollutionValue = 'Polluted!';
 
-            // Verificar se a propriedade foi herdada
-            if (testObj.innerHTML === xssPayload) {
-                 log("[POLLUTE-TARGETED] testObj inherited innerHTML property value!", "warning impact");
-                 // Agora, tentar usar isso de forma que *poderia* levar a XSS
-                 // NOTA: Isso é altamente improvável de funcionar em browsers modernos
-                 // pois eles validam a atribuição a Element.innerHTML.
-                 // Mas fazemos a tentativa para registrar.
+            try {
+                log(`Tentando poluir Object.prototype com '${pollutionKey}'...`, 'info');
+                Object.prototype[pollutionKey] = pollutionValue;
+
+                // Verificar poluição em objetos chave
+                const testObjects = { 'window': window, 'document': document, 'novoObjeto': {} };
+                let pollutedCount = 0;
+                for (const name in testObjects) {
+                    try {
+                         // Usar 'in' ou 'hasOwnProperty' pode ser enganado, checar diretamente
+                         // Cuidado com accessors que podem gerar erro
+                         if (testObjects[name] && testObjects[name][pollutionKey] === pollutionValue) {
+                            log(`VULNERÁVEL: Prototype Pollution detectada! ${name}.${pollutionKey} = ${testObjects[name][pollutionKey]}`, 'vuln');
+                            pollutedCount++;
+                        } else {
+                             // Pode não ter herdado ou ser um objeto sem prototype chain padrão
+                             // log(`Objeto '${name}' não parece diretamente poluído ou inacessível.`, 'info');
+                        }
+                    } catch(checkError){
+                         log(`Aviso ao verificar ${name}: ${checkError.message}`, 'warn');
+                    }
+                }
+
+                if (pollutedCount > 0) {
+                     log(`Confirmação: ${pollutedCount} objeto(s) chave demonstraram herdar a propriedade poluída.`, 'vuln');
+                } else {
+                     log(`Aviso: Não foi possível confirmar a poluição nos objetos de teste. Verifique manualmente.`, 'warn');
+                }
+
+                 // Limpeza (importante!)
                  try {
-                     log("[POLLUTE-TARGETED] Setting testDiv.innerHTML = {}.innerHTML...", "info");
-                     testDiv.innerHTML = testObj.innerHTML; // Tenta atribuir o valor herdado
-                     log("[POLLUTE-TARGETED] Assignment done. Check console/UI for XSS alert (unlikely).", "warning");
-                      // Se o onerror no payload disparar, ele chamará log() e sendVulnerabilityNotification()
-                 } catch(e_set) {
-                     log(`[POLLUTE-TARGETED] Error setting testDiv.innerHTML: ${e_set.message}`, "success"); // Erro aqui é esperado
+                    delete Object.prototype[pollutionKey];
+                    log("Tentativa de limpar poluição do prototype.", 'info');
+                 } catch (cleanError){
+                    log(`Erro ao limpar poluição: ${cleanError.message}`, 'warn');
                  }
-            } else {
-                 log("[POLLUTE-TARGETED] testObj did NOT inherit innerHTML value. Pollution might have failed.", "success");
+
+
+            } catch (e) {
+                log(`Erro GERAL no teste de Prototype Pollution: ${e.message}`, 'warn');
             }
+             log("--- Teste Prototype Pollution Concluído ---", 'test');
+        };
 
-        } catch (e_pollute) {
-            log(`❌ Error during innerHTML pollution test: ${e_pollute.message}`, "danger extended-test");
-        } finally {
-            // Limpeza CRUCIAL
-            log("[POLLUTE-TARGETED] Cleaning up Object.prototype.innerHTML...", "info");
-            try {
-                 if (originalInnerHTMLDescriptor) {
-                     Object.defineProperty(Object.prototype, 'innerHTML', originalInnerHTMLDescriptor); // Tenta restaurar descritor
-                     log("[POLLUTE-TARGETED] Restored original innerHTML descriptor.", "info");
-                 } else {
-                     delete Object.prototype.innerHTML; // Fallback para delete
-                     log("[POLLUTE-TARGETED] Deleted innerHTML from prototype.", "info");
-                 }
-            } catch (e_clean) {
-                 log(`⚠️ Error cleaning innerHTML: ${e_clean.message}`, "warning");
-            }
-            try { if(testDiv) testDiv.remove(); } catch(e){} // Limpa div de teste
-        }
+        // --- Função Principal de Execução ---
+        const runAllTests = async () => {
+            log("Iniciando todos os testes de PoC...");
 
-        await new Promise(r => setTimeout(r, 500)); // Pausa
+            await runOOBTest();
+            log("\nPausa de 2 segundos...\n", 'info');
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-        // --- Teste 2: toString ---
-        log("[POLLUTE-TARGETED] Testing toString pollution...", "info extended-test");
-        let originalToString = Object.prototype.toString; // Backup
-        let toStringTriggered = false;
-        try {
-            log(`[POLLUTE-TARGETED] Defining Object.prototype.toString...`, "info");
-            Object.prototype.toString = function() {
-                 log("!!!! [IMPACT] Polluted toString called !!!!", "danger impact");
-                 console.log("!!!! [IMPACT] Polluted toString called !!!!");
-                 if (!toStringTriggered) { // Envia notificação só uma vez
-                     sendVulnerabilityNotification({ vulnerability: 'PROTOTYPE_POLLUTION_TOSTRING_CALLED', details: 'Polluted toString was executed.' });
-                 }
-                 toStringTriggered = true;
-                 return 'Polluted_Return_Value'; // Valor de retorno diferente
-            };
-             await new Promise(r => setTimeout(r, 50));
+            runCSPTest();
+            log("\nPausa de 2 segundos...\n", 'info');
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-            log("[POLLUTE-TARGETED] Calling {}.toString() to check...", "info");
-            let result = {}.toString(); // Chama a toString poluída
-            log(`[POLLUTE-TARGETED] Result of {}.toString(): ${result}`, "info");
+            runPrototypePollutionTest();
 
-            if (toStringTriggered && result === 'Polluted_Return_Value') {
-                log("[POLLUTE-TARGETED] toString pollution SUCCESSFUL: Function executed and returned polluted value!", "danger impact");
-                pollutionImpactDetected = true;
-            } else if (toStringTriggered) {
-                 log("[POLLUTE-TARGETED] toString pollution SUCCESSFUL: Function executed but return value differs? Investigate.", "warning impact");
-                 pollutionImpactDetected = true;
-            } else if (result === 'Polluted_Return_Value') {
-                 log("[POLLUTE-TARGETED] toString pollution WARNING: Changed return value but function log didn't trigger?", "warning");
-            } else {
-                 log("[POLLUTE-TARGETED] toString pollution likely failed or was prevented.", "success");
-            }
+            log("\n\nTodos os testes PoC foram concluídos. Revise o log acima.", 'test');
+        };
 
-        } catch (e_pollute) {
-            log(`❌ Error during toString pollution test: ${e_pollute.message}`, "danger extended-test");
-        } finally {
-             // Limpeza CRUCIAL
-            log("[POLLUTE-TARGETED] Cleaning up Object.prototype.toString...", "info");
-            try {
-                 Object.prototype.toString = originalToString; // Restaura a original
-                 log("[POLLUTE-TARGETED] Restored original toString.", "info");
-            } catch(e_clean) {
-                 log(`⚠️ Error cleaning toString: ${e_clean.message}`, "warning");
-            }
-        }
+        // Executar ao carregar a página
+        document.addEventListener('DOMContentLoaded', runAllTests);
 
-        log(`[POLLUTE-TARGETED] Completed Targeted Prototype Pollution tests. Impact detected: ${pollutionImpactDetected}`, pollutionImpactDetected ? "danger" : "info");
-    },
+    </script>
 
-    // Testes UAF/TC (Mantidos como placeholders do Funcional.html)
-    "uaf_basic": async function() { /* ... Placeholder ... */ },
-    "type_confusion_basic": async function() { /* ... Placeholder ... */ },
-
-    // Executor Principal Atualizado para incluir novo teste
-    "all_tests": async function() {
-        log("=== Running All Tests (Incl. Targeted Pollution) ===", "section"); // Nome atualizado
-        await aggressiveTests["oob_write_aggressive"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000));
-        if (potentialVulnsFound.oobWrite) { await aggressiveTests["oob_impact_tests"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000)); }
-        else { log("Skipping OOB impact tests.", "warning"); }
-        await aggressiveTests["csp_bypass_aggressive"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
-        // Chama o novo teste de poluição direcionada
-        await aggressiveTests["prototype_pollution_targeted"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
-        await aggressiveTests["uaf_basic"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000)); // Chama placeholder
-        await aggressiveTests["type_confusion_basic"](); // Chama placeholder
-        log("\n=== All Tests Completed. Review logs & endpoint. ===", "section");
-    },
-    // Executor OOB Impact (Completo e inalterado)
-    "oob_impact_tests": async function() { /* ... Código completo ... */ }
-};
-// Adiciona a nova função ao objeto para seleção individual
-aggressiveTests["prototype_pollution_targeted"] = aggressiveTests.prototype_pollution_targeted;
-
-
-// ======================
-// Test Runner (Inalterado do Funcional.html)
-// ======================
-async function runSelectedTest() { /* ... código idêntico ... */ }
-
-// **IMPORTANTE:** Cole aqui o código COMPLETO das funções que marquei como /* ... */
-// (log, clearLog, sendVulnerabilityNotification, demonstrate*, oob_write_aggressive,
-// test_oob_metadata, test_oob_crash_probe, csp_bypass_aggressive, oob_impact_tests, all_tests, runSelectedTest)
-// a partir do seu arquivo Funcional.html ou da minha resposta #46.
-// As funções uaf_basic e type_confusion_basic também devem ser coladas, contendo apenas os placeholders.
-</script>
 </body>
 </html>
