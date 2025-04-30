@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes Simultâneos e Robustos</title>
+    <title>PS4 WebKit Exploit - Testes Robustos e Isolados</title>
 </head>
 <body>
-    <h1>Testes Simultâneos e Robustos</h1>
+    <h1>Testes Robustos e Isolados</h1>
     <div id="output"></div>
 
     <h2>Teste 1: Primitiva de Modificação de Propriedades (Robustos)</h2>
@@ -15,22 +15,26 @@
     <pre id="propResult2"></pre>
     <div id="propTarget3" customAttr="Initial" style="border: 1px solid black; padding: 10px; margin: 5px; cursor: pointer;">Clique para modificar atributo customizado</div>
     <pre id="propResult3"></pre>
+    <div id="propTarget4" style="border: 1px solid black; padding: 10px; margin: 5px; cursor: pointer;">Clique para tentar modificar prototype</div>
+    <pre id="propResult4"></pre>
     <hr>
 
-    <h2>Teste 2: Exploração da API Canvas 2D (Robustos)</h2>
-    <canvas id="canvas2D_1" width="64" height="64" style="border: 1px solid black; cursor: pointer;"></canvas>
-    <pre id="canvasResult1"></pre>
-    <canvas id="canvas2D_2" width="128" height="32" style="border: 1px solid black; cursor: pointer; margin-top: 5px;"></canvas>
-    <pre id="canvasResult2"></pre>
-    <button id="canvasButton">Clique para ler informações da imagem (se houver)</button>
-    <pre id="canvasResult3"></pre>
+    <h2>Teste 2: Exploração da API Canvas 2D (Leitura/Escrita Precisa e Robustos)</h2>
+    <canvas id="rwCanvas1" width="2" height="1" style="border: 1px solid black; cursor: pointer;"></canvas>
+    <pre id="rwResult1"></pre>
+    <canvas id="rwCanvas2" width="1" height="2" style="border: 1px solid black; cursor: pointer; margin-top: 5px;"></canvas>
+    <pre id="rwResult2"></pre>
+    <button id="readCanvasButton">Clique para ler área maior do canvas</button>
+    <pre id="readCanvasResult"></pre>
     <hr>
 
-    <h2>Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratório)</h2>
-    <button id="memoryReadButton1">Tentar ler ArrayBuffer (indiretamente)</button>
+    <h2>Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratório e Robustos)</h2>
+    <button id="memoryReadButton1">Tentar ler ArrayBuffer (indiretamente - múltiplos acessos)</button>
     <pre id="memoryReadResult1"></pre>
-    <button id="memoryReadButton2">Tentar ler propriedade de objeto (indiretamente)</button>
+    <button id="memoryReadButton2">Tentar ler propriedade de objeto (indiretamente - diferentes objetos)</button>
     <pre id="memoryReadResult2"></pre>
+    <button id="memoryReadButton3">Tentar vazar informações de erro</button>
+    <pre id="memoryReadResult3"></pre>
 
     <script>
         const log = (message, type = 'info') => {
@@ -50,135 +54,82 @@
             return { buffer, view, bufferSize };
         }
 
-        function testPropertyModification() {
+        function testPropertyModificationRobust() {
             log("\n--- Teste 1: Primitiva de Modificação de Propriedades (Robustos) ---", 'critical');
             prepareData();
 
             document.getElementById('propTarget1').setAttribute('onclick', `
-                function modifyDatasetProp() {
-                    try {
-                        this.dataset.newValue = 'VALOR MODIFICADO A!';
-                        document.getElementById('propResult1').textContent = 'dataset.newValue: ' + this.dataset.newValue;
-                    } catch (e) {
-                        document.getElementById('propResult1').textContent = 'Erro dataset: ' + e;
-                    }
-                }
-                modifyDatasetProp.call(this);
+                try { this.dataset.newValue = 'MODIFICADO DATASET ROBUSTO!'; document.getElementById('propResult1').textContent = 'dataset.newValue: ' + this.dataset.newValue; } catch (e) { document.getElementById('propResult1').textContent = 'Erro dataset: ' + e; }
             `);
 
             document.getElementById('propTarget2').setAttribute('onclick', `
-                function modifyStyleProp() {
-                    try {
-                        this.style.backgroundColor = 'lightblue';
-                        this.style.color = 'white';
-                        document.getElementById('propResult2').textContent = 'style.backgroundColor e style.color modificados!';
-                    } catch (e) {
-                        document.getElementById('propResult2').textContent = 'Erro style: ' + e;
-                    }
-                }
-                modifyStyleProp.call(this);
+                try { this.style.backgroundColor = 'coral'; this.style.color = 'black'; document.getElementById('propResult2').textContent = 'style modificado ROBUSTO!'; } catch (e) { document.getElementById('propResult2').textContent = 'Erro style: ' + e; }
             `);
 
             document.getElementById('propTarget3').setAttribute('onclick', `
-                function modifyCustomAttr() {
-                    try {
-                        this.setAttribute('customAttr', 'MODIFICADO!');
-                        document.getElementById('propResult3').textContent = 'Atributo customAttr: ' + this.getAttribute('customAttr');
-                    } catch (e) {
-                        document.getElementById('propResult3').textContent = 'Erro atributo customizado: ' + e;
-                    }
-                }
-                modifyCustomAttr.call(this);
+                try { this.setAttribute('customAttr', 'ROBUSTO!'); document.getElementById('propResult3').textContent = 'customAttr: ' + this.getAttribute('customAttr'); } catch (e) { document.getElementById('propResult3').textContent = 'Erro customAttr: ' + e; }
+            `);
+
+            document.getElementById('propTarget4').setAttribute('onclick', `
+                try { Object.prototype.injectedProperty = 'INJECTED!'; document.getElementById('propResult4').textContent = 'Tentativa de modificar prototype (pode falhar silenciosamente).'; } catch (e) { document.getElementById('propResult4').textContent = 'Erro prototype: ' + e; }
             `);
         }
 
-        function testCanvasExploration() {
-            log("\n--- Teste 2: Exploração da API Canvas 2D (Robustos) ---", 'critical');
+        function testCanvasRWRobust() {
+            log("\n--- Teste 2: Exploração da API Canvas 2D (Leitura/Escrita Precisa e Robustos) ---", 'critical');
             prepareData();
 
-            document.getElementById('canvas2D_1').setAttribute('onclick', `
-                function drawRectangle1() {
-                    const canvas = this;
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        ctx.fillStyle = 'green';
-                        ctx.fillRect(10, 10, 40, 40);
-                        document.getElementById('canvasResult1').textContent = 'Canvas 1: Retângulo verde desenhado.';
-                    } else {
-                        document.getElementById('canvasResult1').textContent = 'Canvas 1: Falha ao obter contexto 2D.';
-                    }
-                }
-                drawRectangle1.call(this);
+            document.getElementById('rwCanvas1').setAttribute('onclick', `
+                const ctx = this.getContext('2d');
+                if (ctx) { ctx.fillStyle = 'purple'; ctx.fillRect(0, 0, 1, 1); const data = ctx.getImageData(0, 0, 1, 1).data; document.getElementById('rwResult1').textContent = 'Canvas 1 (1x1): Desenhado roxo, lido RGBA: ' + Array.from(data).join(','); } else { document.getElementById('rwResult1').textContent = 'Erro Canvas 1.'; }
             `);
 
-            document.getElementById('canvas2D_2').setAttribute('onclick', `
-                function drawRectangle2() {
-                    const canvas = this;
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        ctx.fillStyle = 'blue';
-                        ctx.fillRect(20, 5, 80, 20);
-                        document.getElementById('canvasResult2').textContent = 'Canvas 2: Retângulo azul desenhado.';
-                    } else {
-                        document.getElementById('canvasResult2').textContent = 'Canvas 2: Falha ao obter contexto 2D.';
-                    }
-                }
-                drawRectangle2.call(this);
+            document.getElementById('rwCanvas2').setAttribute('onclick', `
+                const ctx = this.getContext('2d');
+                if (ctx) { ctx.fillStyle = 'olive'; ctx.fillRect(0, 1, 1, 1); const data = ctx.getImageData(0, 1, 1, 1).data; document.getElementById('rwResult2').textContent = 'Canvas 2 (1x2): Desenhado azeitona, lido RGBA (pixel 1): ' + Array.from(data).join(','); } else { document.getElementById('rwResult2').textContent = 'Erro Canvas 2.'; }
             `);
 
-            document.getElementById('canvasButton').setAttribute('onclick', `
-                function readImageData() {
-                    const canvas = document.getElementById('canvas2D_1');
-                    const ctx = canvas.getContext('2d');
-                    if (ctx) {
-                        try {
-                            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                            document.getElementById('canvasResult3').textContent = 'Canvas Data (primeiros 10 bytes): ' + Array.from(new Uint8Array(imageData.data.buffer)).slice(0, 10).join(',');
-                        } catch (e) {
-                            document.getElementById('canvasResult3').textContent = 'Erro ao ler dados da imagem: ' + e;
-                        }
-                    } else {
-                        document.getElementById('canvasResult3').textContent = 'Falha ao obter contexto 2D para leitura de imagem.';
-                    }
-                }
-                readImageData();
+            document.getElementById('readCanvasButton').setAttribute('onclick', `
+                const canvas = document.getElementById('rwCanvas1');
+                const ctx = canvas.getContext('2d');
+                if (ctx) { try { const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); document.getElementById('readCanvasResult').textContent = 'Lido área (2x1) RGBA: ' + Array.from(new Uint8Array(imageData.data.buffer)).join(','); } catch (e) { document.getElementById('readCanvasResult').textContent = 'Erro ao ler área: ' + e; } } else { document.getElementById('readCanvasResult').textContent = 'Erro ao obter contexto para leitura de área.'; }
             `);
         }
 
-        function attemptMemoryRead() {
-            log("\n--- Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratório) ---", 'critical');
+        function attemptMemoryReadRobust() {
+            log("\n--- Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratório e Robustos) ---", 'critical');
             prepareData();
 
-            let leakedArray = null;
-            const createArrayBuffer = `
-                leakedArray = new ArrayBuffer(32);
-            `;
+            let leakedBuffer = new ArrayBuffer(8);
+            const view = new Uint8Array(leakedBuffer);
+            view[0] = 0x41; view[1] = 0x42;
 
             document.getElementById('memoryReadButton1').setAttribute('onclick', `
-                ${createArrayBuffer}
-                document.getElementById('memoryReadResult1').textContent = 'ArrayBuffer criado (indiretamente acessível?).';
-                // Próximo passo: tentar ler conteúdo do leakedArray de alguma forma indireta.
-                // Isso é extremamente difícil sem uma vulnerabilidade específica.
+                let temp = new Uint8Array(leakedBuffer);
+                document.getElementById('memoryReadResult1').textContent = 'Tentativa leitura AB (indireta): ' + temp[0] + ',' + temp[1];
+                temp = null;
             `);
 
-            let leakedObject = { secret: "SEGREDO" };
-            const createObject = `
-                window.leakedObject = { secret: "SEGREDO" };
-            `;
-
+            let leakedObject = { secret1: "AAA", secret2: "BBB" };
             document.getElementById('memoryReadButton2').setAttribute('onclick', `
-                ${createObject}
-                document.getElementById('memoryReadResult2').textContent = 'Objeto criado globalmente (indiretamente acessível?).';
-                // Próximo passo: tentar ler propriedades do leakedObject de alguma forma indireta.
-                // Geralmente bloqueado por Same-Origin Policy e escopo.
+                document.getElementById('memoryReadResult2').textContent = 'Tentativa leitura obj (indireta): ' + leakedObject.secret1 + ',' + leakedObject.secret2;
+                leakedObject = null;
+            `);
+
+            document.getElementById('memoryReadButton3').setAttribute('onclick', `
+                try {
+                    throw new Error('Teste de Erro com Dados Sensíveis: ' + leakedBuffer);
+                } catch (e) {
+                    document.getElementById('memoryReadResult3').textContent = 'Informação de erro (pode vazar dados): ' + e.message;
+                }
             `);
         }
 
         function mainExploit() {
             log("mainExploit() iniciado.", 'critical');
-            testPropertyModification();
-            testCanvasExploration();
-            attemptMemoryRead();
+            testPropertyModificationRobust();
+            testCanvasRWRobust();
+            attemptMemoryReadRobust();
             log("mainExploit() concluído.", 'critical');
         }
 
