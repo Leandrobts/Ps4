@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes Avançados (Execução Correta)</title>
+    <title>PS4 WebKit Exploit - Testes Avançados Integrados</title>
 </head>
 <body>
-    <h1>Testes Avançados (Execução Correta)</h1>
+    <h1>Testes Avançados Integrados</h1>
     <div id="output"></div>
 
     <h2>Teste 1: Investigar a Memória da GPU</h2>
@@ -94,66 +94,6 @@
             return { buffer, view, bufferSize };
         }
 
-        function testPropertyModificationRobust() {
-            log("\n--- Teste 1: Primitiva de Modificação de Propriedades (Robustos) ---", 'critical');
-            prepareData();
-            document.getElementById('propTarget1').setAttribute('onclick', `try { this.dataset.newValue = 'MODIFICADO DATASET ROBUSTO!'; document.getElementById('propResult1').textContent = 'dataset.newValue: ' + this.dataset.newValue; } catch (e) { document.getElementById('propResult1').textContent = 'Erro dataset: ' + e; }`);
-            document.getElementById('propTarget2').setAttribute('onclick', `try { this.style.backgroundColor = 'coral'; this.style.color = 'black'; document.getElementById('propResult2').textContent = 'style modificado ROBUSTO!'; } catch (e) { document.getElementById('propResult2').textContent = 'Erro style: ' + e; }`);
-            document.getElementById('propTarget3').setAttribute('onclick', `try { this.setAttribute('customAttr', 'ROBUSTO!'); document.getElementById('propResult3').textContent = 'customAttr: ' + this.getAttribute('customAttr'); } catch (e) { document.getElementById('propResult3').textContent = 'Erro customAttr: ' + e; }`);
-            document.getElementById('propTarget4').setAttribute('onclick', `try { Object.prototype.injectedProperty = 'INJECTED!'; document.getElementById('propResult4').textContent = 'Tentativa de modificar prototype (pode falhar silenciosamente).'; } catch (e) { document.getElementById('propResult4').textContent = 'Erro prototype: ' + e; }`);
-        }
-
-        function testCanvasRWRobust() {
-            log("\n--- Teste 2: Exploração da API Canvas 2D (Leitura/Escrita Precisa e Robustos) ---", 'critical');
-            prepareData();
-            document.getElementById('rwCanvas1').setAttribute('onclick', `const ctx = this.getContext('2d'); if (ctx) { ctx.fillStyle = 'purple'; ctx.fillRect(0, 0, 1, 1); const data = ctx.getImageData(0, 0, 1, 1).data; document.getElementById('rwResult1').textContent = 'Canvas 1 (1x1): Desenhado roxo, lido RGBA: ' + Array.from(data).join(','); } else { document.getElementById('rwResult1').textContent = 'Erro Canvas 1.'; }`);
-            document.getElementById('rwCanvas2').setAttribute('onclick', `const ctx = this.getContext('2d'); if (ctx) { ctx.fillStyle = 'olive'; ctx.fillRect(0, 1, 1, 1); const data = ctx.getImageData(0, 1, 1, 1).data; document.getElementById('rwResult2').textContent = 'Canvas 2 (1x2): Desenhado azeitona, lido RGBA (pixel 1): ' + Array.from(data).join(','); } else { document.getElementById('rwResult2').textContent = 'Erro Canvas 2.'; }`);
-            document.getElementById('readCanvasButton').setAttribute('onclick', `const canvas = document.getElementById('rwCanvas1'); const ctx = canvas.getContext('2d'); if (ctx) { try { const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); document.getElementById('readCanvasResult').textContent = 'Lido área (2x1) RGBA: ' + Array.from(new Uint8Array(imageData.data.buffer)).join(','); } catch (e) { document.getElementById('readCanvasResult').textContent = 'Erro ao ler área: ' + e; } } else { document.getElementById('readCanvasResult').textContent = 'Erro ao obter contexto para leitura de área.'; }`);
-
-            setTimeout(function() {
-                const patternButton = document.createElement('button');
-                patternButton.textContent = 'Clique para testar padrão R/W';
-                patternButton.onclick = function() {
-                    const canvas = document.getElementById('patternCanvas');
-                    const ctx = canvas.getContext('2d');
-                    const resultElement = document.getElementById('patternCanvasResult');
-                    if (ctx) {
-                        const writeData = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]); // Vermelho, Azul
-                        const imageDataWrite = new ImageData(new Uint8ClampedArray(writeData.buffer), canvas.width, canvas.height);
-                        ctx.putImageData(imageDataWrite, 0, 0);
-                        resultElement.textContent = 'Padrão escrito (vermelho, azul).';
-                        setTimeout(() => {
-                            const readImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                            const readArray = Array.from(new Uint8Array(readImageData.data.buffer));
-                            resultElement.textContent += '\\nLido (RGBA): ' + readArray.join(',');
-                        }, 100);
-                    } else {
-                        resultElement.textContent = 'Erro ao obter contexto para padrão.';
-                    }
-                };
-                document.getElementById('patternCanvasContainer').appendChild(patternButton);
-            }, 500);
-        }
-
-        let globalLeakedBuffer;
-        let globalLeakedObject;
-
-        function attemptMemoryReadRobust() {
-            log("\n--- Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratória e Robustos) ---", 'critical');
-            prepareData();
-
-            globalLeakedBuffer = new ArrayBuffer(8);
-            const view = new Uint8Array(globalLeakedBuffer);
-            view[0] = 0x41; view[1] = 0x42;
-
-            globalLeakedObject = { secret1: "AAA", secret2: "BBB" };
-
-            document.getElementById('memoryReadButton1').setAttribute('onclick', `try { let temp = new Uint8Array(globalLeakedBuffer); document.getElementById('memoryReadResult1').textContent = 'Tentativa leitura AB (indireta - global): ' + temp[0] + ',' + temp[1]; temp = null; } catch (e) { document.getElementById('memoryReadResult1').textContent = 'Erro: ' + e; }`);
-            document.getElementById('memoryReadButton2').setAttribute('onclick', `try { document.getElementById('memoryReadResult2').textContent = 'Tentativa leitura obj (indireta - global): ' + globalLeakedObject.secret1 + ',' + globalLeakedObject.secret2; } catch (e) { document.getElementById('memoryReadResult2').textContent = 'Erro: ' + e; }`);
-            document.getElementById('memoryReadButton3').setAttribute('onclick', `try { throw new Error('Teste de Erro com Dados Sensíveis: ' + globalLeakedBuffer); } catch (e) { document.getElementById('memoryReadResult3').textContent = 'Informação de erro (global - pode vazar dados): ' + e.message; }`);
-            document.getElementById('memoryReadButton4').setAttribute('onclick', `try { const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(globalLeakedBuffer))); document.getElementById('memoryReadResult4').textContent = 'Tentativa leitura com btoa (global): ' + base64; const decoded = atob(base64); document.getElementById('memoryReadResult4').textContent += '\\nDecodificado: ' + decoded.charCodeAt(0) + ',' + decoded.charCodeAt(1); } catch (e) { document.getElementById('memoryReadResult4').textContent = 'Erro btoa/atob (global): ' + e.message; }`);
-        }
-
         // --- Teste 1: Investigar a Memória da GPU ---
         function testGPUMemory1() {
             const canvas = document.getElementById('gpuCanvas1');
@@ -214,4 +154,163 @@
                 ctx.fillRect(0, 0, 8, 8);
                 ctx.fillStyle = 'blue';
                 ctx.fillRect(8, 8, 8, 8);
-                const imageData = ctx.getImageData(0, 0, canvas.width,
+                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
+                // Tentativa de ler alguns pixels espaçados
+                const sampledData = [
+                    imageData[0], imageData[1], imageData[2], imageData[3], // (0,0) Red
+                    imageData[4 * 8 * 4 + 0], imageData[4 * 8 * 4 + 1], imageData[4 * 8 * 4 + 2], imageData[4 * 8 * 4 + 3], // (8,0) ?
+                    imageData[8 * 8 * 4 + 0], imageData[8 * 8 * 4 + 1], imageData[8 * 8 * 4 + 2], imageData[8 * 8 * 4 + 3], // (0,8) ?
+                    imageData[12 * 12 * 4 + 0], imageData[12 * 12 * 4 + 1], imageData[12 * 12 * 4 + 2], imageData[12 * 12 * 4 + 3]  // (12,12) Blue
+                ];
+                resultElement.textContent = 'Leitura Amostrada RGBA: ' + sampledData.join(',');
+            } else {
+                resultElement.textContent = 'Erro ao obter contexto GPU 4.';
+            }
+        }
+
+        // --- Teste 2: Buscar Objetos de Interesse no Escopo Global ---
+        function testGlobalScope1() {
+            const resultElement = document.getElementById('globalResult1');
+            let globalProperties = [];
+            for (let prop in window) {
+                globalProperties.push(prop);
+            }
+            resultElement.textContent = 'Propriedades Globais: ' + globalProperties.join(', ');
+        }
+
+        function testGlobalScope2() {
+            const resultElement = document.getElementById('globalResult2');
+            let interestingObjects = ['document', 'window', 'console', 'WebGLRenderingContext'];
+            let inspectionResults = [];
+            for (let objName of interestingObjects) {
+                try {
+                    let obj = window[objName];
+                    if (obj) {
+                        inspectionResults.push(`${objName}: ${typeof obj}`);
+                    } else {
+                        inspectionResults.push(`${objName}: Não encontrado`);
+                    }
+                } catch (e) {
+                    inspectionResults.push(`${objName}: Erro ao inspecionar: ${e}`);
+                }
+            }
+            resultElement.textContent = 'Inspeção Seletiva: ' + inspectionResults.join(', ');
+        }
+
+        function testGlobalScope3() {
+            const resultElement = document.getElementById('globalResult3');
+            let searchTerms = ['memory', 'buffer', 'array', 'webgl'];
+            let foundNames = [];
+            for (let prop in window) {
+                for (let term of searchTerms) {
+                    if (prop.toLowerCase().includes(term)) {
+                        foundNames.push(prop);
+                        break;
+                    }
+                }
+            }
+            resultElement.textContent = 'Nomes Globais Encontrados: ' + foundNames.join(', ');
+        }
+
+        function testGlobalScope4() {
+            const resultElement = document.getElementById('globalResult4');
+            let functionNames = ['alert', 'eval', 'setTimeout', 'requestAnimationFrame'];
+            let functionTypes = [];
+            for (let funcName of functionNames) {
+                try {
+                    let func = window[funcName];
+                    if (typeof func === 'function') {
+                        functionTypes.push(`${funcName}: function`);
+                    } else {
+                        functionTypes.push(`${funcName}: not function or not found`);
+                    }
+                } catch (e) {
+                    functionTypes.push(`${funcName}: Error: ${e}`);
+                }
+            }
+            resultElement.textContent = 'Tipos de Funções Globais: ' + functionTypes.join(', ');
+        }
+
+        // --- Teste 3: Desenvolver Primitivas de Leitura/Escrita Mais Sofisticadas ---
+        function testPrimitives1() {
+            const canvas = document.getElementById('primitiveCanvas1');
+            const ctx = canvas.getContext('2d');
+            const resultElement = document.getElementById('primitiveResult1');
+            if (ctx) {
+                // Escrevendo RGBA diretamente
+                let data = new Uint8ClampedArray([
+                    255, 0, 0, 255, // Vermelho
+                    0, 255, 0, 255, // Verde
+                    0, 0, 255, 255, // Azul
+                    255, 255, 0, 255  // Amarelo
+                ]);
+                let imageData = new ImageData(data, canvas.width, canvas.height);
+                ctx.putImageData(imageData, 0, 0);
+                resultElement.textContent = 'Escrita RGBA: ' + Array.from(data).join(',');
+            } else {
+                resultElement.textContent = 'Erro Primitive 1.';
+            }
+        }
+
+        function testPrimitives2() {
+            const canvas = document.getElementById('primitiveCanvas2');
+            const ctx = canvas.getContext('2d');
+            const resultElement = document.getElementById('primitiveResult2');
+            if (ctx) {
+                // Lendo apenas o canal vermelho de cada pixel
+                ctx.fillStyle = 'red';
+                ctx.fillRect(0, 0, 1, 1);
+                ctx.fillStyle = 'green';
+                ctx.fillRect(0, 1, 1, 1);
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(0, 2, 1, 1);
+                ctx.fillStyle = 'yellow';
+                ctx.fillRect(0, 3, 1, 1);
+
+                const imageData = ctx.getImageData(0, 0, 1, canvas.height).data;
+                let redChannels = [];
+                for (let i = 0; i < imageData.length; i += 4) {
+                    redChannels.push(imageData[i]);
+                }
+                resultElement.textContent = 'Canal Vermelho: ' + redChannels.join(',');
+            } else {
+                resultElement.textContent = 'Erro Primitive 2.';
+            }
+        }
+
+        function testPrimitives3() {
+            const canvas = document.getElementById('primitiveCanvas3');
+            const ctx = canvas.getContext('2d');
+            const resultElement = document.getElementById('primitiveResult3');
+            if (ctx) {
+                // Deslocando dados dentro do canvas
+                ctx.fillStyle = 'purple';
+                ctx.fillRect(0, 0, 2, 2);
+                let originalData = ctx.getImageData(0, 0, 2, 2).data;
+
+                // Deslocando um pixel para a direita
+                ctx.clearRect(0, 0, 2, 2);
+                ctx.putImageData(new ImageData(new Uint8ClampedArray([
+                    0, 0, 0, 0, originalData[0], originalData[1], originalData[2], originalData[3],
+                    0, 0, 0, 0, originalData[4], originalData[5], originalData[6], originalData[7]
+                ]), 2, 2), 0, 0);
+
+                let displacedData = ctx.getImageData(0, 0, 2, 2).data;
+                resultElement.textContent = 'Deslocamento: Original: ' + Array.from(originalData).join(',') + ' Deslocado: ' + Array.from(displacedData).join(',');
+            } else {
+                resultElement.textContent = 'Erro Primitive 3.';
+            }
+        }
+
+        function testPrimitives4() {
+            const canvas = document.getElementById('primitiveCanvas4');
+            const ctx = canvas.getContext('2d');
+            const resultElement = document.getElementById('primitiveResult4');
+            if (ctx) {
+                // Tentando ler dados com um offset
+                ctx.fillStyle = 'orange';
+                ctx.fillRect(0, 0, 1, 1);
+                ctx.fillStyle = 'cyan';
+                ctx.fillRect(1, 1, 1, 1);
+
+                let imageData = ctx.getImageData(0, 0
