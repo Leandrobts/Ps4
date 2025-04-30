@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Debug Escrita Offsets Maiores</title>
+    <title>PS4 WebKit Exploit - Testes Robustos Simultâneos</title>
 </head>
 <body>
-    <h1>Debug Escrita Offsets Maiores</h1>
+    <h1>Testes Robustos Simultâneos</h1>
     <div id="output"></div>
     <script>
         const log = (message, type = 'info') => { /* ... sua função log ... */ };
@@ -14,22 +14,31 @@
 
         function prepareData() { /* ... sua função prepareData ... */ }
 
-        function performOOBWrite(view, bufferSize, offset, value) {
-            log(`\n--- Tentativa de escrita OOB no offset ${offset} (Valor 0x${value.toString(16)}) ---`, 'info');
+        function performOOBWrite(view, bufferSize, offset, value) { /* ... sua função performOOBWrite ... */ }
+
+        function objectPropertyAccessTests() {
+            log("\n--- Testes de Acesso a Propriedades de Objetos ---", 'critical');
             try {
-                log(`performOOBWrite(): view = ${view}`);
-                log(`performOOBWrite(): view.buffer = ${view ? view.buffer : null}`);
-                const dataView = new DataView(view.buffer);
-                log(`performOOBWrite(): DataView criado.`);
-                log(`performOOBWrite(): Tentativa de escrever o valor 0x${value.toString(16)} no offset ${offset}.`);
-                if (offset >= 0 && offset < bufferSize) {
-                    dataView.setUint8(offset, value);
-                    log(`performOOBWrite(): Valor 0x${value.toString(16)} escrito com sucesso no offset ${offset}.`);
-                } else {
-                    log(`performOOBWrite(): Offset ${offset} está fora dos limites do buffer (${bufferSize}).`, 'error');
-                }
-            } catch (writeError) {
-                log(`performOOBWrite(): Erro durante a escrita OOB no offset ${offset}: ${writeError}`, 'error');
+                log(`Acessando propriedades de globalTargetObject: ${globalTargetObject.name}, ${globalTargetObject.counter}`);
+                globalTargetObject.newValue = "newValue";
+                log(`Adicionando nova propriedade: ${JSON.stringify(globalTargetObject)}`);
+                delete globalTargetObject.flag1;
+                log(`Deletando propriedade: ${JSON.stringify(globalTargetObject)}`);
+            } catch (error) {
+                log(`Erro nos testes de acesso a propriedades: ${error}`, 'error');
+            }
+        }
+
+        function arrayManipulationTests() {
+            log("\n--- Testes de Manipulação de Array ---", 'critical');
+            try {
+                log(`Array inicial: ${globalTargetObject.array}`);
+                globalTargetObject.array.push(4);
+                log(`Array após push: ${globalTargetObject.array}`);
+                globalTargetObject.array[0] = 100;
+                log(`Array após modificação de índice: ${globalTargetObject.array}`);
+            } catch (error) {
+                log(`Erro nos testes de manipulação de array: ${error}`, 'error');
             }
         }
 
@@ -38,9 +47,22 @@
             const data = prepareData();
             if (data) {
                 log("mainExploit(): prepareData() retornou dados.");
-                performOOBWrite(data.view, data.bufferSize, 32, 0xEE);
-                performOOBWrite(data.view, data.bufferSize, 60, 0xFF);
-                log(`\nmainExploit(): Objeto APÓS as escritas: ${JSON.stringify(globalTargetObject)}`);
+
+                // Testes de escrita OOB em vários offsets
+                performOOBWrite(data.view, data.bufferSize, 0, 0x11);
+                performOOBWrite(data.view, data.bufferSize, 8, 0x22);
+                performOOBWrite(data.view, data.bufferSize, 16, 0x33);
+                performOOBWrite(data.view, data.bufferSize, 32, 0x44);
+                performOOBWrite(data.view, data.bufferSize, 60, 0x55);
+                performOOBWrite(data.view, data.bufferSize, 100, 0x66); // Offset fora dos limites (intencional)
+                performOOBWrite(data.view, data.bufferSize, -4, 0x77);  // Offset negativo (intencional)
+
+                // Testes de manipulação de objetos JavaScript
+                objectPropertyAccessTests();
+                arrayManipulationTests();
+
+                log(`\nmainExploit(): Objeto APÓS todos os testes: ${JSON.stringify(globalTargetObject)}`);
+
             } else {
                 log("mainExploit(): prepareData() falhou.", 'error');
             }
