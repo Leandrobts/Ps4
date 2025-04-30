@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes Robustos Simultâneos</title>
+    <title>PS4 WebKit Exploit - Testes de Objeto Isolados</title>
 </head>
 <body>
-    <h1>Testes Robustos Simultâneos</h1>
+    <h1>Testes de Objeto Isolados</h1>
     <div id="output"></div>
     <script>
         const log = (message, type = 'info') => { /* ... sua função log ... */ };
@@ -13,8 +13,6 @@
         let globalTargetObject = {};
 
         function prepareData() { /* ... sua função prepareData ... */ }
-
-        function performOOBWrite(view, bufferSize, offset, value) { /* ... sua função performOOBWrite ... */ }
 
         function objectPropertyAccessTests() {
             log("\n--- Testes de Acesso a Propriedades de Objetos ---", 'critical');
@@ -48,20 +46,31 @@
             if (data) {
                 log("mainExploit(): prepareData() retornou dados.");
 
-                // Testes de escrita OOB em vários offsets
-                performOOBWrite(data.view, data.bufferSize, 0, 0x11);
-                performOOBWrite(data.view, data.bufferSize, 8, 0x22);
-                performOOBWrite(data.view, data.bufferSize, 16, 0x33);
-                performOOBWrite(data.view, data.bufferSize, 32, 0x44);
-                performOOBWrite(data.view, data.bufferSize, 60, 0x55);
-                performOOBWrite(data.view, data.bufferSize, 100, 0x66); // Offset fora dos limites (intencional)
-                performOOBWrite(data.view, data.bufferSize, -4, 0x77);  // Offset negativo (intencional)
+                // Realizando as escritas OOB (como no último teste bem-sucedido)
+                const view = data.view;
+                const bufferSize = data.bufferSize;
+                const performOOBWrite = (offset, value) => {
+                    log(`\n--- Tentativa de escrita OOB no offset ${offset} (Valor 0x${value.toString(16)}) ---`, 'info');
+                    try {
+                        const dataView = new DataView(view.buffer);
+                        if (offset >= 0 && offset < bufferSize) {
+                            dataView.setUint8(offset, value);
+                            log(`Escrita OOB no offset ${offset} com valor 0x${value.toString(16)} realizada.`);
+                        } else {
+                            log(`Offset ${offset} fora dos limites.`, 'error');
+                        }
+                    } catch (error) {
+                        log(`Erro na escrita OOB no offset ${offset}: ${error}`, 'error');
+                    }
+                };
+                performOOBWrite(32, 0xEE);
+                performOOBWrite(60, 0xFF);
 
-                // Testes de manipulação de objetos JavaScript
+                // Executando os testes de manipulação de objetos APÓS as escritas OOB
                 objectPropertyAccessTests();
                 arrayManipulationTests();
 
-                log(`\nmainExploit(): Objeto APÓS todos os testes: ${JSON.stringify(globalTargetObject)}`);
+                log(`\nmainExploit(): Objeto APÓS os testes: ${JSON.stringify(globalTargetObject)}`);
 
             } else {
                 log("mainExploit(): prepareData() falhou.", 'error');
