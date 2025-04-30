@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes Isolados e Robustos (Revisado)</title>
+    <title>PS4 WebKit Exploit - Testes Isolados e Robustos (Corrigido)</title>
 </head>
 <body>
-    <h1>Testes Isolados e Robustos (Revisado)</h1>
+    <h1>Testes Isolados e Robustos (Corrigido)</h1>
     <div id="output"></div>
 
     <h2>Teste 1: Primitiva de Modificação de Propriedades (Robustos)</h2>
@@ -31,20 +31,20 @@
     <hr>
 
     <h2>Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratória e Robustos)</h2>
-    <button id="memoryReadButton1">Tentar ler ArrayBuffer (indiretamente - múltiplos acessos)</button>
+    <button id="memoryReadButton1">Tentar ler ArrayBuffer (indiretamente - global)</button>
     <pre id="memoryReadResult1"></pre>
-    <button id="memoryReadButton2">Tentar ler propriedade de objeto (indiretamente - diferentes objetos)</button>
+    <button id="memoryReadButton2">Tentar ler propriedade de objeto (indiretamente - global)</button>
     <pre id="memoryReadResult2"></pre>
-    <button id="memoryReadButton3">Tentar vazar informações de erro</button>
+    <button id="memoryReadButton3">Tentar vazar informações de erro (global)</button>
     <pre id="memoryReadResult3"></pre>
-    <button id="memoryReadButton4">Tentar ler com `atob`/`btoa`</button>
+    <button id="memoryReadButton4">Tentar ler com `atob`/`btoa` (global)</button>
     <pre id="memoryReadResult4"></pre>
 
     <script>
         const log = (message, type = 'info') => {
             const outputDiv = document.getElementById('output');
             if (outputDiv) {
-                outputDiv.innerHTML += `<span style="color: ${type === 'error' ? 'red' : type === 'warning' ? 'orange' : 'blue'};">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+                outputDiv.innerHTML += `<span style="color: <span class="math-inline">\{type \=\=\= 'error' ? 'red' \: type \=\=\= 'warning' ? 'orange' \: 'blue'\};"\></span>{new Date().toLocaleTimeString()} - ${message}\n</span>`;
             } else {
                 console.error('Elemento #output não encontrado!');
             }
@@ -75,48 +75,9 @@
             document.getElementById('readCanvasButton').setAttribute('onclick', `const canvas = document.getElementById('rwCanvas1'); const ctx = canvas.getContext('2d'); if (ctx) { try { const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); document.getElementById('readCanvasResult').textContent = 'Lido área (2x1) RGBA: ' + Array.from(new Uint8Array(imageData.data.buffer)).join(','); } catch (e) { document.getElementById('readCanvasResult').textContent = 'Erro ao ler área: ' + e; } } else { document.getElementById('readCanvasResult').textContent = 'Erro ao obter contexto para leitura de área.'; }`);
 
             const patternButton = document.getElementById('patternCanvasButton');
-            const patternResult = document.getElementById('patternCanvasResult');
-            patternButton.setAttribute('onclick', `
+            patternButton.setAttribute('onclick', function() {
                 const canvas = document.getElementById('patternCanvas');
                 const ctx = canvas.getContext('2d');
+                const resultElement = document.getElementById('patternCanvasResult');
                 if (ctx) {
-                    const writeData = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]);
-                    const imageDataWrite = new ImageData(new Uint8ClampedArray(writeData.buffer), canvas.width, canvas.height);
-                    ctx.putImageData(imageDataWrite, 0, 0);
-                    document.getElementById('patternCanvasResult').textContent = 'Padrão escrito (vermelho, azul).';
-                    setTimeout(() => {
-                        const readImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                        const readArray = Array.from(new Uint8Array(readImageData.data.buffer));
-                        document.getElementById('patternCanvasResult').textContent += '\\nLido (RGBA): ' + readArray.join(',');
-                    }, 100);
-                } else {
-                    document.getElementById('patternCanvasResult').textContent = 'Erro ao obter contexto para padrão.';
-                }
-            `);
-        }
-
-        function attemptMemoryReadRobust() {
-            log("\n--- Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratória e Robustos) ---", 'critical');
-            prepareData();
-            let leakedBuffer = new ArrayBuffer(8);
-            const view = new Uint8Array(leakedBuffer);
-            view[0] = 0x41; view[1] = 0x42;
-            document.getElementById('memoryReadButton1').setAttribute('onclick', `let temp = new Uint8Array(leakedBuffer); document.getElementById('memoryReadResult1').textContent = 'Tentativa leitura AB (indireta): ' + temp[0] + ',' + temp[1]; temp = null;`);
-            let leakedObject = { secret1: "AAA", secret2: "BBB" };
-            document.getElementById('memoryReadButton2').setAttribute('onclick', `document.getElementById('memoryReadResult2').textContent = 'Tentativa leitura obj (indireta): ' + leakedObject.secret1 + ',' + leakedObject.secret2; leakedObject = null;`);
-            document.getElementById('memoryReadButton3').setAttribute('onclick', `try { throw new Error('Teste de Erro com Dados Sensíveis: ' + leakedBuffer); } catch (e) { document.getElementById('memoryReadResult3').textContent = 'Informação de erro (pode vazar dados): ' + e.message; }`);
-            document.getElementById('memoryReadButton4').setAttribute('onclick', `try { const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(leakedBuffer))); document.getElementById('memoryReadResult4').textContent = 'Tentativa leitura com btoa: ' + base64; const decoded = atob(base64); document.getElementById('memoryReadResult4').textContent += '\\nDecodificado: ' + decoded.charCodeAt(0) + ',' + decoded.charCodeAt(1); } catch (e) { document.getElementById('memoryReadResult4').textContent = 'Erro btoa/atob: ' + e.message; }`);
-        }
-
-        function mainExploit() {
-            log("mainExploit() iniciado.", 'critical');
-            testPropertyModificationRobust();
-            testCanvasRWRobust();
-            attemptMemoryReadRobust();
-            log("mainExploit() concluído.", 'critical');
-        }
-
-        mainExploit();
-    </script>
-</body>
-</html>
+                    const writeData = new Uint8Array([255, 0, 0
