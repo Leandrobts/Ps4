@@ -3,30 +3,22 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes GPU, Canvas e Memory (Isolados)</title>
+    <title>PS4 WebKit Exploit - Testes Isolados (IIFE)</title>
 </head>
 
 <body>
-    <h1>Testes GPU, Canvas e Memory (Isolados)</h1>
+    <h1>Testes Isolados (IIFE)</h1>
     <div id="output"></div>
 
-    <h2>Teste 1: Investigar a Memória da GPU</h2>
-    <canvas id="gpuCanvas1" width="64" height="1" style="border: 1px solid black; margin-bottom: 10px;"></canvas>
-    <pre id="gpuResult1"></pre>
-    <button id="gpuButton1">Teste GPU 1: Padrão Linear Horizontal</button>
-
-    <canvas id="gpuCanvas2" width="1" height="64" style="border: 1px solid black; margin-bottom: 10px;"></canvas>
-    <pre id="gpuResult2"></pre>
-    <button id="gpuButton2">Teste GPU 2: Padrão Linear Vertical</button>
-
-    <canvas id="gpuCanvas3" width="8" height="8" style="border: 1px solid black; margin-bottom: 10px;"></canvas>
-    <pre id="gpuResult3"></pre>
-    <button id="gpuButton3">Teste GPU 3: Padrão de Xadrez</button>
-
-    <canvas id="gpuCanvas4" width="16" height="16" style="border: 1px solid black; margin-bottom: 10px;"></canvas>
-    <pre id="gpuResult4"></pre>
-    <button id="gpuButton4">Teste GPU 4: Leitura Amostrada</button>
-
+    <h2>Teste 1: Primitiva de Modificação de Propriedades (Robustos)</h2>
+    <div id="propTarget1" data-original="Valor A" style="border: 1px solid black; padding: 10px; margin: 5px; cursor: pointer;">Clique para modificar dataset</div>
+    <pre id="propResult1"></pre>
+    <div id="propTarget2" style="border: 1px solid black; padding: 10px; margin: 5px; cursor: pointer; background-color: #f0f0f0;">Clique para modificar style</div>
+    <pre id="propResult2"></pre>
+    <div id="propTarget3" customAttr="Initial" style="border: 1px solid black; padding: 10px; margin: 5px; cursor: pointer;">Clique para modificar atributo customizado</div>
+    <pre id="propResult3"></pre>
+    <div id="propTarget4" style="border: 1px solid black; padding: 10px; margin: 5px; cursor: pointer;">Clique para tentar modificar prototype</div>
+    <pre id="propResult4"></pre>
     <hr>
 
     <h2>Teste 2: Exploração da API Canvas 2D (Leitura/Escrita Precisa e Robustos)</h2>
@@ -40,27 +32,23 @@
         <canvas id="patternCanvas" width="2" height="1" style="border: 1px solid black; cursor: pointer;"></canvas>
         <pre id="patternCanvasResult"></pre>
     </div>
-
     <hr>
 
-    <h2>Teste 4: Analisar a Disposição da Memória</h2>
-    <pre id="memoryLayoutResult1"></pre>
-    <button id="memoryLayoutButton1">Teste Layout 1: Alocar e Ler (Sequencial)</button>
-
-    <pre id="memoryLayoutResult2"></pre>
-    <button id="memoryLayoutButton2">Teste Layout 2: Alocar e Ler (Espaçado)</button>
-
-    <pre id="memoryLayoutResult3"></pre>
-    <button id="memoryLayoutButton3">Teste Layout 3: Inspeção de Buffers Globais</button>
-
-    <pre id="memoryLayoutResult4"></pre>
-    <button id="memoryLayoutButton4">Teste Layout 4: Tentativa de Overlap</button>
+    <h2>Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratória e Robustos)</h2>
+    <button id="memoryReadButton1">Tentar ler ArrayBuffer (indiretamente - global)</button>
+    <pre id="memoryReadResult1"></pre>
+    <button id="memoryReadButton2">Tentar ler propriedade de objeto (indiretamente - global)</button>
+    <pre id="memoryReadResult2"></pre>
+    <button id="memoryReadButton3">Tentar vazar informações de erro (global)</button>
+    <pre id="memoryReadResult3"></pre>
+    <button id="memoryReadButton4">Tentar ler com `atob`/`btoa` (global)</button>
+    <pre id="memoryReadResult4"></pre>
 
     <script>
         const log = (message, type = 'info') => {
             const outputDiv = document.getElementById('output');
             if (outputDiv) {
-                outputDiv.innerHTML += `<span style="color: <span class="math-inline">\{type \=\=\= 'error' ? 'red' \: type \=\=\= 'warning' ? 'orange' \: 'blue'\};"\></span>{new Date().toLocaleTimeString()} - ${message}\n</span>`;
+                outputDiv.innerHTML += `<span style="color: ${type === 'error' ? 'red' : type === 'warning' ? 'orange' : 'blue'};">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
             } else {
                 console.error('Elemento #output não encontrado!');
             }
@@ -78,130 +66,213 @@
             };
         }
 
-        // --- Teste 1: Investigar a Memória da GPU ---
-        function testGPUMemory1() {
-            log("\n--- Teste 1: Investigar a Memória da GPU ---", 'critical');
-            prepareData();
-            const canvas = document.getElementById('gpuCanvas1');
-            const ctx = canvas.getContext('2d');
-            const resultElement = document.getElementById('gpuResult1');
-            if (ctx) {
-                for (let i = 0; i < canvas.width; i++) {
-                    ctx.fillStyle = `rgba(${i * 4 % 256}, ${(i * 4 + 85) % 256}, ${(i * 4 + 170) % 256}, 255)`;
-                    ctx.fillRect(i, 0, 1, 1);
-                }
-                const imageData = ctx.getImageData(0, 0, canvas.width, 1).data;
-                resultElement.textContent = 'Padrão Horizontal RGBA: ' + Array.from(imageData).join(',');
-            } else {
-                resultElement.textContent = 'Erro ao obter contexto GPU 1.';
-            }
-        }
+        // --- Teste 1: Primitiva de Modificação de Propriedades (Robustos) ---
+        (function() {
+            const testName = "Teste 1: Primitiva de Modificação de Propriedades (Robustos)";
+            log(`\n--- ${testName} ---`, 'critical');
 
-        function testGPUMemory2() {
-            log("\n--- Teste 1: Investigar a Memória da GPU ---", 'critical');
-            prepareData();
-            const canvas = document.getElementById('gpuCanvas2');
-            const ctx = canvas.getContext('2d');
-            const resultElement = document.getElementById('gpuResult2');
-            if (ctx) {
-                for (let i = 0; i < canvas.height; i++) {
-                    ctx.fillStyle = `rgba(${(i * 4 + 170) % 256}, ${i * 4 % 256}, ${(i * 4 + 85) % 256}, 255)`;
-                    ctx.fillRect(0, i, 1, 1);
-                }
-                const imageData = ctx.getImageData(0, 0, 1, canvas.height).data;
-                resultElement.textContent = 'Padrão Vertical RGBA: ' + Array.from(imageData).join(',');
-            } else {
-                resultElement.textContent = 'Erro ao obter contexto GPU 2.';
-            }
-        }
+            function testPropertyModificationRobust() {
+                prepareData();
+                const propTarget1 = document.getElementById('propTarget1');
+                const propTarget2 = document.getElementById('propTarget2');
+                const propTarget3 = document.getElementById('propTarget3');
+                const propTarget4 = document.getElementById('propTarget4');
+                const propResult1 = document.getElementById('propResult1');
+                const propResult2 = document.getElementById('propResult2');
+                const propResult3 = document.getElementById('propResult3');
+                const propResult4 = document.getElementById('propResult4');
 
-        function testGPUMemory3() {
-            log("\n--- Teste 1: Investigar a Memória da GPU ---", 'critical');
-            prepareData();
-            const canvas = document.getElementById('gpuCanvas3');
-            const ctx = canvas.getContext('2d');
-            const resultElement = document.getElementById('gpuResult3');
-            if (ctx) {
-                for (let y = 0; y < canvas.height; y++) {
-                    for (let x = 0; x < canvas.width; x++) {
-                        ctx.fillStyle = (x % 2 === y % 2) ? 'black' : 'white';
-                        ctx.fillRect(x, y, 1, 1);
+                propTarget1.addEventListener('click', function() {
+                    try {
+                        this.dataset.newValue = 'MODIFICADO DATASET ROBUSTO!';
+                        propResult1.textContent = 'dataset.newValue: ' + this.dataset.newValue;
+                    } catch (e) {
+                        propResult1.textContent = 'Erro dataset: ' + e;
                     }
-                }
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                resultElement.textContent = 'Padrão Xadrez RGBA: ' + Array.from(imageData).join(',');
-            } else {
-                resultElement.textContent = 'Erro ao obter contexto GPU 3.';
-            }
-        }
+                });
 
-        function testGPUMemory4() {
-            log("\n--- Teste 1: Investigar a Memória da GPU ---", 'critical');
-            prepareData();
-            const canvas = document.getElementById('gpuCanvas4');
-            const ctx = canvas.getContext('2d');
-            const resultElement = document.getElementById('gpuResult4');
-            if (ctx) {
-                ctx.fillStyle = 'red';
-                ctx.fillRect(0, 0, 8, 8);
-                ctx.fillStyle = 'blue';
-                ctx.fillRect(8, 8, 8, 8);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                // Tentativa de ler alguns pixels espaçados
-                const sampledData = [
-                    imageData[0], imageData[1], imageData[2], imageData[3], // (0,0) Red
-                    imageData[4 * 8 * 4 + 0], imageData[4 * 8 * 4 + 1], imageData[4 * 8 * 4 + 2], imageData[4 * 8 * 4 + 3], // (8,0) ?
-                    imageData[8 * 8 * 4 + 0], imageData[8 * 8 * 4 + 1], imageData[8 * 8 * 4 + 2], imageData[8 * 8 * 4 + 3], // (0,8) ?
-                    imageData[12 * 12 * 4 + 0], imageData[12 * 12 * 4 + 1], imageData[12 * 12 * 4 + 2], imageData[12 * 12 * 4 + 3] // (12,12) Blue
-                ];
-                resultElement.textContent = 'Leitura Amostrada RGBA: ' + sampledData.join(',');
-            } else {
-                resultElement.textContent = 'Erro ao obter contexto GPU 4.';
+                propTarget2.addEventListener('click', function() {
+                    try {
+                        this.style.backgroundColor = 'coral';
+                        this.style.color = 'black';
+                        propResult2.textContent = 'style modificado ROBUSTO!';
+                    } catch (e) {
+                        propResult2.textContent = 'Erro style: ' + e;
+                    }
+                });
+
+                propTarget3.addEventListener('click', function() {
+                    try {
+                        this.setAttribute('customAttr', 'ROBUSTO!');
+                        propResult3.textContent = 'customAttr: ' + this.getAttribute('customAttr');
+                    } catch (e) {
+                        propResult3.textContent = 'Erro customAttr: ' + e;
+                    }
+                });
+
+                propTarget4.addEventListener('click', function() {
+                    try {
+                        Object.prototype.injectedProperty = 'INJECTED!';
+                        propResult4.textContent = 'Tentativa de modificar prototype (pode falhar silenciosamente).';
+                    } catch (e) {
+                        propResult4.textContent = 'Erro prototype: ' + e;
+                    }
+                });
             }
-        }
+
+            testPropertyModificationRobust();
+        })();
 
         // --- Teste 2: Exploração da API Canvas 2D (Leitura/Escrita Precisa e Robustos) ---
-        function testCanvasRWRobust() {
-            log("\n--- Teste 2: Exploração da API Canvas 2D (Leitura/Escrita Precisa e Robustos) ---", 'critical');
-            prepareData();
+        (function() {
+            const testName = "Teste 2: Exploração da API Canvas 2D (Leitura/Escrita Precisa e Robustos)";
+            log(`\n--- ${testName} ---`, 'critical');
 
-            const rwCanvas1 = document.getElementById('rwCanvas1');
-            const rwCanvas2 = document.getElementById('rwCanvas2');
-            const readCanvasButton = document.getElementById('readCanvasButton');
+            function testCanvasRWRobust() {
+                prepareData();
+                const rwCanvas1 = document.getElementById('rwCanvas1');
+                const rwCanvas2 = document.getElementById('rwCanvas2');
+                const readCanvasButton = document.getElementById('readCanvasButton');
+                const rwResult1 = document.getElementById('rwResult1');
+                const rwResult2 = document.getElementById('rwResult2');
+                const readCanvasResult = document.getElementById('readCanvasResult');
+                const patternCanvas = document.getElementById('patternCanvas');
+                const patternCanvasResult = document.getElementById('patternCanvasResult');
 
-            rwCanvas1.addEventListener('click', function() {
-                const ctx = this.getContext('2d');
-                if (ctx) {
-                    ctx.fillStyle = 'purple';
-                    ctx.fillRect(0, 0, 1, 1);
-                    const data = ctx.getImageData(0, 0, 1, 1).data;
-                    document.getElementById('rwResult1').textContent = 'Canvas 1 (1x1): Desenhado roxo, lido RGBA: ' + Array.from(data).join(',');
-                } else {
-                    document.getElementById('rwResult1').textContent = 'Erro Canvas 1.';
-                }
-            });
-
-            rwCanvas2.addEventListener('click', function() {
-                const ctx = this.getContext('2d');
-                if (ctx) {
-                    ctx.fillStyle = 'olive';
-                    ctx.fillRect(0, 1, 1, 1);
-                    const data = ctx.getImageData(0, 1, 1, 1).data;
-                    document.getElementById('rwResult2').textContent = 'Canvas 2 (1x2): Desenhado azeitona, lido RGBA (pixel 1): ' + Array.from(data).join(',');
-                } else {
-                    document.getElementById('rwResult2').textContent = 'Erro Canvas 2.';
-                }
-            });
-
-            readCanvasButton.addEventListener('click', function() {
-                const canvas = document.getElementById('rwCanvas1');
-                const ctx = canvas.getContext('2d');
-                if (ctx) {
-                    try {
-                        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                        document.getElementById('readCanvasResult').textContent = 'Lido área (2x1) RGBA: ' + Array.from(new Uint8Array(imageData.data.buffer)).join(',');
-                    } catch (e) {
-                        document.getElementById('readCanvasResult').textContent = 'Erro ao ler área: ' + e;
+                rwCanvas1.addEventListener('click', function() {
+                    const ctx = this.getContext('2d');
+                    if (ctx) {
+                        ctx.fillStyle = 'purple';
+                        ctx.fillRect(0, 0, 1, 1);
+                        const data = ctx.getImageData(0, 0, 1, 1).data;
+                        rwResult1.textContent = 'Canvas 1 (1x1): Desenhado roxo, lido RGBA: ' + Array.from(data).join(',');
+                    } else {
+                        rwResult1.textContent = 'Erro Canvas 1.';
                     }
-                } else {
-                    document.getElementById('readCanvasResult').textContent = 'Erro ao obter contexto para leitura de área.';
+                });
+
+                rwCanvas2.addEventListener('click', function() {
+                    const ctx = this.getContext('2d');
+                    if (ctx) {
+                        ctx.fillStyle = 'olive';
+                        ctx.fillRect(0, 1, 1, 1);
+                        const data = ctx.getImageData(0, 1, 1, 1).data;
+                        rwResult2.textContent = 'Canvas 2 (1x2): Desenhado azeitona, lido RGBA (pixel 1): ' + Array.from(data).join(',');
+                    } else {
+                        rwResult2.textContent = 'Erro Canvas 2.';
+                    }
+                });
+
+                readCanvasButton.addEventListener('click', function() {
+                    const ctx = rwCanvas1.getContext('2d');
+                    if (ctx) {
+                        try {
+                            const imageData = ctx.getImageData(0, 0, rwCanvas1.width, rwCanvas1.height);
+                            readCanvasResult.textContent = 'Lido área (2x1) RGBA: ' + Array.from(new Uint8Array(imageData.data.buffer)).join(',');
+                        } catch (e) {
+                            readCanvasResult.textContent = 'Erro ao ler área: ' + e;
+                        }
+                    } else {
+                        readCanvasResult.textContent = 'Erro ao obter contexto para leitura de área.';
+                    }
+                });
+
+                setTimeout(function() {
+                    const patternButton = document.createElement('button');
+                    patternButton.textContent = 'Clique para testar padrão R/W';
+                    patternButton.addEventListener('click', function() {
+                        const ctx = patternCanvas.getContext('2d');
+                        if (ctx) {
+                            const writeData = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]); // Vermelho, Azul
+                            const imageDataWrite = new ImageData(new Uint8ClampedArray(writeData.buffer), patternCanvas.width, patternCanvas.height);
+                            ctx.putImageData(imageDataWrite, 0, 0);
+                            patternCanvasResult.textContent = 'Padrão escrito (vermelho, azul).';
+                            setTimeout(() => {
+                                const readImageData = ctx.getImageData(0, 0, patternCanvas.width, patternCanvas.height);
+                                const readArray = Array.from(new Uint8Array(readImageData.data.buffer));
+                                patternCanvasResult.textContent += '\\nLido (RGBA): ' + readArray.join(',');
+                            }, 100);
+                        } else {
+                            patternCanvasResult.textContent = 'Erro ao obter contexto para padrão.';
+                        }
+                    });
+                    document.getElementById('patternCanvasContainer').appendChild(patternButton);
+                }, 500);
+            }
+
+            testCanvasRWRobust();
+        })();
+
+        // --- Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratória e Robustos) ---
+        (function() {
+            const testName = "Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratória e Robustos)";
+            log(`\n--- ${testName} ---`, 'critical');
+
+            let globalLeakedBuffer;
+            let globalLeakedObject;
+
+            function attemptMemoryReadRobust() {
+                prepareData();
+                const memoryReadButton1 = document.getElementById('memoryReadButton1');
+                const memoryReadButton2 = document.getElementById('memoryReadButton2');
+                const memoryReadButton3 = document.getElementById('memoryReadButton3');
+                const memoryReadButton4 = document.getElementById('memoryReadButton4');
+                const memoryReadResult1 = document.getElementById('memoryReadResult1');
+                const memoryReadResult2 = document.getElementById('memoryReadResult2');
+                const memoryReadResult3 = document.getElementById('memoryReadResult3');
+                const memoryReadResult4 = document.getElementById('memoryReadResult4');
+
+                globalLeakedBuffer = new ArrayBuffer(8);
+                const view = new Uint8Array(globalLeakedBuffer);
+                view[0] = 0x41;
+                view[1] = 0x42;
+
+                globalLeakedObject = {
+                    secret1: "AAA",
+                    secret2: "BBB"
+                };
+
+                memoryReadButton1.addEventListener('click', function() {
+                    try {
+                        let temp = new Uint8Array(globalLeakedBuffer);
+                        memoryReadResult1.textContent = 'Tentativa leitura AB (indireta - global): ' + temp[0] + ',' + temp[1];
+                        temp = null;
+                    } catch (e) {
+                        memoryReadResult1.textContent = 'Erro: ' + e;
+                    }
+                });
+
+                memoryReadButton2.addEventListener('click', function() {
+                    try {
+                        memoryReadResult2.textContent = 'Tentativa leitura obj (indireta - global): ' + globalLeakedObject.secret1 + ',' + globalLeakedObject.secret2;
+                    } catch (e) {
+                        memoryReadResult2.textContent = 'Erro: ' + e;
+                    }
+                });
+
+                memoryReadButton3.addEventListener('click', function() {
+                    try {
+                        throw new Error('Teste de Erro com Dados Sensíveis: ' + globalLeakedBuffer);
+                    } catch (e) {
+                        memoryReadResult3.textContent = 'Informação de erro (global - pode vazar dados): ' + e.message;
+                    }
+                });
+
+                memoryReadButton4.addEventListener('click', function() {
+                    try {
+                        const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(globalLeakedBuffer)));
+                        memoryReadResult4.textContent = 'Tentativa leitura com btoa (global): ' + base64;
+                        const decoded = atob(base64);
+                        memoryReadResult4.textContent += '\\nDecodificado: ' + decoded.charCodeAt(0) + ',' + decoded.charCodeAt(1);
+                    } catch (e) {
+                        memoryReadResult4.textContent = 'Erro btoa/atob (global): ' + e.message;
+                    }
+                });
+            }
+
+            attemptMemoryReadRobust();
+        })();
+    </script>
+</body>
+
+</html>
