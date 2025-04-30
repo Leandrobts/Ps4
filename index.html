@@ -2,41 +2,89 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes de Objeto Isolados</title>
+    <title>PS4 WebKit Exploit - Testes Isolados e Robustos</title>
 </head>
 <body>
-    <h1>Testes de Objeto Isolados</h1>
+    <h1>Testes Isolados e Robustos</h1>
     <div id="output"></div>
     <script>
-        const log = (message, type = 'info') => { /* ... sua função log ... */ };
+        const log = (message, type = 'info') => {
+            const outputDiv = document.getElementById('output');
+            if (outputDiv) {
+                outputDiv.innerHTML += `<span style="color: ${type === 'error' ? 'red' : type === 'warning' ? 'orange' : 'blue'};">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+            } else {
+                console.error('Elemento #output não encontrado!');
+            }
+        };
 
         let globalTargetObject = {};
 
-        function prepareData() { /* ... sua função prepareData ... */ }
-
-        function objectPropertyAccessTests() {
-            log("\n--- Testes de Acesso a Propriedades de Objetos ---", 'critical');
+        function prepareData() {
+            log("Função prepareData() iniciada.", 'warning');
+            let bufferSize;
+            let buffer;
+            let view;
             try {
-                log(`Acessando propriedades de globalTargetObject: ${globalTargetObject.name}, ${globalTargetObject.counter}`);
-                globalTargetObject.newValue = "newValue";
-                log(`Adicionando nova propriedade: ${JSON.stringify(globalTargetObject)}`);
-                delete globalTargetObject.flag1;
-                log(`Deletando propriedade: ${JSON.stringify(globalTargetObject)}`);
+                bufferSize = 64;
+                log(`Tamanho do buffer dentro de prepareData: ${bufferSize}`);
+                buffer = new ArrayBuffer(bufferSize);
+                log(`ArrayBuffer criado dentro de prepareData.`);
+                view = new Uint8Array(buffer);
+                log(`Uint8Array criado dentro de prepareData.`);
+                globalTargetObject = {
+                    flag1: true, flag2: false, counter: 10, name: "Test", array: [1, 2, 3],
+                    floatValue: 3.14, longValue: 1234567890123, nestedObject: { a: 1, b: "hello" },
+                    privileged: false, bypassMethod: "default"
+                };
+                log(`Objeto inicial (prepareData): ${JSON.stringify(globalTargetObject)}`);
+                log("Função prepareData() concluída com sucesso.", 'success');
+                return { buffer, view, bufferSize };
             } catch (error) {
-                log(`Erro nos testes de acesso a propriedades: ${error}`, 'error');
+                log(`Erro dentro de prepareData(): ${error}`, 'error');
+                return null; // Indica falha
             }
         }
 
-        function arrayManipulationTests() {
-            log("\n--- Testes de Manipulação de Array ---", 'critical');
+        function performOOBWriteIsolated(view, bufferSize, offset, value, testName) {
+            log(`\n--- Teste de Escrita OOB Isolado: ${testName} (Offset ${offset}, Valor 0x${value.toString(16)}) ---`, 'info');
             try {
-                log(`Array inicial: ${globalTargetObject.array}`);
-                globalTargetObject.array.push(4);
-                log(`Array após push: ${globalTargetObject.array}`);
-                globalTargetObject.array[0] = 100;
-                log(`Array após modificação de índice: ${globalTargetObject.array}`);
+                const dataView = new DataView(view.buffer);
+                log(`performOOBWriteIsolated (${testName}): DataView criado.`);
+                log(`performOOBWriteIsolated (${testName}): Tentativa de escrever 0x${value.toString(16)} no offset ${offset}.`);
+                if (offset >= 0 && offset < bufferSize) {
+                    dataView.setUint8(offset, value);
+                    log(`performOOBWriteIsolated (${testName}): Escrita realizada com sucesso.`);
+                } else {
+                    log(`performOOBWriteIsolated (${testName}): Offset fora dos limites.`, 'warning');
+                }
+            } catch (writeError) {
+                log(`performOOBWriteIsolated (${testName}): Erro durante a escrita: ${writeError}`, 'error');
+            }
+        }
+
+        function objectManipulationTestsIsolated() {
+            log("\n--- Testes de Manipulação de Objeto Isolados ---", 'critical');
+            try {
+                log(`objectManipulationTestsIsolated: Acessando propriedades: ${globalTargetObject.name}, ${globalTargetObject.counter}`);
+                globalTargetObject.newValue = "newValue";
+                log(`objectManipulationTestsIsolated: Adicionando propriedade: ${JSON.stringify(globalTargetObject)}`);
+                delete globalTargetObject.flag1;
+                log(`objectManipulationTestsIsolated: Deletando propriedade: ${JSON.stringify(globalTargetObject)}`);
             } catch (error) {
-                log(`Erro nos testes de manipulação de array: ${error}`, 'error');
+                log(`objectManipulationTestsIsolated: Erro: ${error}`, 'error');
+            }
+        }
+
+        function arrayManipulationTestsIsolated() {
+            log("\n--- Testes de Manipulação de Array Isolados ---", 'critical');
+            try {
+                log(`arrayManipulationTestsIsolated: Array inicial: ${globalTargetObject.array}`);
+                globalTargetObject.array.push(4);
+                log(`arrayManipulationTestsIsolated: Após push: ${globalTargetObject.array}`);
+                globalTargetObject.array[0] = 100;
+                log(`arrayManipulationTestsIsolated: Após modificação de índice: ${globalTargetObject.array}`);
+            } catch (error) {
+                log(`arrayManipulationTestsIsolated: Erro: ${error}`, 'error');
             }
         }
 
@@ -45,32 +93,24 @@
             const data = prepareData();
             if (data) {
                 log("mainExploit(): prepareData() retornou dados.");
+                const { view, bufferSize } = data;
 
-                // Realizando as escritas OOB (como no último teste bem-sucedido)
-                const view = data.view;
-                const bufferSize = data.bufferSize;
-                const performOOBWrite = (offset, value) => {
-                    log(`\n--- Tentativa de escrita OOB no offset ${offset} (Valor 0x${value.toString(16)}) ---`, 'info');
-                    try {
-                        const dataView = new DataView(view.buffer);
-                        if (offset >= 0 && offset < bufferSize) {
-                            dataView.setUint8(offset, value);
-                            log(`Escrita OOB no offset ${offset} com valor 0x${value.toString(16)} realizada.`);
-                        } else {
-                            log(`Offset ${offset} fora dos limites.`, 'error');
-                        }
-                    } catch (error) {
-                        log(`Erro na escrita OOB no offset ${offset}: ${error}`, 'error');
-                    }
-                };
-                performOOBWrite(32, 0xEE);
-                performOOBWrite(60, 0xFF);
+                // Testes de escrita OOB isolados
+                performOOBWriteIsolated(view, bufferSize, 0, 0xAA, "Offset 0");
+                performOOBWriteIsolated(view, bufferSize, 8, 0xBB, "Offset 8");
+                performOOBWriteIsolated(view, bufferSize, 16, 0xCC, "Offset 16");
+                performOOBWriteIsolated(view, bufferSize, 32, 0xDD, "Offset 32");
+                performOOBWriteIsolated(view, bufferSize, 60, 0xEE, "Offset 60");
+                performOOBWriteIsolated(view, bufferSize, 100, 0xFF, "Offset 100 (OOB)");
+                performOOBWriteIsolated(view, bufferSize, -4, 0x01, "Offset -4 (OOB)");
 
-                // Executando os testes de manipulação de objetos APÓS as escritas OOB
-                objectPropertyAccessTests();
-                arrayManipulationTests();
+                // Testes de manipulação de objetos isolados
+                objectManipulationTestsIsolated();
 
-                log(`\nmainExploit(): Objeto APÓS os testes: ${JSON.stringify(globalTargetObject)}`);
+                // Testes de manipulação de array isolados
+                arrayManipulationTestsIsolated();
+
+                log(`\nmainExploit(): Objeto APÓS todos os testes: ${JSON.stringify(globalTargetObject)}`);
 
             } else {
                 log("mainExploit(): prepareData() falhou.", 'error');
