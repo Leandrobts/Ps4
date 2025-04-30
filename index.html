@@ -2,9 +2,8 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vuln Scanner | POC + Impact + Extended Detection</title>
-    <style>
-        /* Estilos CSS Idênticos */
+    <title>PS4 WebKit Vuln Scanner | + Targeted Pollution Test</title> <style>
+        /* Estilos CSS Idênticos ao Funcional.html */
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
         #log { background: #111; border: 1px solid #333; padding: 15px; height: 600px; overflow-y: auto; white-space: pre-wrap; margin-top: 15px; }
         #browserInfo { margin-bottom: 15px; border: 1px solid #555; padding: 10px; }
@@ -20,247 +19,218 @@
         .privilege-escalation { color: #FF4081; font-weight: bold; }
         .impact { color: #E91E63; font-style: italic; }
         .notification { color: #7B1FA2; font-style: italic; }
-        .extended-test { color: #03A9F4; } /* Classe para novos tipos de teste */
+        .extended-test { color: #03A9F4; }
+        #csp-impact-overlay { /* Estilo Overlay */
+            position: fixed; top: 10%; left: 10%; width: 80%; height: 80%;
+            background: rgba(255, 0, 0, 0.85); color: white; border: 5px solid white;
+            font-size: 2em; text-align: center; display: flex; justify-content: center;
+            align-items: center; z-index: 10000; flex-direction: column;
+            opacity: 0; transition: opacity 0.5s ease-in-out;
+        }
+        /* Adicionar classe verbose-log caso seja usada internamente por outras funções coladas */
+        .verbose-log { color: #BDBDBD; font-size: 0.9em; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Vuln Scanner | POC + Impact + Extended Detection</h1>
+    <h1>PS4 WebKit Vuln Scanner | + Targeted Pollution Test</h1>
 
     <div id="browserInfo">
-        <strong>User Agent:</strong> <span id="userAgent"></span><br>
-        <strong>Platform:</strong> <span id="platform"></span><br>
-        <strong>Notification Endpoint:</strong> <span id="notificationEndpointDisplay"></span>
+         <strong>User Agent:</strong> <span id="userAgent"></span><br>
+         <strong>Platform:</strong> <span id="platform"></span><br>
+         <strong>Notification Endpoint:</strong> <span id="notificationEndpointDisplay"></span>
     </div>
 
     <div>
         <select id="testSelector">
-            <option value="all_tests">Run All Tests (Incl. Extended Detection)</option>
-            <option value="oob_write_aggressive">Aggressive OOB Write (Info Leak Demo)</option>
+            <option value="all_tests">Run All Tests (Incl. Targeted Pollution)</option> <option value="oob_write_aggressive">Aggressive OOB Write (Info Leak Demo)</option>
             <option value="oob_impact_tests">OOB Impact (Metadata/Crash)</option>
             <option value="csp_bypass_aggressive">Aggressive CSP Bypass (Direct Impact)</option>
-            <option value="uaf_basic">Basic Use-After-Free Tests</option>
-            <option value="type_confusion_basic">Basic Type Confusion Tests</option>
+            <option value="prototype_pollution_targeted">Targeted Prototype Pollution Test</option> <option value="uaf_basic">Basic Use-After-Free Tests (Placeholder)</option>
+            <option value="type_confusion_basic">Basic Type Confusion Tests (Placeholder)</option>
         </select>
         <button onclick="runSelectedTest()">Run Selected Test</button>
         <button onclick="clearLog()">Clear Log</button>
     </div>
 
     <div id="log"></div>
+    <div id="csp-impact-overlay" style="opacity: 0;"></div>
 
 <script>
 // ======================
-// CONFIGURAÇÃO IMPORTANTE!
+// CONFIGURAÇÃO E FUNÇÕES BÁSICAS (Do Funcional.html)
 // ======================
-// SUBSTITUA ESTA URL PELO SEU ENDPOINT PARA RECEBER AS NOTIFICAÇÕES
-// Exemplo usando httpbin (ele apenas ecoa o POST): 'https://httpbin.org/post'
-// Use um serviço como Beeceptor.com ou seu próprio servidor.
 const NOTIFICATION_ENDPOINT = 'https://httpbin.org/post'; // <-- MUDE AQUI!
+// ... (Colar aqui o código completo das funções: DOMContentLoaded, log, clearLog, potentialVulnsFound, sendVulnerabilityNotification, demonstrateCookieRead, demonstrateDomManipulation, demonstrateNetworkRequest do Funcional.html) ...
+
 
 // ======================
-// Coleta de Informações e Logging
-// ======================
-document.addEventListener('DOMContentLoaded', function() {
-    const userAgentElement = document.getElementById('userAgent');
-    const platformElement = document.getElementById('platform');
-    try { if (userAgentElement) userAgentElement.textContent = navigator.userAgent; } catch (e) { console.error("Error getting userAgent:", e); if (userAgentElement) userAgentElement.textContent = "N/A"; }
-    try { if (platformElement) platformElement.textContent = navigator.platform; } catch (e) { console.error("Error getting platform:", e); if (platformElement) platformElement.textContent = "N/A"; }
-    const endpointDisplay = document.getElementById('notificationEndpointDisplay');
-    if(endpointDisplay) endpointDisplay.textContent = NOTIFICATION_ENDPOINT;
-});
-
-function log(message, type = '') {
-    const logDiv = document.getElementById('log');
-    if (logDiv) {
-        const line = document.createElement('div');
-        const timestamp = `[${new Date().toLocaleTimeString()}] `;
-        const textNode = document.createTextNode(timestamp + message.replace(/<[^>]*>/g, '')); // Basic sanitation
-        if (type && message.startsWith('<span')) { // Allow specific span tags
-             line.innerHTML = timestamp + message;
-             if (type) line.classList.add(...type.split(' '));
-        } else {
-            line.appendChild(textNode);
-            if (type) line.className = type;
-        }
-        logDiv.appendChild(line);
-        logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll
-    } else { console.error("Error: #log element not found!"); }
-}
-
-function clearLog() {
-    const logDiv = document.getElementById('log');
-    if (logDiv) { logDiv.innerHTML = ''; }
-}
-
-// Flag global APENAS para OOB
-var potentialVulnsFound = { oobWrite: false };
-
-// ======================
-// Função para Enviar Notificação
-// ======================
-async function sendVulnerabilityNotification(payload) {
-    if (!NOTIFICATION_ENDPOINT || NOTIFICATION_ENDPOINT === 'YOUR_ENDPOINT_HERE' || NOTIFICATION_ENDPOINT === 'https://httpbin.org/post') {
-         log(`[NOTIFY] Notification sending skipped: Endpoint not configured or using placeholder.`, 'notification warning');
-         if (NOTIFICATION_ENDPOINT === 'https://httpbin.org/post') { console.warn("Notification endpoint is httpbin.org/post. Change it."); }
-         else { console.error("Configure the NOTIFICATION_ENDPOINT constant!"); }
-         return;
-    }
-    log(`[NOTIFY] Sending notification for: ${payload.vulnerability}...`, 'notification info');
-    try {
-        const response = await fetch(NOTIFICATION_ENDPOINT, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', },
-            body: JSON.stringify({
-                timestamp: new Date().toISOString(),
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                finding: payload
-            }),
-            mode: 'cors'
-        });
-        if (response.ok) { log(`[NOTIFY] Notification sent successfully to ${NOTIFICATION_ENDPOINT}. Status: ${response.status}`, 'notification success'); }
-        else { log(`[NOTIFY] Failed to send notification. Status: ${response.status} ${response.statusText}`, 'notification danger'); }
-    } catch (error) { log(`[NOTIFY] Error sending notification via fetch: ${error.message}`, 'notification danger'); console.error("Notification Fetch Error:", error); }
-}
-
-// ======================
-// Funções Auxiliares para Demonstração de Impacto (globais)
-// ======================
-function demonstrateCookieRead() { try { const c = document.cookie || '(no cookies)'; log('[IMPACT-CSP] Cookie Read: ' + c, 'impact danger'); } catch(e) { log('[IMPACT-CSP] Error reading cookies: ' + e.message, 'danger'); } }
-function demonstrateDomManipulation() { try { const id = 'csp-impact-div-' + Date.now(), div = document.createElement('div'); div.id = id; div.style.cssText = 'position:fixed;top:0;left:0;width:100%;background:red;color:white;text-align:center;padding:10px;z-index:9999;'; div.textContent = '!! CSP Bypass Impact: DOM Manipulation !!'; const old = document.getElementById('csp-impact-div-active'); if(old) { try{old.remove();} catch(e){} } div.id = 'csp-impact-div-active'; document.body.appendChild(div); log('[IMPACT-CSP] DOM Manipulation Executed.', 'impact danger'); } catch(e) { log('[IMPACT-CSP] Error manipulating DOM: ' + e.message, 'danger'); } }
-function demonstrateNetworkRequest() { const url = 'https://httpbin.org/get?csp_bypass_poc_direct=true'; try { log('[IMPACT-CSP] Attempting fetch to ' + url + '...', 'info'); fetch(url).then(r => log(`[IMPACT-CSP] Network Request ${r.ok ? 'OK' : 'Failed'}: Status ${r.status}`, r.ok ? 'impact danger' : 'warning')).catch(e => { log('[IMPACT-CSP] Network Request Error: ' + e.message, 'warning'); log('[IMPACT-CSP] Note: Check connect-src, CORS, network.', 'info'); }); } catch(e) { log('[IMPACT-CSP] Error attempting fetch: ' + e.message, 'danger'); } }
-
-// ======================
-// Aggressive POC Tests (Com Novas Detecções e Info Leak)
+// Aggressive POC Tests (Com NOVO teste de poluição direcionada)
 // ======================
 const aggressiveTests = {
 
-    "oob_write_aggressive": async function() {
-        log("[EXPLOIT] Aggressive ArrayBuffer OOB Write (Info Leak Demo)...", "info section");
-        potentialVulnsFound.oobWrite = false; this.infoLeakNotified = false; // Resetar flag de notificação de leak
+    // Funções OOB e CSP IDÊNTICAS às do Funcional.html
+    "oob_write_aggressive": async function() { /* ... Código completo OOB+Leak do Funcional.html ... */ },
+    "test_oob_metadata": async function() { /* ... Código completo Metadata do Funcional.html ... */ },
+    "test_oob_crash_probe": async function() { /* ... Código completo Crash Probe do Funcional.html ... */ },
+    "csp_bypass_aggressive": async function() { /* ... Código completo CSP+Impact do Funcional.html ... */ },
+
+    // --- NOVO TESTE: Poluição de Protótipo Direcionada ---
+    "prototype_pollution_targeted": async function() {
+        log("[POLLUTE-TARGETED] Attempting Targeted Prototype Pollution...", "section extended-test");
+        let pollutionImpactDetected = false;
+        let testDiv = null; // Para o teste de innerHTML
+
+        // --- Teste 1: innerHTML ---
+        log("[POLLUTE-TARGETED] Testing innerHTML pollution...", "info extended-test");
+        const xssPayload = "<img src=x onerror=\"log(\'!!!! [IMPACT] XSS via innerHTML Pollution Triggered !!!!\', \'danger impact\'); sendVulnerabilityNotification({vulnerability: \'PROTOTYPE_POLLUTION_INNERHTML_TRIGGERED\', details: \'onerror executed\'});\">";
+        let originalInnerHTMLDescriptor = Object.getOwnPropertyDescriptor(Object.prototype, 'innerHTML'); // Tentar guardar descritor original
+
         try {
-            const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
-            const writeValue = 0xEE;
-            const offsets = [-10, -1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 10];
-            const readOffsets = [-5, 0, 5, bufferSize - 1, bufferSize, bufferSize + 5, bufferSize + 8, bufferSize + 16];
+            log(`[POLLUTE-TARGETED] Defining Object.prototype.innerHTML...`, "info");
+            // Usar defineProperty pode ser mais robusto que atribuição direta
+             try {
+                 Object.defineProperty(Object.prototype, 'innerHTML', {
+                     value: xssPayload,
+                     writable: true,
+                     enumerable: false, // Tentar não ser enumerável
+                     configurable: true // Precisa ser configurável para poder deletar depois
+                 });
+                 log("[POLLUTE-TARGETED] defineProperty for innerHTML potentially successful.", "warning");
+             } catch(e_define) {
+                 log(`[POLLUTE-TARGETED] defineProperty failed: ${e_define.message}. Falling back to direct assignment...`, "warning");
+                 Object.prototype.innerHTML = xssPayload; // Tenta fallback
+             }
 
-            for (const writeOffset of offsets) {
-                log(`[OOB-AGG] Attempting write 0x${writeValue.toString(16)} at offset ${writeOffset}...`, "info");
-                let oobWriteSuccess = false;
-                try {
-                    view[writeOffset] = writeValue;
-                    log(`⚠️ OOB write at offset ${writeOffset} successful (no error).`, "warning");
-                    potentialVulnsFound.oobWrite = true; oobWriteSuccess = true;
-                } catch (writeError) { log(`✅ OOB write at offset ${writeOffset} blocked/error: ${writeError.message}`, "success"); }
+            await new Promise(r => setTimeout(r, 50));
 
-                if(oobWriteSuccess || (writeOffset >= 0 && writeOffset < bufferSize)) {
-                    for (const readOffset of readOffsets) {
-                        try {
-                            await new Promise(resolve => setTimeout(resolve, 50));
-                            const readValue = view[readOffset];
-                            const readValueHex = (readValue !== undefined ? `0x${readValue.toString(16)}` : 'undefined');
-                            log(`[OOB-AGG] Read ${readValueHex} at offset ${readOffset} after write at ${writeOffset}.`, "info");
+            // Tentativa de Trigger
+            log("[POLLUTE-TARGETED] Attempting to trigger XSS via innerHTML...", "info");
+            testDiv = document.createElement('div');
+            let testObj = {};
 
-                            // Detecção de Corrupção
-                            if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && (writeOffset >= bufferSize || writeOffset < 0)) {
-                                const detailMsg = `Wrote at ${writeOffset}, read ${readValueHex} at IN-BOUNDS offset ${readOffset}.`;
-                                log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 Potential OOB Write Corruption: ${detailMsg}</span>`, "danger");
-                                sendVulnerabilityNotification({ vulnerability: 'OOB_WRITE_CORRUPTION', details: detailMsg });
-                            }
+            // Verificar se a propriedade foi herdada
+            if (testObj.innerHTML === xssPayload) {
+                 log("[POLLUTE-TARGETED] testObj inherited innerHTML property value!", "warning impact");
+                 // Agora, tentar usar isso de forma que *poderia* levar a XSS
+                 // NOTA: Isso é altamente improvável de funcionar em browsers modernos
+                 // pois eles validam a atribuição a Element.innerHTML.
+                 // Mas fazemos a tentativa para registrar.
+                 try {
+                     log("[POLLUTE-TARGETED] Setting testDiv.innerHTML = {}.innerHTML...", "info");
+                     testDiv.innerHTML = testObj.innerHTML; // Tenta atribuir o valor herdado
+                     log("[POLLUTE-TARGETED] Assignment done. Check console/UI for XSS alert (unlikely).", "warning");
+                      // Se o onerror no payload disparar, ele chamará log() e sendVulnerabilityNotification()
+                 } catch(e_set) {
+                     log(`[POLLUTE-TARGETED] Error setting testDiv.innerHTML: ${e_set.message}`, "success"); // Erro aqui é esperado
+                 }
+            } else {
+                 log("[POLLUTE-TARGETED] testObj did NOT inherit innerHTML value. Pollution might have failed.", "success");
+            }
 
-                            // Demonstração de Info Leak Controlado
-                            if (readOffset >= bufferSize && readValue !== undefined) {
-                                let leakedBytes = []; const bytesToRead = 8;
-                                for (let i = 0; i < bytesToRead; i++) {
-                                    try {
-                                        const leakOffset = readOffset + i;
-                                        leakedBytes.push(view[leakOffset]?.toString(16).padStart(2, '0') ?? '??');
-                                    } catch (leakReadError) { leakedBytes.push('ERR'); break; }
-                                }
-                                const leakHex = leakedBytes.join(' ');
-                                const detailMsg = `Read ${readValueHex} at OOB offset ${readOffset}. Following ${bytesToRead} bytes: ${leakHex}`;
-                                log(`<span class="poc-potential impact">💧 Potential Info Leak: ${detailMsg}</span>`, "warning impact");
-                                if(!this.infoLeakNotified) {
-                                     sendVulnerabilityNotification({ vulnerability: 'OOB_INFO_LEAK_ADJACENT', details: detailMsg });
-                                     this.infoLeakNotified = true;
-                                }
-                            }
-                        } catch (readError) { log(`⚠️ Error reading at offset ${readOffset}: ${readError.message}`, "warning"); }
-                    } // end read loop
-                } // end if write success
-                await new Promise(resolve => setTimeout(resolve, 100));
-            } // end write loop
-            log("[OOB-AGG] Completed OOB write / info leak testing.", "info");
-        } catch (e) { log(`❌ Test error (OOB Write/Leak): ${e.message}`, "danger"); console.error(e); }
-         this.infoLeakNotified = false; // Garante reset no final
+        } catch (e_pollute) {
+            log(`❌ Error during innerHTML pollution test: ${e_pollute.message}`, "danger extended-test");
+        } finally {
+            // Limpeza CRUCIAL
+            log("[POLLUTE-TARGETED] Cleaning up Object.prototype.innerHTML...", "info");
+            try {
+                 if (originalInnerHTMLDescriptor) {
+                     Object.defineProperty(Object.prototype, 'innerHTML', originalInnerHTMLDescriptor); // Tenta restaurar descritor
+                     log("[POLLUTE-TARGETED] Restored original innerHTML descriptor.", "info");
+                 } else {
+                     delete Object.prototype.innerHTML; // Fallback para delete
+                     log("[POLLUTE-TARGETED] Deleted innerHTML from prototype.", "info");
+                 }
+            } catch (e_clean) {
+                 log(`⚠️ Error cleaning innerHTML: ${e_clean.message}`, "warning");
+            }
+            try { if(testDiv) testDiv.remove(); } catch(e){} // Limpa div de teste
+        }
+
+        await new Promise(r => setTimeout(r, 500)); // Pausa
+
+        // --- Teste 2: toString ---
+        log("[POLLUTE-TARGETED] Testing toString pollution...", "info extended-test");
+        let originalToString = Object.prototype.toString; // Backup
+        let toStringTriggered = false;
+        try {
+            log(`[POLLUTE-TARGETED] Defining Object.prototype.toString...`, "info");
+            Object.prototype.toString = function() {
+                 log("!!!! [IMPACT] Polluted toString called !!!!", "danger impact");
+                 console.log("!!!! [IMPACT] Polluted toString called !!!!");
+                 if (!toStringTriggered) { // Envia notificação só uma vez
+                     sendVulnerabilityNotification({ vulnerability: 'PROTOTYPE_POLLUTION_TOSTRING_CALLED', details: 'Polluted toString was executed.' });
+                 }
+                 toStringTriggered = true;
+                 return 'Polluted_Return_Value'; // Valor de retorno diferente
+            };
+             await new Promise(r => setTimeout(r, 50));
+
+            log("[POLLUTE-TARGETED] Calling {}.toString() to check...", "info");
+            let result = {}.toString(); // Chama a toString poluída
+            log(`[POLLUTE-TARGETED] Result of {}.toString(): ${result}`, "info");
+
+            if (toStringTriggered && result === 'Polluted_Return_Value') {
+                log("[POLLUTE-TARGETED] toString pollution SUCCESSFUL: Function executed and returned polluted value!", "danger impact");
+                pollutionImpactDetected = true;
+            } else if (toStringTriggered) {
+                 log("[POLLUTE-TARGETED] toString pollution SUCCESSFUL: Function executed but return value differs? Investigate.", "warning impact");
+                 pollutionImpactDetected = true;
+            } else if (result === 'Polluted_Return_Value') {
+                 log("[POLLUTE-TARGETED] toString pollution WARNING: Changed return value but function log didn't trigger?", "warning");
+            } else {
+                 log("[POLLUTE-TARGETED] toString pollution likely failed or was prevented.", "success");
+            }
+
+        } catch (e_pollute) {
+            log(`❌ Error during toString pollution test: ${e_pollute.message}`, "danger extended-test");
+        } finally {
+             // Limpeza CRUCIAL
+            log("[POLLUTE-TARGETED] Cleaning up Object.prototype.toString...", "info");
+            try {
+                 Object.prototype.toString = originalToString; // Restaura a original
+                 log("[POLLUTE-TARGETED] Restored original toString.", "info");
+            } catch(e_clean) {
+                 log(`⚠️ Error cleaning toString: ${e_clean.message}`, "warning");
+            }
+        }
+
+        log(`[POLLUTE-TARGETED] Completed Targeted Prototype Pollution tests. Impact detected: ${pollutionImpactDetected}`, pollutionImpactDetected ? "danger" : "info");
     },
 
-    "test_oob_metadata": async function() { /* ... código idêntico anterior ... */ },
-    "test_oob_crash_probe": async function() { /* ... código idêntico anterior ... */ },
-    "csp_bypass_aggressive": async function() { /* ... código idêntico anterior ... */ },
+    // Testes UAF/TC (Mantidos como placeholders do Funcional.html)
+    "uaf_basic": async function() { /* ... Placeholder ... */ },
+    "type_confusion_basic": async function() { /* ... Placeholder ... */ },
 
-    // --- NOVOS TESTES DE DETECÇÃO ---
-    "uaf_basic": async function() {
-        log("[UAF-BASIC] Attempting basic Use-After-Free scenarios...", "section extended-test");
-        log("INFO: Generic tests, may not trigger specific UAFs.", "info");
-        // Cenário 1: DOM Node
-        try {
-            log("[UAF-BASIC] Scenario 1: DOM Node Ref After Removal", "extended-test");
-            let p = document.createElement('div'), c = document.createElement('span'); p.appendChild(c); document.body.appendChild(p);
-            let cRef = c; p.removeChild(c); document.body.removeChild(p);
-            try { new ArrayBuffer(10*1024*1024); } catch(e) {} // Hint GC
-            await new Promise(r => setTimeout(r, 500));
-            log(`[UAF-BASIC] Accessing childRef.tagName...`, "info"); let tn = cRef.tagName;
-            log(`[UAF-BASIC] childRef.tagName = ${tn}. No immediate error.`, "success");
-            log(`[UAF-BASIC] Calling childRef.getBoundingClientRect()...`, "info"); cRef.getBoundingClientRect();
-            log(`[UAF-BASIC] Call OK. No immediate error.`, "success"); cRef = null;
-        } catch (e) { log(`❌ Error UAF Scenario 1: ${e.message}. Investigate.`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'UAF_BASIC_SCENARIO1_ERROR', details: e.message }); }
-        // Cenário 2: Placeholder
-        log("[UAF-BASIC] Scenario 2: ArrayBuffer/TypedArray (Placeholder - complex)", "extended-test info");
-        log("[UAF-BASIC] Completed basic UAF tests.", "extended-test info");
-    },
-
-    "type_confusion_basic": async function() {
-        log("[TYPE-CONFUSION] Attempting basic Type Confusion scenarios...", "section extended-test");
-        log("INFO: Generic tests, may not trigger specific type confusions.", "info");
-        // Cenário 1: API DOM
-        try {
-            log("[TYPE-CONFUSION] Scenario 1: Incorrect type to DOM API", "extended-test");
-            log(`[TYPE-CONFUSION] Sending self via postMessage...`, "info"); try { window.postMessage(window, "*"); log(`[TYPE-CONFUSION] postMessage(window) OK.`, "success"); } catch(e) { log(`[TYPE-CONFUSION] postMessage(window) threw: ${e.message}`, "success"); }
-            let fakeEvent = { target: document.body, type: "click" }; log(`[TYPE-CONFUSION] Dispatching fake event...`, "info"); try { document.dispatchEvent(fakeEvent); log(`[TYPE-CONFUSION] dispatchEvent(fakeEvent) OK.`, "success"); } catch(e) { log(`[TYPE-CONFUSION] dispatchEvent(fakeEvent) threw: ${e.message}`, "success"); }
-        } catch (e) { log(`❌ Error Type Confusion Scenario 1: ${e.message}. Investigate.`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO1_ERROR', details: e.message }); }
-        // Cenário 2: Primitivo vs Objeto
-        try {
-            log("[TYPE-CONFUSION] Scenario 2: Primitive vs Object", "extended-test");
-            let nP = 5, nO = new Number(5); log(`[TYPE-CONFUSION] Calling nP.toFixed(nO)...`, "info"); try { let r = nP.toFixed(nO); log(`[TYPE-CONFUSION] nP.toFixed(nO) = ${r}.`, "success"); } catch(e) { log(`[TYPE-CONFUSION] nP.toFixed(nO) threw: ${e.message}`, "danger"); }
-        } catch(e) { log(`❌ Error Type Confusion Scenario 2: ${e.message}. Investigate.`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO2_ERROR', details: e.message }); }
-        log("[TYPE-CONFUSION] Completed basic Type Confusion tests.", "extended-test info");
-    },
-
-    // --- Executor Principal Atualizado ---
+    // Executor Principal Atualizado para incluir novo teste
     "all_tests": async function() {
-        log("=== Running All Tests (OOB, CSP, UAF Basic, Type Confusion Basic) ===", "section");
+        log("=== Running All Tests (Incl. Targeted Pollution) ===", "section"); // Nome atualizado
         await aggressiveTests["oob_write_aggressive"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000));
-        if (potentialVulnsFound.oobWrite) { await aggressiveTests["test_oob_metadata"](); await new Promise(r => setTimeout(r, 1000)); await aggressiveTests["test_oob_crash_probe"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000)); }
+        if (potentialVulnsFound.oobWrite) { await aggressiveTests["oob_impact_tests"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000)); }
         else { log("Skipping OOB impact tests.", "warning"); }
         await aggressiveTests["csp_bypass_aggressive"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
-        await aggressiveTests["uaf_basic"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
-        await aggressiveTests["type_confusion_basic"]();
+        // Chama o novo teste de poluição direcionada
+        await aggressiveTests["prototype_pollution_targeted"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
+        await aggressiveTests["uaf_basic"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000)); // Chama placeholder
+        await aggressiveTests["type_confusion_basic"](); // Chama placeholder
         log("\n=== All Tests Completed. Review logs & endpoint. ===", "section");
     },
-    "oob_impact_tests": async function() { /* ... código idêntico anterior ... */ }
+    // Executor OOB Impact (Completo e inalterado)
+    "oob_impact_tests": async function() { /* ... Código completo ... */ }
 };
+// Adiciona a nova função ao objeto para seleção individual
+aggressiveTests["prototype_pollution_targeted"] = aggressiveTests.prototype_pollution_targeted;
+
 
 // ======================
-// Test Runner (Atualizado)
+// Test Runner (Inalterado do Funcional.html)
 // ======================
-async function runSelectedTest() {
-    const testSelector = document.getElementById('testSelector');
-    const selectedTest = testSelector.value;
-    if (selectedTest === "oob_impact_tests" && !potentialVulnsFound.oobWrite) { log("Warning: Run main OOB test first for best results.", "warning"); }
-    clearLog(); log(`=== Starting Test: ${selectedTest} ===`, "section");
-    if (aggressiveTests[selectedTest]) { await aggressiveTests[selectedTest](); log(`\n=== Test Execution for "${selectedTest}" Completed. Review logs & endpoint. ===`, "section"); }
-    else { log(`Error: Test "${selectedTest}" not found.`, "danger"); }
-}
+async function runSelectedTest() { /* ... código idêntico ... */ }
+
+// **IMPORTANTE:** Cole aqui o código COMPLETO das funções que marquei como /* ... */
+// (log, clearLog, sendVulnerabilityNotification, demonstrate*, oob_write_aggressive,
+// test_oob_metadata, test_oob_crash_probe, csp_bypass_aggressive, oob_impact_tests, all_tests, runSelectedTest)
+// a partir do seu arquivo Funcional.html ou da minha resposta #46.
+// As funções uaf_basic e type_confusion_basic também devem ser coladas, contendo apenas os placeholders.
 </script>
 </body>
 </html>
