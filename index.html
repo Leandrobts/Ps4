@@ -2,10 +2,10 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes Isolados e Robustos (Corrigido)</title>
+    <title>PS4 WebKit Exploit - Testes Isolados e Robustos (Revisado 3)</title>
 </head>
 <body>
-    <h1>Testes Isolados e Robustos (Corrigido)</h1>
+    <h1>Testes Isolados e Robustos (Revisado 3)</h1>
     <div id="output"></div>
 
     <h2>Teste 1: Primitiva de Modificação de Propriedades (Robustos)</h2>
@@ -44,7 +44,7 @@
         const log = (message, type = 'info') => {
             const outputDiv = document.getElementById('output');
             if (outputDiv) {
-                outputDiv.innerHTML += `<span style="color: <span class="math-inline">\{type \=\=\= 'error' ? 'red' \: type \=\=\= 'warning' ? 'orange' \: 'blue'\};"\></span>{new Date().toLocaleTimeString()} - ${message}\n</span>`;
+                outputDiv.innerHTML += `<span style="color: ${type === 'error' ? 'red' : type === 'warning' ? 'orange' : 'blue'};">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
             } else {
                 console.error('Elemento #output não encontrado!');
             }
@@ -75,9 +75,54 @@
             document.getElementById('readCanvasButton').setAttribute('onclick', `const canvas = document.getElementById('rwCanvas1'); const ctx = canvas.getContext('2d'); if (ctx) { try { const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height); document.getElementById('readCanvasResult').textContent = 'Lido área (2x1) RGBA: ' + Array.from(new Uint8Array(imageData.data.buffer)).join(','); } catch (e) { document.getElementById('readCanvasResult').textContent = 'Erro ao ler área: ' + e; } } else { document.getElementById('readCanvasResult').textContent = 'Erro ao obter contexto para leitura de área.'; }`);
 
             const patternButton = document.getElementById('patternCanvasButton');
-            patternButton.setAttribute('onclick', function() {
+            const patternResult = document.getElementById('patternCanvasResult');
+            patternButton.onclick = function() {
                 const canvas = document.getElementById('patternCanvas');
                 const ctx = canvas.getContext('2d');
-                const resultElement = document.getElementById('patternCanvasResult');
                 if (ctx) {
-                    const writeData = new Uint8Array([255, 0, 0
+                    const writeData = new Uint8Array([255, 0, 0, 255, 0, 0, 255, 255]);
+                    const imageDataWrite = new ImageData(new Uint8ClampedArray(writeData.buffer), canvas.width, canvas.height);
+                    ctx.putImageData(imageDataWrite, 0, 0);
+                    patternResult.textContent = 'Padrão escrito (vermelho, azul).';
+                    setTimeout(() => {
+                        const readImageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+                        const readArray = Array.from(new Uint8Array(readImageData.data.buffer));
+                        patternResult.textContent += '\\nLido (RGBA): ' + readArray.join(',');
+                    }, 100);
+                } else {
+                    patternResult.textContent = 'Erro ao obter contexto para padrão.';
+                }
+            };
+        }
+
+        let globalLeakedBuffer;
+        let globalLeakedObject;
+
+        function attemptMemoryReadRobust() {
+            log("\n--- Teste 3: Tentativa de Primitiva de Leitura de Memória (Exploratória e Robustos) ---", 'critical');
+            prepareData();
+
+            globalLeakedBuffer = new ArrayBuffer(8);
+            const view = new Uint8Array(globalLeakedBuffer);
+            view[0] = 0x41; view[1] = 0x42;
+
+            globalLeakedObject = { secret1: "AAA", secret2: "BBB" };
+
+            document.getElementById('memoryReadButton1').setAttribute('onclick', `try { let temp = new Uint8Array(globalLeakedBuffer); document.getElementById('memoryReadResult1').textContent = 'Tentativa leitura AB (indireta - global): ' + temp[0] + ',' + temp[1]; temp = null; } catch (e) { document.getElementById('memoryReadResult1').textContent = 'Erro: ' + e; }`);
+            document.getElementById('memoryReadButton2').setAttribute('onclick', `try { document.getElementById('memoryReadResult2').textContent = 'Tentativa leitura obj (indireta - global): ' + globalLeakedObject.secret1 + ',' + globalLeakedObject.secret2; } catch (e) { document.getElementById('memoryReadResult2').textContent = 'Erro: ' + e; }`);
+            document.getElementById('memoryReadButton3').setAttribute('onclick', `try { throw new Error('Teste de Erro com Dados Sensíveis: ' + globalLeakedBuffer); } catch (e) { document.getElementById('memoryReadResult3').textContent = 'Informação de erro (global - pode vazar dados): ' + e.message; }`);
+            document.getElementById('memoryReadButton4').setAttribute('onclick', `try { const base64 = btoa(String.fromCharCode.apply(null, new Uint8Array(globalLeakedBuffer))); document.getElementById('memoryReadResult4').textContent = 'Tentativa leitura com btoa (global): ' + base64; const decoded = atob(base64); document.getElementById('memoryReadResult4').textContent += '\\nDecodificado: ' + decoded.charCodeAt(0) + ',' + decoded.charCodeAt(1); } catch (e) { document.getElementById('memoryReadResult4').textContent = 'Erro btoa/atob (global): ' + e.message; }`);
+        }
+
+        function mainExploit() {
+            log("mainExploit() iniciado.", 'critical');
+            testPropertyModificationRobust();
+            testCanvasRWRobust();
+            attemptMemoryReadRobust();
+            log("mainExploit() concluído.", 'critical');
+        }
+
+        mainExploit();
+    </script>
+</body>
+</html>
