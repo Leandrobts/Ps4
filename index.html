@@ -2,13 +2,13 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Testes Combinados (Heap & CSP)</title>
+    <title>PS4 WebKit Exploit - Testes de Bypass CSP</title>
     <style>
         body { background-color: lightblue; }
     </style>
     </head>
 <body>
-    <h1>Testes Combinados (Heap & CSP)</h1>
+    <h1>Testes de Bypass CSP</h1>
     <div id="output"></div>
     <iframe id="cspFrame" sandbox="allow-scripts"></iframe>
     <script>
@@ -21,10 +21,6 @@
             }
         };
 
-        let heapSprayArrays = [];
-        const heapSpraySize = 1000; // Número de alocações para o Heap Spray
-        const sprayElementSize = 0x1000; // Tamanho de cada elemento alocado (4KB)
-
         function prepareData() {
             log("Função prepareData() iniciada.", 'warning');
             let bufferSize = 64;
@@ -34,69 +30,53 @@
             return { buffer, view, bufferSize };
         }
 
-        function performOOBWriteIsolated(view, bufferSize, offset, value, testName) {
-            log(`\n--- Teste de Escrita OOB Isolado: ${testName} (Offset ${offset}, Valor 0x${value.toString(16)}) ---`, 'info');
-            try {
-                const dataView = new DataView(view.buffer);
-                log(`performOOBWriteIsolated (${testName}): DataView criado.`);
-                log(`performOOBWriteIsolated (${testName}): Tentativa de escrever 0x${value.toString(16)} no offset ${offset}.`);
-                if (offset >= 0 && offset < bufferSize) {
-                    dataView.setUint8(offset, value);
-                    log(`performOOBWriteIsolated (${testName}): Escrita realizada com sucesso.`);
-                } else {
-                    log(`performOOBWriteIsolated (${testName}): Offset fora dos limites.`, 'warning');
-                }
-            } catch (writeError) {
-                log(`performOOBWriteIsolated (${testName}): Erro durante a escrita: ${writeError}`, 'error');
-            }
-        }
-
-        function triggerHeapSpray() {
-            log("\n--- Iniciando Heap Spray ---", 'critical');
-            try {
-                for (let i = 0; i < heapSpraySize; i++) {
-                    const sprayArray = new Array(sprayElementSize / 4); // Aloca array de inteiros
-                    for (let j = 0; j < sprayArray.length; j++) {
-                        sprayArray[j] = 0x41414141; // Preenche com um padrão
-                    }
-                    heapSprayArrays.push(sprayArray);
-                    if (i % 100 === 0) {
-                        log(`Heap Spray: Alocado ${i + 1}/${heapSpraySize} objetos.`);
-                    }
-                }
-                log(`Heap Spray concluído: ${heapSprayArrays.length} objetos alocados.`);
-            } catch (error) {
-                log(`Erro durante o Heap Spray: ${error}`, 'error');
-            }
-        }
-
         function testCSPBypassAttempts() {
             log("\n--- Testando Possíveis Bypasses de CSP ---", 'critical');
             try {
-                // 1. Tentativa de executar código inline via atributo event handler
-                const inlineEventHandler = document.createElement('div');
-                inlineEventHandler.setAttribute('onclick', 'alert("CSP Bypass?")');
-                inlineEventHandler.textContent = 'Clique para testar CSP';
-                document.body.appendChild(inlineEventHandler);
+                // 1. Tentativa com 'onclick' (sabemos que provavelmente falha)
+                const inlineEventHandlerClick = document.createElement('div');
+                inlineEventHandlerClick.setAttribute('onclick', 'alert("CSP Bypass? - Onclick")');
+                inlineEventHandlerClick.textContent = 'Clique para testar CSP (Onclick)';
+                document.body.appendChild(inlineEventHandlerClick);
                 log("Teste CSP: Elemento com event handler 'onclick' injetado.");
 
-                // 2. Tentativa de injetar uma tag <script> com conteúdo inline (pode ser bloqueado por 'unsafe-inline')
-                const inlineScript = document.createElement('script');
-                inlineScript.textContent = 'try { console.log("Inline script test"); } catch (e) { log("Erro inline script: " + e, "warning"); }';
-                document.body.appendChild(inlineScript);
-                log("Teste CSP: Tag <script> com código inline injetada.");
+                // 2. Tentativa com 'onmouseover'
+                const inlineEventHandlerMouseover = document.createElement('div');
+                inlineEventHandlerMouseover.setAttribute('onmouseover', 'alert("CSP Bypass? - Onmouseover")');
+                inlineEventHandlerMouseover.textContent = 'Passe o mouse para testar CSP (Onmouseover)';
+                document.body.appendChild(inlineEventHandlerMouseover);
+                log("Teste CSP: Elemento com event handler 'onmouseover' injetado.");
 
-                // 3. Tentativa de manipular o 'sandbox' de um iframe (algumas configurações podem ser vulneráveis)
+                // 3. Tentativa de injetar <script> com src (pode ser bloqueado se a fonte não estiver na whitelist)
+                const externalScript = document.createElement('script');
+                externalScript.src = 'data:text/javascript,console.log("External script test");'; // Usando data URI para teste
+                document.body.appendChild(externalScript);
+                log("Teste CSP: Tag <script> com src (data URI) injetada.");
+
+                // 4. Tentativa de manipular o 'sandbox' do iframe (enviando e recebendo mensagens)
                 const cspFrame = document.getElementById('cspFrame');
                 if (cspFrame) {
+                    const message = { type: 'testCSP', data: 'hello from main window' };
+                    cspFrame.contentWindow.postMessage(JSON.stringify(message), '*');
+                    window.addEventListener('message', (event) => {
+                        try {
+                            const received = JSON.parse(event.data);
+                            log(`Teste CSP (iframe): Mensagem recebida: ${JSON.stringify(received)}`);
+                        } catch (e) {
+                            log(`Teste CSP (iframe): Mensagem recebida (não JSON): ${event.data}`);
+                        }
+                    });
+                    log("Teste CSP (iframe): Mensagem postada para iframe.");
+
+                    // Tentativa de injetar script dentro do iframe (pode ser permitido pelo 'sandbox')
                     try {
-                        cspFrame.contentWindow.postMessage('test', '*');
-                        window.addEventListener('message', (event) => {
-                            log(`Teste CSP (iframe): Mensagem recebida: ${event.data}`);
-                        });
-                        log("Teste CSP (iframe): Mensagem postada para iframe.");
+                        const iframeDoc = cspFrame.contentDocument || cspFrame.contentWindow.document;
+                        const scriptInIframe = iframeDoc.createElement('script');
+                        scriptInIframe.textContent = 'console.log("Script dentro do iframe"); parent.postMessage({ type: "iframeReply", data: "iframe says hello" }, "*");';
+                        iframeDoc.head.appendChild(scriptInIframe);
+                        log("Teste CSP (iframe): Tentativa de injetar script dentro do iframe.");
                     } catch (e) {
-                        log(`Erro ao interagir com iframe: ${e}`, 'warning');
+                        log(`Erro ao injetar script no iframe: ${e}`, 'warning');
                     }
                 }
 
@@ -107,26 +87,8 @@
 
         function mainExploit() {
             log("mainExploit() iniciado.", 'critical');
-            const data = prepareData();
-            if (data) {
-                log("mainExploit(): prepareData() retornou dados.");
-                const { view, bufferSize } = data;
-
-                // Realiza alguns testes OOB básicos (para manter a linha de investigação principal)
-                performOOBWriteIsolated(view, bufferSize, 0, 0xAA, "OOB Test 1");
-                performOOBWriteIsolated(view, bufferSize, 8, 0xBB, "OOB Test 2");
-
-                // Inicia o Heap Spray
-                triggerHeapSpray();
-
-                // Tenta alguns bypasses de CSP
-                testCSPBypassAttempts();
-
-                log(`\nmainExploit(): Concluído.`);
-
-            } else {
-                log("mainExploit(): prepareData() falhou.", 'error');
-            }
+            prepareData(); // Chamando a função prepareData CORRETA
+            testCSPBypassAttempts();
             log("mainExploit() concluído.", 'critical');
         }
 
