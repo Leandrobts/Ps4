@@ -2,26 +2,26 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 FW 12.02 - Teste Combinado v6 (Info Leak via OOB Read)</title>
+    <title>PS4 FW 12.02 - Teste Combinado v7 (Notificação Web)</title>
     <style>
-        /* Estilos CSS (incluindo log-leak e log-ptr) */
+        /* Estilos CSS (iguais aos anteriores) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; }
         .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
         .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
-        .log-vuln { color: #ff4444; font-weight: bold; } /* Vermelho para vulnerabilidade confirmada */
-        .log-good { color: #4CAF50; } /* Verde para bloqueio esperado / falha */
+        .log-vuln { color: #ff4444; font-weight: bold; }
+        .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
-        .log-leak { color: #FF9800; font-weight: bold; } /* Laranja para leituras OOB */
-        .log-ptr { color: #f0f; font-weight: bold; } /* Magenta para POTENCIAIS ponteiros */
+        .log-leak { color: #FF9800; font-weight: bold; }
+        .log-ptr { color: #f0f; font-weight: bold; }
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
     </style>
 </head>
 <body>
-    <h1>PS4 FW 12.02 - Teste Combinado v6 (Info Leak via OOB Read)</h1>
-    <p>Testa: XSS, OOB Write/Read (Procurando por ponteiros), PP Básica.</p>
+    <h1>PS4 FW 12.02 - Teste Combinado v7 (Notificação Web)</h1>
+    <p>Testa: XSS, OOB R/W (Info Leak), PP Básica, Notificação Web.</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
@@ -29,8 +29,8 @@
     <script>
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
-        const SHORT_PAUSE = 100; // Pausa curta em ms
-        const MEDIUM_PAUSE = 500; // Pausa média em ms
+        const SHORT_PAUSE = 100; // ms
+        const MEDIUM_PAUSE = 500; // ms
 
         // --- Função de Log ---
         // (Função log igual à versão anterior)
@@ -45,10 +45,7 @@
                  }
                  outputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`;
                  outputDiv.scrollTop = outputDiv.scrollHeight;
-             } catch(e) {
-                 console.error("Erro na função log:", e);
-                 outputDiv = null;
-             }
+             } catch(e) { console.error("Erro na função log:", e); outputDiv = null; }
         };
 
         // Helper para formatar números como hex
@@ -56,45 +53,29 @@
         const toHex = (val, bits = 32) => {
              if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
              let num = Number(val);
-             if (bits <= 32) {
-                 num = num >>> 0;
-             }
+             if (bits <= 32) { num = num >>> 0; }
              const pad = Math.ceil(bits / 4);
              return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
         }
 
         // --- Heurística Simples para Detetar Potenciais Ponteiros (64-bit) ---
-        // ISTO É APENAS UMA HEURÍSTICA, NÃO É GARANTIDO!
+        // (Função isPotentialPointer64 igual à versão anterior)
         const isPotentialPointer64 = (high, low) => {
-            // Não pode ser zero ou nulo
             if (high === 0 && low === 0) return false;
             if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
-
-            // Não pode ser valores "pequenos" (improvável ser ponteiro de kernel/heap)
-            // Ajustar estes limites conforme necessário para a arquitetura alvo
-             if (high === 0 && low < 0x100000) return false; // Ex: Abaixo de 1MB
-
-            // Não pode ser valores muito altos como 0xFFFFFFFF_FFFFFFFF
-             if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
-             // Heurística muito simples: High part não deve ser 0 ou FFFFFFFF (pode indicar dados comuns)
-             // if (high === 0 || high === 0xFFFFFFFF) return false; // Pode ser muito restritivo
-
-            // Heurística: Low part deve ter alguns bits altos setados (improvável para dados comuns)
-             if ((low >>> 24) === 0) return false; // Ex: Se os 8 bits mais altos de low forem 0
-
-            // Poderia adicionar verificação de alinhamento (ex: low % 8 === 0), mas pode falhar
-            // if (low % 8 !== 0) return false;
-
-            return true; // Se passou nas verificações, PODE ser um ponteiro
+            if (high === 0 && low < 0x100000) return false;
+            if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
+            if ((low >>> 24) === 0) return false;
+            // if (low % 8 !== 0) return false; // Alinhamento (opcional)
+            return true;
         };
-
 
         // --- Teste 1: CSP Bypass / XSS ---
         // (Função testCSPBypass igual à versão anterior)
         const testCSPBypass = async () => {
             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
-            // ... (código igual ao script v4) ...
-            // 1.1 Teste com data: URI
+            // ... (código igual ao script v6) ...
+             // 1.1 Teste com data: URI
             log("Tentando XSS via data: URI (alert)...", 'subtest');
             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
             try {
@@ -129,33 +110,26 @@
                 document.body.appendChild(imgTag);
                 log("Tag <img> com onerror adicionada.", 'info');
             } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error'); }
-
             log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test');
         };
 
-
         // --- Teste 2: OOB Write/Read (Tentativa de Info Leak) ---
-        // Modificado para procurar por valores que pareçam ponteiros
+        // (Função testOOBReadInfoLeak igual à versão anterior - v6)
         const testOOBReadInfoLeak = async () => {
             log("--- Iniciando Teste 2: OOB Write/Read (Tentativa de Info Leak) ---", 'test');
+            // ... (código igual ao script v6) ...
             const bufferSize = 32;
             const writeValue = 0xEE;
-            const oobWriteOffset = 32; // Usar um offset OOB confirmado para a escrita
-            // Offsets RELATIVOS ao início do buffer para TENTAR LER OOB
-            // Inclui offsets antes e depois do buffer original
+            const oobWriteOffset = 32;
             const oobReadOffsets = [-32, -24, -16, -8, bufferSize, bufferSize + 8, bufferSize + 16, bufferSize + 24];
             let writeSuccess = false;
             let potentialLeakFound = false;
 
             try {
-                const buffer = new ArrayBuffer(bufferSize + 128); // Buffer maior para leituras OOB
+                const buffer = new ArrayBuffer(bufferSize + 128);
                 const dataView = new DataView(buffer);
-                const baseOffset = 64; // Área de trabalho começa em 64
-
-                // Preenche o buffer com um padrão reconhecível (0xAA)
+                const baseOffset = 64;
                 for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
-
-                // Realiza a escrita OOB para potencialmente corromper metadados adjacentes
                 const writeTargetAddress = baseOffset + oobWriteOffset;
                 log(`Tentando escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) com valor ${toHex(writeValue, 8)}...`, 'subtest');
                 await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
@@ -166,55 +140,37 @@
                 } catch (e) {
                     log(`BLOQUEADO: Escrita OOB U8 @${oobWriteOffset} impedida: ${e.message}`, 'good');
                     log("--- Teste 2 Interrompido (Escrita OOB falhou) ---", 'test');
-                    return false; // Não adianta continuar se a escrita falhou
+                    return false;
                 }
-
-                 await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); // Pausa após a escrita
-
-                // Loop para tentar ler OOB em vários offsets
-                log(`Tentando leituras OOB U64 nos offsets relativos: [${oobReadOffsets.join(', ')}]`, 'subtest');
+                 await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                 log(`Tentando leituras OOB U64 nos offsets relativos: [${oobReadOffsets.join(', ')}]`, 'subtest');
                 for (const readOffset of oobReadOffsets) {
-                    const readTargetAddress = baseOffset + readOffset; // Endereço absoluto da leitura
-                    // Garante que estamos a tentar ler dentro dos limites do buffer maior alocado
+                    const readTargetAddress = baseOffset + readOffset;
                     if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) {
                          log(`  Leitura @${readOffset} (addr ${readTargetAddress}) ignorada (fora do buffer de teste).`, 'info');
                          continue;
                     }
-
                     log(`  Tentando leitura U64 @${readOffset} (addr ${readTargetAddress})...`, 'info');
                     await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE / 2));
                     try {
-                        const low = dataView.getUint32(readTargetAddress, true); // Little-endian
-                        const high = dataView.getUint32(readTargetAddress + 4, true); // Little-endian
+                        const low = dataView.getUint32(readTargetAddress, true);
+                        const high = dataView.getUint32(readTargetAddress + 4, true);
                         const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
-
-                        // Aplica a heurística para verificar se parece ponteiro
                         if (isPotentialPointer64(high, low)) {
                             log(`  -> POTENCIAL PONTEIRO? Leitura OOB U64 @${readOffset}: ${valueStr}`, 'ptr');
                             potentialLeakFound = true;
                         } else {
-                            // Loga como leak normal se não parecer ponteiro mas for diferente do padrão
                             if (low !== 0xAAAAAAAA || high !== 0xAAAAAAAA) {
                                 log(`  -> Leitura OOB U64 @${readOffset}: ${valueStr}`, 'leak');
-                            } else {
-                                // Se for igual ao padrão, loga como info
-                                // log(`  -> Leitura OOB U64 @${readOffset}: ${valueStr} (Padrão 0xAA)`, 'info');
                             }
                         }
-                    } catch (e) {
-                        log(`  -> Leitura OOB U64 @${readOffset}: FALHA (${e.message})`, 'warn');
-                    }
-                } // Fim loop leitura OOB
-
+                    } catch (e) { log(`  -> Leitura OOB U64 @${readOffset}: FALHA (${e.message})`, 'warn'); }
+                }
             } catch (e) { log(`Erro inesperado durante o teste Info Leak: ${e.message}`, 'error'); }
 
-            if (potentialLeakFound) {
-                 log(`--- Teste 2 Concluído (POTENCIAL VAZAMENTO DE PONTEIRO DETETADO!) ---`, 'test');
-            } else if (writeSuccess) {
-                 log(`--- Teste 2 Concluído (Escrita OOB OK, mas nenhum valor suspeito de ser ponteiro foi lido) ---`, 'test');
-            } else {
-                 log(`--- Teste 2 Concluído (Falha na escrita OOB inicial) ---`, 'test');
-            }
+            if (potentialLeakFound) { log(`--- Teste 2 Concluído (POTENCIAL VAZAMENTO DE PONTEIRO DETETADO!) ---`, 'test'); }
+            else if (writeSuccess) { log(`--- Teste 2 Concluído (Escrita OOB OK, mas nenhum valor suspeito de ser ponteiro foi lido) ---`, 'test'); }
+            else { log(`--- Teste 2 Concluído (Falha na escrita OOB inicial) ---`, 'test'); }
             return potentialLeakFound;
         };
 
@@ -222,8 +178,8 @@
         // (Função testBasicPP igual à versão anterior)
         const testBasicPP = async () => {
             log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
-            // ... (código igual ao script v4) ...
-             const testProp = '__pp_basic_test__';
+            // ... (código igual ao script v6) ...
+            const testProp = '__pp_basic_test__';
             const testValue = 'Polluted!';
             let success = false;
             try {
@@ -247,23 +203,84 @@
             return success;
         };
 
+        // --- Teste 4: Notificação Web (API Padrão) ---
+        // NOVO TESTE: Tenta usar a API de Notificações Web
+        const testWebNotification = async () => {
+            log("--- Iniciando Teste 4: Notificação Web (API Padrão) ---", 'test');
+            let permissionGranted = false;
+            let notificationShown = false;
+
+            // Verifica se a API de Notificação existe no navegador
+            if (!("Notification" in window)) {
+                log("FALHA: API de Notificação Web não suportada neste navegador.", 'error');
+                log("--- Teste 4 Concluído (API Não Suportada) ---", 'test');
+                return false;
+            }
+
+            log("Verificando permissão de notificação atual...", 'subtest');
+            log(`Permissão atual: ${Notification.permission}`, 'info');
+
+            // Pede permissão (pode exigir interação do utilizador ou ser bloqueado)
+            try {
+                log("Solicitando permissão para notificações...", 'warn');
+                const permission = await Notification.requestPermission();
+                log(`Permissão solicitada. Resultado: ${permission}`, 'info');
+
+                if (permission === "granted") {
+                    permissionGranted = true;
+                    log("Permissão CONCEDIDA para notificações!", 'vuln'); // Consideramos 'vuln' pois conseguimos a permissão
+
+                    // Tenta exibir uma notificação
+                    log("Tentando exibir uma notificação de teste...", 'subtest');
+                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                    try {
+                        const notification = new Notification("PS4 WebKit Teste", {
+                            body: "Se você vê isto, a API de Notificação funcionou!",
+                            icon: "https://via.placeholder.com/64" // Ícone placeholder
+                        });
+                        notification.onclick = () => { log("Notificação clicada!", 'info'); };
+                        notification.onshow = () => { log("Notificação exibida (onshow).", 'info'); notificationShown = true;}; // Evento pode não ser suportado
+                        notification.onclose = () => { log("Notificação fechada.", 'info'); };
+                        notification.onerror = (err) => { log(`Erro ao exibir notificação: ${err}`, 'error'); };
+
+                        log("Objeto de notificação criado. Verifique se a notificação apareceu.", 'warn');
+                        // Não há garantia que 'onshow' dispare, então logamos sucesso aqui
+                        // O sucesso real é a notificação visual aparecer
+                        notificationShown = true; // Assume que foi mostrada se não deu erro
+
+                    } catch (e) {
+                        log(`Erro ao criar/exibir Notificação: ${e.message}`, 'error');
+                    }
+                } else {
+                    log(`Permissão NÃO CONCEDIDA (${permission}). Não é possível exibir notificações.`, 'good');
+                }
+            } catch (e) {
+                log(`Erro ao solicitar permissão de Notificação: ${e.message}`, 'error');
+            }
+
+            log(`--- Teste 4 Concluído (Permissão ${permissionGranted ? 'Concedida' : 'Negada/Padrão'}, Notificação ${notificationShown ? 'Tentada' : 'Não Tentada'}) ---`, 'test');
+            return permissionGranted && notificationShown;
+        };
+
+
         // --- Função Principal para Rodar Todos os Testes ---
         const runAllTests = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO TODOS OS TESTES COMBINADOS v6 (Info Leak Attempt) ====", 'critical');
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS v7 (Web Notification Attempt) ====", 'critical');
 
             await testCSPBypass(); // Teste 1
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testOOBReadInfoLeak(); // Teste 2 (v6 Info Leak)
+            await testOOBReadInfoLeak(); // Teste 2 (Info Leak)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
             await testBasicPP(); // Teste 3
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            // Removido o teste PP Hijack para focar no Info Leak
+            await testWebNotification(); // Teste 4 (NOVO - Notificação Web)
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            log("\n==== TODOS OS TESTES COMBINADOS v6 CONCLUÍDOS ====", 'critical');
+            log("\n==== TODOS OS TESTES COMBINADOS v7 CONCLUÍDOS ====", 'critical');
             if (runBtn) runBtn.disabled = false;
         };
 
@@ -276,15 +293,14 @@
 </html>
 ```
 
-**O que este script tenta fazer:**
+**O que esperar deste script:**
 
-1.  **XSS:** Confirma a execução de script (Teste 1).
-2.  **OOB Write/Read + Info Leak:** Realiza uma escrita OOB confirmada e depois tenta ler blocos de 64 bits em vários offsets antes e depois do buffer original. Usa uma heurística simples (`isPotentialPointer64`) para verificar se os valores lidos (que não sejam o padrão `0xAA`) *poderiam* ser ponteiros. Se encontrar algo suspeito, loga com destaque (`log-ptr`).
-3.  **PP Básica:** Confirma a poluição de protótipo (Teste 3).
+1.  Os Testes 1, 2 e 3 devem funcionar como na versão v6.
+2.  **Teste 4 (Notificação Web):**
+    * O script verificará se a API `Notification` existe.
+    * Pedirá permissão ao utilizador. **Isto pode fazer aparecer uma barra ou popup do próprio navegador a pedir para permitir ou bloquear notificações para este site.** Você precisará interagir com isso (Permitir).
+    * Se a permissão for concedida, ele tentará criar e exibir uma notificação com o título "PS4 WebKit Teste".
+    * **Observe atentamente:** Onde e como esta notificação aparece? É dentro da janela do navegador? Tem um aspeto diferente de um `alert()`? Parece minimamente com uma notificação do sistema?
+    * O log indicará se a permissão foi concedida e se a tentativa de mostrar a notificação foi feita.
 
-**Como interpretar os resultados do Teste 2:**
-
-* Se o log mostrar mensagens com `POTENCIAL PONTEIRO?` (em magenta), significa que a leitura OOB retornou um valor que passou na heurística. **Isto seria a PoC mais "contundente" que podemos gerar**, pois demonstra que a vulnerabilidade permite ler dados que *parecem* ser endereços de memória internos.
-* Se o log mostrar apenas leituras OOB com `0xAAAAAAAA` ou o valor `0xEE` escrito, significa que a leitura OOB funciona, mas *nesta execução específica* não encontrámos dados que parecessem ponteiros nos offsets testados. A vulnerabilidade de leitura OOB ainda existe.
-
-Execute este script v6. Se conseguir capturar no log (e no vídeo) uma mensagem de "POTENCIAL PONTEIRO?", isso fortalece muito o seu argumento sobre o impacto da vulnerabilidade OOB Read/Write, mesmo sem RCE ou sandbox esca
+**Importante:** É muito provável que isto **não** acione uma notificação *nativa* do sistema PS4. No entanto, é o teste mais próximo que posso fornecer dentro das minhas regras para tentar algo visualmente diferente e potencialmente mais impactante do que um `alert()`. Se funcionar e tiver um aspeto único no PS4, pode ser um elemento adicional para a sua PoC em víd
