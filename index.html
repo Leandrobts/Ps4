@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 FW 12.02 - Teste v18 (Corrupção de Dados OOB)</title>
+    <title>PS4 FW 12.02 - Teste v18 Mod v2 (Corrupção via OOB Write @ 32)</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -20,8 +20,8 @@
     </style>
 </head>
 <body>
-    <h1>PS4 FW 12.02 - Teste v18 (Corrupção de Dados OOB)</h1>
-    <p>Testa: XSS, OOB Write (Corrupção de Float64Array), PP Básica.</p>
+    <h1>PS4 FW 12.02 - Teste v18 Mod v2 (Corrupção via OOB Write @ 32)</h1>
+    <p>Testa: XSS, OOB Write @ 32 (Corrupção de Float64Array), PP Básica.</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
@@ -48,26 +48,36 @@
              } catch(e) { console.error("Erro na função log:", e); outputDiv = null; }
         };
 
-        // Helper para formatar números como hex (para Float64)
+        // Helper para formatar números como hex (definido globalmente)
+        const toHex = (val, bits = 32) => {
+             if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
+             let num = Number(val);
+             if (bits <= 32) { num = num >>> 0; }
+             const pad = Math.ceil(bits / 4);
+             return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
+        }
+
+        // Helper para formatar Float64 como hex (agora pode aceder toHex)
         const float64ToHex = (f64) => {
             try {
+                if (isNaN(f64)) return "NaN";
                 const buffer = new ArrayBuffer(8);
                 const view = new DataView(buffer);
                 view.setFloat64(0, f64, true); // Assume little-endian
                 const low = view.getUint32(0, true);
                 const high = view.getUint32(4, true);
+                // Usa a função toHex que está no escopo global
                 return `H=${toHex(high)} L=${toHex(low)}`;
             } catch (e) {
-                return "NaN/Error";
+                return "Error";
             }
         }
 
         // --- Teste 1: CSP Bypass / XSS ---
-        // (Função testCSPBypass igual à versão anterior)
         const testCSPBypass = async () => {
             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
-            // ... (código igual ao script v10) ...
-            // 1.1 Teste com data: URI
+            // ... (código igual às versões anteriores) ...
+             // 1.1 Teste com data: URI
             log("Tentando XSS via data: URI (alert)...", 'subtest');
             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
             try {
@@ -106,51 +116,46 @@
         };
 
 
-        // --- Teste 2: OOB Write (Tentativa de Corromper Dados Float64) ---
-        // NOVO: Tenta corromper dados de um Float64Array adjacente
-        const testOOBDataCorruption = async () => {
-            log("--- Iniciando Teste 2: OOB Write (Corrupção de Dados Float64) ---", 'test');
-            const attackerSize = 32; // Tamanho do buffer atacante
-            const victimSize = 4; // Número de elementos Float64 na vítima
-            const oobWriteOffset = attackerSize; // Tenta escrever logo após o buffer atacante
+        // --- Teste 2: OOB Write @ 32 (Tentativa de Corromper Dados Float64) ---
+        const testOOBDataCorruptionOffset32 = async () => {
+            log("--- Iniciando Teste 2: OOB Write @ 32 (Corrupção de Dados Float64) ---", 'test');
+            const attackerSize = 32;
+            const victimSize = 4;
+            const oobWriteOffset = attackerSize; // = 32
             const bytesToWrite = [0x41, 0x42, 0x43, 0x44, 0x45, 0x46, 0x47, 0x48]; // "ABCDEFGH"
             let corruptionObserved = false;
 
             try {
                 log(`Alocando buffer atacante (Uint8Array ${attackerSize}B) e vítima (Float64Array ${victimSize} elems)...`, 'subtest');
-                // Aloca sequencialmente
                 const attackerBuffer = new ArrayBuffer(attackerSize);
-                const attackerView = new Uint8Array(attackerBuffer); // Visão de escrita
+                const attackerView = new Uint8Array(attackerBuffer);
+                const victimBuffer = new ArrayBuffer(victimSize * 8);
+                const victimView = new Float64Array(victimBuffer);
 
-                const victimBuffer = new ArrayBuffer(victimSize * 8); // Float64 usa 8 bytes
-                const victimView = new Float64Array(victimBuffer); // Visão de leitura/verificação
-
-                // Preenche a vítima com valores conhecidos
                 const originalValues = [1.1, 2.2, 3.3, 4.4];
                 for (let i = 0; i < victimSize; i++) {
                     victimView[i] = originalValues[i];
                 }
                 log(`Vítima preenchida. Valores originais: [${originalValues.join(', ')}]`, 'info');
-                log(`  victim[0] (hex): ${float64ToHex(victimView[0])}`, 'info');
+                // Agora deve funcionar, pois toHex está no escopo global
+                log(`  victim[0] (hex original): ${float64ToHex(victimView[0])}`, 'info');
 
-                // Tenta a escrita OOB do atacante para dentro da vítima
                 log(`Tentando escrita OOB de ${bytesToWrite.length} bytes a partir do offset ${oobWriteOffset} do atacante...`, 'subtest');
                 log(`Valores a escrever (hex): ${bytesToWrite.map(b => toHex(b, 8)).join(' ')}`, 'info');
                 await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
 
-                let writeAllowed = true; // Assume que vai funcionar baseado em testes anteriores
+                let writeAllowed = false;
                 try {
                     for (let i = 0; i < bytesToWrite.length; i++) {
-                        // Escreve byte a byte fora dos limites do atacante
                         attackerView[oobWriteOffset + i] = bytesToWrite[i];
                     }
                     log(`VULN: Escrita OOB de ${bytesToWrite.length} bytes @${oobWriteOffset} permitida!`, 'vuln');
+                    writeAllowed = true;
                 } catch (e) {
                     log(`BLOQUEADO: Escrita OOB @${oobWriteOffset} impedida: ${e.message}`, 'good');
                     writeAllowed = false;
                 }
 
-                // Verifica a vítima APÓS a tentativa de escrita OOB
                 if (writeAllowed) {
                     log("Verificando o conteúdo do Float64Array vítima após escrita OOB...", 'subtest');
                     await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
@@ -162,29 +167,31 @@
                         log(`  Valor Original: ${originalValue} (${float64ToHex(originalValue)})`, 'info');
                         log(`  Valor Atual:    ${currentValue} (${float64ToHex(currentValue)})`, 'info');
 
-                        // Compara os valores. Se forem diferentes, houve corrupção.
-                        // Usar uma pequena tolerância para comparação de floats pode ser necessário,
-                        // mas aqui esperamos uma mudança drástica ou NaN se os bytes forem corrompidos.
                         if (isNaN(currentValue) || Math.abs(currentValue - originalValue) > 0.0001) {
-                            log(`  VULN: CORRUPÇÃO DETETADA em victim[${i}]! Valor alterado.`, 'vuln');
-                            corruptionObserved = true;
+                             if (!isNaN(originalValue) || isNaN(currentValue)) {
+                                log(`  VULN: CORRUPÇÃO DETETADA em victim[${i}]! Valor alterado.`, 'vuln');
+                                corruptionObserved = true;
+                             } else {
+                                log(`  INFO: Valor em victim[${i}] é NaN, mas original também era? (Ignorando)`, 'info');
+                             }
                         } else {
                             log(`  INFO: Valor em victim[${i}] parece inalterado.`, 'good');
                         }
                     }
                 }
 
-            } catch (e) { log(`Erro inesperado durante o teste de Corrupção de Dados: ${e.message}`, 'error'); }
+            } catch (e) {
+                log(`Erro inesperado durante o teste de Corrupção de Dados: ${e.message}`, 'error');
+                if (e.stack) { log(`Stack trace: ${e.stack}`, 'error'); }
+             }
 
             log(`--- Teste 2 Concluído (Corrupção de Dados ${corruptionObserved ? 'OBSERVADA' : 'Não Observada'}) ---`, 'test');
             return corruptionObserved;
         };
 
         // --- Teste 3: Prototype Pollution (Básica) ---
-        // (Função testBasicPP igual à versão anterior)
         const testBasicPP = async () => {
             log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
-            // ... (código igual ao script v11) ...
             const testProp = '__pp_basic_test__';
             const testValue = 'Polluted!';
             let success = false;
@@ -212,20 +219,18 @@
         // --- Função Principal para Rodar Todos os Testes ---
         const runAllTests = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO TODOS OS TESTES COMBINADOS v18 (OOB Data Corruption) ====", 'critical');
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS v18 Mod v2 (OOB Corruption @ 32) ====", 'critical');
 
             await testCSPBypass(); // Teste 1
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testOOBDataCorruption(); // Teste 2 (NOVO - Corrupção de Dados)
+            await testOOBDataCorruptionOffset32(); // Teste 2 (Corrigido)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
             await testBasicPP(); // Teste 3
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            // Removidos outros testes para focar na Corrupção OOB
-
-            log("\n==== TODOS OS TESTES COMBINADOS v18 CONCLUÍDOS ====", 'critical');
+            log("\n==== TODOS OS TESTES COMBINADOS v18 Mod v2 CONCLUÍDOS ====", 'critical');
             if (runBtn) runBtn.disabled = false;
         };
 
@@ -236,11 +241,4 @@
 </html>
 ```
 
-**O que procurar nos resultados:**
-
-* **Teste 2:**
-    * Verifique se a escrita OOB foi permitida (`VULN: Escrita OOB...`).
-    * Analise a comparação entre o "Valor Original" e o "Valor Atual" para `victim[0]`. Se a escrita OOB atingiu os bytes corretos, o "Valor Atual" deve ser muito diferente do original (1.1) ou ser `NaN`.
-    * O log deve indicar `VULN: CORRUPÇÃO DETETADA em victim[0]!`.
-
-Se este teste mostrar a corrupção do valor `Float64` devido à escrita OOB de bytes (`Uint8`), será uma demonstração clara e direta do impacto da vulnerabilidade OOB Write na integridade dos dados de objetos adjacentes na memór
+Por favor, tente executar esta versão corrigida (v18 Mod v2). Esperamos que agora o Teste 2 execute corretamente e possamos ver se a escrita OOB no offset 32 consegue corromper os dados do `Float64Array` víti
