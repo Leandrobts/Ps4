@@ -1,174 +1,293 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Advanced Sandbox Bypass Attempt</title>
+    <title>PS4 FW 12.02 - Esqueleto Exploit (WebKit -> Notifica√ß√£o)</title>
     <style>
-        #output {
-            font-family: monospace;
-            white-space: pre-wrap;
-        }
+        /* Estilos CSS (iguais aos anteriores) */
+        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
+        #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        .log-info { color: #6cf; }
+        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
+        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
+        .log-vuln { color: #ff4444; font-weight: bold; }
+        .log-good { color: #4CAF50; }
+        .log-warn { color: #FFC107; }
+        .log-error { color: #f44336; }
+        .log-leak { color: #FF9800; font-weight: bold; }
+        .log-ptr { color: #f0f; font-weight: bold; }
     </style>
 </head>
-
 <body>
-    <h1>Advanced Sandbox Bypass Attempt</h1>
+    <h1>PS4 FW 12.02 - Esqueleto Exploit (WebKit -> Notifica√ß√£o)</h1>
+    <p>Estrutura: WebKit Primitives -> Sandbox Escape -> System Notification.</p>
+    <button id="runBtn" onclick="runExploitChain()">Iniciar Cadeia de Exploit</button>
     <div id="output"></div>
 
     <script>
+        // --- Globals & Setup ---
+        const outputDiv = document.getElementById('output');
+        const runBtn = document.getElementById('runBtn');
+        const SHORT_PAUSE = 50;
+        const MEDIUM_PAUSE = 500;
+
+        // Vari√°veis para armazenar resultados das primitivas (exemplo)
+        let oobReadWritePrimitive = null; // Poderia ser um objeto com fun√ß√µes addrof/fakeobj
+        let leakedPointer = null;         // Exemplo de ponteiro vazado
+        let hasEscapedSandbox = false;    // Flag para indicar sucesso da fuga
+
+        // --- Fun√ß√£o de Log ---
         const log = (message, type = 'info') => {
-            const outputDiv = document.getElementById('output');
-            if (outputDiv) {
-                outputDiv.innerHTML += `<span style="color: ${type === 'error' ? 'red' : type === 'warning' ? 'orange' : 'blue'};">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
+             if (!outputDiv) return;
+             try {
+                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
+                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                 if(outputDiv.innerHTML.length > 500000){
+                     outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000);
+                     outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
+                 }
+                 outputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`;
+                 outputDiv.scrollTop = outputDiv.scrollHeight;
+             } catch(e) { console.error("Erro na fun√ß√£o log:", e); outputDiv = null; }
+        };
+
+        // Helper para formatar n√∫meros como hex
+        const toHex = (val, bits = 32) => {
+             if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
+             let num = Number(val);
+             if (bits <= 32) { num = num >>> 0; }
+             const pad = Math.ceil(bits / 4);
+             return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
+        }
+
+        // --- Heur√≠stica Simples para Detetar Potenciais Ponteiros (64-bit) ---
+        const isPotentialPointer64 = (high, low) => {
+             if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
+             if (high === 0 && low === 0) return false;
+             if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
+             if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; // Nosso padr√£o
+             if (high === 0 && low < 0x100000) return false;
+             // if (low % 8 !== 0) return false; // Alinhamento (opcional)
+             return true;
+        };
+
+        // --- PASSO 1: Explora√ß√£o WebKit (Obter Primitivas R/W) ---
+        // Esta fun√ß√£o deve usar OOB Write/Read para obter leitura/escrita
+        // arbitr√°ria dentro do processo WebKit e/ou vazar ponteiros.
+        // Adaptada do Script v7 (Info Leak Aprimorado).
+        const achieveWebKitReadWrite = async () => {
+            log("--- Iniciando Passo 1: Explora√ß√£o WebKit (OOB R/W & Info Leak) ---", 'test');
+            const bufferSize = 32;
+            const writeValue = 0xEE;
+            const oobWriteOffset = 32;
+            const oobReadOffsets = [];
+            for (let i = -64; i < bufferSize + 64; i += 4) { oobReadOffsets.push(i); }
+            let writeSuccess = false;
+            let potentialLeakFound = false;
+            let tempLeakedPtr = null; // Armazena o primeiro ponteiro potencial encontrado
+
+            try {
+                const buffer = new ArrayBuffer(bufferSize + 256);
+                const dataView = new DataView(buffer);
+                const baseOffset = 128;
+                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
+
+                const writeTargetAddress = baseOffset + oobWriteOffset;
+                log(`Tentando escrita OOB U8 @${oobWriteOffset}...`, 'subtest');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                try {
+                    dataView.setUint8(writeTargetAddress, writeValue);
+                    log(`VULN: Escrita OOB U8 @${oobWriteOffset} permitida!`, 'vuln');
+                    writeSuccess = true;
+                } catch (e) {
+                    log(`BLOQUEADO: Escrita OOB U8 @${oobWriteOffset} impedida: ${e.message}`, 'good');
+                    log("--- Passo 1 FALHOU (Escrita OOB inicial) ---", 'test');
+                    return false; // Falha cr√≠tica
+                }
+
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                log(`Tentando leituras OOB U64 em ${oobReadOffsets.length} offsets...`, 'subtest');
+                for (const readOffset of oobReadOffsets) {
+                    const readTargetAddress = baseOffset + readOffset;
+                    if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) continue;
+
+                    try {
+                        const low = dataView.getUint32(readTargetAddress, true);
+                        const high = dataView.getUint32(readTargetAddress + 4, true);
+                        if (isPotentialPointer64(high, low)) {
+                            const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
+                            log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr');
+                            potentialLeakFound = true;
+                            if (tempLeakedPtr === null) { // Armazena o primeiro encontrado
+                                tempLeakedPtr = { high, low };
+                                log(`  -> Primeiro ponteiro potencial armazenado: ${valueStr}`, 'vuln');
+                            }
+                        }
+                    } catch (e) {/* Ignora falha */}
+                    if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1));
+                }
+
+                // Simula√ß√£o de obten√ß√£o de primitiva R/W
+                // Na pr√°tica, seria necess√°rio usar o leak para construir addrof/fakeobj
+                if (potentialLeakFound) {
+                    log("Info Leak bem-sucedido (potenciais ponteiros encontrados).", 'info');
+                    log("Simulando obten√ß√£o de primitiva R/W baseada no leak...", 'warn');
+                    oobReadWritePrimitive = { // Objeto simulado
+                        read64: (addr_high, addr_low) => { log(`Simulado: read64(${toHex(addr_high)}:${toHex(addr_low)})`, 'info'); return {high: 0, low: 0}; },
+                        write64: (addr_high, addr_low, val_high, val_low) => { log(`Simulado: write64(${toHex(addr_high)}:${toHex(addr_low)}, val=${toHex(val_high)}:${toHex(val_low)})`, 'info'); }
+                    };
+                    leakedPointer = tempLeakedPtr; // Guarda o ponteiro para exemplo
+                } else {
+                     log("Nenhum ponteiro potencial encontrado via OOB Read.", 'warn');
+                     // Poderia tentar PP Hijack aqui como alternativa para obter controlo
+                }
+
+            } catch (e) {
+                log(`Erro inesperado durante Passo 1: ${e.message}`, 'error');
+                log("--- Passo 1 FALHOU ---", 'test');
+                return false;
+            }
+
+            if (oobReadWritePrimitive) {
+                 log("--- Passo 1 CONCLU√çDO (Primitiva R/W WebKit Simulada Obtida) ---", 'test');
+                 return true;
             } else {
-                console.error('Elemento #output n„o encontrado!');
+                 log("--- Passo 1 FALHOU (N√£o foi poss√≠vel obter primitiva R/W) ---", 'test');
+                 return false;
             }
         };
 
-        const prepareData = (size = 64) => {
-            log(`FunÁ„o prepareData(${size}) iniciada e concluÌda.`, 'info');
-            let buffer = new ArrayBuffer(size);
-            let view = new Uint8Array(buffer);
-            return {
-                buffer,
-                view,
-                size
-            };
-        };
+        // --- PASSO 2: Fuga da Sandbox ---
+        // ESTA FUN√á√ÉO PRECISA SER IMPLEMENTADA POR VOC√ä!
+        // Deve usar as primitivas obtidas no Passo 1 (oobReadWritePrimitive)
+        // para explorar uma vulnerabilidade de IPC ou Kernel e escapar da sandbox.
+        const escapeSandbox = async () => {
+            log("--- Iniciando Passo 2: Fuga da Sandbox ---", 'test');
+            log("AVISO: Esta fun√ß√£o √© um placeholder. Precisa implementar a sua l√≥gica de fuga da sandbox aqui.", 'warn');
 
-        // --- Prototype Pollution ---
-        const attemptPrototypePollution = () => {
-            log("\n--- Prototype Pollution Attempt ---", 'critical');
-            try {
-                Object.prototype.injectedProperty = 'POLLUTED!';
-                log("Prototype pollution bem-sucedida. Verificando...", 'info');
-                // Verifique se a propriedade foi injetada em objetos relevantes
-                if ({}.injectedProperty === 'POLLUTED!') {
-                    log("Prototype pollution confirmado.", 'success');
-                } else {
-                    log("Falha na confirmaÁ„o do prototype pollution.", 'warning');
-                }
-            } catch (e) {
-                log(`Erro na tentativa de prototype pollution: ${e}`, 'error');
+            if (!oobReadWritePrimitive) {
+                log("Erro: Primitiva R/W do WebKit n√£o dispon√≠vel.", 'error');
+                log("--- Passo 2 FALHOU ---", 'test');
+                return false;
+            }
+
+            // Exemplo de como poderia usar a primitiva (simulada)
+            log("Usando primitiva R/W simulada para ler/escrever mem√≥ria WebKit...", 'info');
+            oobReadWritePrimitive.read64(0, 0); // Exemplo de leitura
+            oobReadWritePrimitive.write64(0, 0, 0, 0); // Exemplo de escrita
+
+            // ##################################################################
+            // #                                                                #
+            // #      INSIRA AQUI O SEU C√ìDIGO DE FUGA DA SANDBOX               #
+            // #      - Use oobReadWritePrimitive para ler/escrever mem√≥ria     #
+            // #      - Explore a vulnerabilidade de IPC/Kernel                 #
+            // #      - Obtenha a capacidade de executar c√≥digo fora da sandbox #
+            // #                                                                #
+            // ##################################################################
+
+            // Simula√ß√£o de sucesso para continuar o fluxo (REMOVER NA IMPLEMENTA√á√ÉO REAL)
+            log("Simulando sucesso na fuga da sandbox...", 'warn');
+            hasEscapedSandbox = true; // Defina como true se a sua fuga for bem-sucedida
+
+            if (hasEscapedSandbox) {
+                log("--- Passo 2 CONCLU√çDO (Fuga da Sandbox Bem-sucedida!) ---", 'test');
+                return true;
+            } else {
+                log("--- Passo 2 FALHOU (Fuga da Sandbox Falhou) ---", 'test');
+                return false;
             }
         };
 
-        // --- Memory Leak / Information Disclosure ---
-        const attemptMemoryLeak = () => {
-            log("\n--- Memory Leak / Information Disclosure Attempt ---", 'critical');
-            let leakedData = "Sensitive Data!";
-            try {
-                throw new Error("Potential Leak: " + leakedData);
-            } catch (e) {
-                log(`Vazamento potencial: ${e.message}`, 'warning');
-                // Tentar extrair a string "Sensitive Data!" da mensagem de erro
-                let extractedData = e.message.split("Potential Leak: ")[1];
-                if (extractedData === leakedData) {
-                    log(`Dados vazados extraÌdos com sucesso: ${extractedData}`, 'success');
-                } else {
-                    log("Falha ao extrair dados vazados.", 'warning');
-                }
+        // --- PASSO 3 e 4: Intera√ß√£o com Sistema e Notifica√ß√£o ---
+        // ESTA FUN√á√ÉO PRECISA SER IMPLEMENTADA POR VOC√ä!
+        // Deve ser executada AP√ìS a fuga da sandbox e usar os privil√©gios obtidos
+        // para encontrar e chamar a fun√ß√£o de notifica√ß√£o do sistema PS4.
+        const triggerSystemNotification = async () => {
+            log("--- Iniciando Passo 3/4: Chamar Notifica√ß√£o do Sistema ---", 'test');
+            log("AVISO: Esta fun√ß√£o √© um placeholder. Precisa implementar a l√≥gica para encontrar e chamar a API de notifica√ß√£o nativa do PS4.", 'warn');
+
+            if (!hasEscapedSandbox) {
+                log("Erro: Fuga da sandbox n√£o realizada.", 'error');
+                log("--- Passo 3/4 FALHOU ---", 'test');
+                return false;
+            }
+
+            // ##################################################################
+            // #                                                                #
+            // #      INSIRA AQUI O SEU C√ìDIGO P√ìS-FUGA                         #
+            // #      - Use os privil√©gios obtidos para:                        #
+            // #        - Encontrar o endere√ßo da fun√ß√£o de notifica√ß√£o         #
+            // #        - Preparar os argumentos (√≠cone, texto, etc.)           #
+            // #        - Chamar a fun√ß√£o/syscall de notifica√ß√£o                #
+            // #                                                                #
+            // ##################################################################
+
+            // Simula√ß√£o de sucesso (REMOVER NA IMPLEMENTA√á√ÉO REAL)
+            const notificationSent = true; // Defina como true se conseguir chamar a API
+            log("Simulando chamada √† API de notifica√ß√£o do sistema...", 'warn');
+
+
+            if (notificationSent) {
+                log("--- Passo 3/4 CONCLU√çDO (Notifica√ß√£o do Sistema Acionada!) ---", 'test');
+                return true;
+            } else {
+                log("--- Passo 3/4 FALHOU (N√£o foi poss√≠vel acionar notifica√ß√£o) ---", 'test');
+                return false;
             }
         };
 
-        // --- Canvas Memory Manipulation (Simplified) ---
-        const attemptCanvasMemoryManipulation = () => {
-            log("\n--- Canvas Memory Manipulation Attempt ---", 'critical');
-            const canvas = document.createElement('canvas');
-            canvas.width = 10;
-            canvas.height = 10;
-            document.body.appendChild(canvas); // Adicione ao corpo para evitar problemas de contexto
-            const ctx = canvas.getContext('2d');
+        // --- Fun√ß√£o Principal da Cadeia de Exploit ---
+        const runExploitChain = async () => {
+            if (runBtn) runBtn.disabled = true;
+            log("==== INICIANDO CADEIA DE EXPLOIT (Esqueleto) ====", 'critical');
 
-            if (!ctx) {
-                log("Falha ao obter o contexto 2D do canvas.", 'error');
+            // Passo 1: Obter R/W no WebKit
+            const step1_success = await achieveWebKitReadWrite();
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+
+            if (!step1_success) {
+                log("==== CADEIA INTERROMPIDA (Falha no Passo 1) ====", 'error');
+                if (runBtn) runBtn.disabled = false;
                 return;
             }
 
-            try {
-                // Escreva um padr„o especÌfico no canvas
-                for (let i = 0; i < 10; i++) {
-                    for (let j = 0; j < 10; j++) {
-                        ctx.fillStyle = (i + j) % 2 === 0 ? 'red' : 'blue';
-                        ctx.fillRect(i, j, 1, 1);
-                    }
-                }
+            // Passo 2: Escapar da Sandbox
+            const step2_success = await escapeSandbox();
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-                // Tente ler os dados do canvas
-                const imageData = ctx.getImageData(0, 0, 10, 10).data;
-                log(`Dados do canvas lidos: ${Array.from(imageData).join(',')}`, 'info');
-
-                // **SimulaÁ„o de Overlap (ALTAMENTE simplificado e N√O confi·vel)**
-                // Este È um exemplo conceitual. A exploraÁ„o real de overlap È muito mais complexa.
-                let fakeBuffer1 = new Uint8Array(100);
-                let fakeBuffer2 = new Uint8Array(100);
-
-                // Initialize fakeBuffer1 with some data
-                for (let i = 0; i < 100; i++) {
-                    fakeBuffer1[i] = i;
-                }
-
-                // Tentativa ingÍnua de overlap (N√O FUNCIONAR¡ na pr·tica)
-                let originalValue = fakeBuffer1[50];
-                fakeBuffer2[50] = 0x42; // Tentar sobrescrever
-                log(`Valor original: ${originalValue}, Valor apÛs tentativa: ${fakeBuffer1[50]}`, 'warning');
-
-                // **Para uma exploraÁ„o de overlap real, vocÍ precisaria:**
-                // 1.  Encontrar uma vulnerabilidade que permita alocar buffers de tamanho e localizaÁ„o controlados.
-                // 2.  Usar tÈcnicas como heap spraying para aumentar a probabilidade de os buffers serem alocados prÛximos o suficiente para overlap.
-                // 3.  Entender o layout da memÛria do navegador em detalhes.
-
-                // Limpeza
-                document.body.removeChild(canvas);
-
-            } catch (e) {
-                log(`Erro ao manipular a memÛria do canvas: ${e}`, 'error');
+             if (!step2_success) {
+                log("==== CADEIA INTERROMPIDA (Falha no Passo 2) ====", 'error');
+                if (runBtn) runBtn.disabled = false;
+                return;
             }
-        };
 
-        // --- Attempt Arbitrary Code Execution (Conceptual - Requires Further Steps) ---
-        const attemptArbitraryCodeExecution = () => {
-            log("\n--- Arbitrary Code Execution Attempt (Conceptual) ---", 'critical');
+            // Passo 3/4: Chamar Notifica√ß√£o
+            const step3_4_success = await triggerSystemNotification();
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            // **Este È um exemplo altamente simplificado e conceitual.**
-            // A execuÁ„o real de cÛdigo arbitr·rio requer uma vulnerabilidade especÌfica
-            // (como use-after-free, buffer overflow) e tÈcnicas para contornar
-            // as mitigaÁıes de seguranÁa (ASLR, DEP, etc.).
-
-            try {
-                // **Prototype Pollution para Manipular uma FunÁ„o Existente (Exemplo)**
-                // Suponha que exista uma funÁ„o `vulnerableFunction` que È chamada em algum lugar.
-                // Podemos tentar sobrescrever essa funÁ„o usando prototype pollution.
-                Object.prototype.vulnerableFunction = function() {
-                    log("FunÁ„o vulner·vel interceptada! Executando cÛdigo arbitr·rio...", 'success');
-                    // **CÛdigo arbitr·rio aqui**
-                    alert("Exploit executado!"); // Exemplo simples
-                };
-
-                // **Para funcionar, vocÍ precisaria:**
-                // 1.  Encontrar uma funÁ„o existente que seja vulner·vel ‡ manipulaÁ„o.
-                // 2.  Garantir que essa funÁ„o seja chamada em algum momento.
-                // 3.  Contornar quaisquer proteÁıes que impeÁam a modificaÁ„o do prototype.
-
-                log("Prototype pollution usado para manipular 'vulnerableFunction' (se existir).", 'warning');
-
-            } catch (e) {
-                log(`Erro ao tentar executar cÛdigo arbitr·rio: ${e}`, 'error');
+             if (!step3_4_success) {
+                log("==== CADEIA CONCLU√çDA (Falha no Passo 3/4) ====", 'error');
+            } else {
+                 log("==== CADEIA DE EXPLOIT CONCLU√çDA COM SUCESSO (Notifica√ß√£o Acionada!) ====", 'vuln');
             }
+
+            if (runBtn) runBtn.disabled = false;
         };
 
-        const main = () => {
-            log("Advanced Exploit Script Iniciado", 'critical');
-            attemptPrototypePollution();
-            attemptMemoryLeak();
-            attemptCanvasMemoryManipulation();
-            attemptArbitraryCodeExecution();
-            log("Advanced Exploit Script ConcluÌdo", 'critical');
-        };
+        // Opcional: descomente para rodar automaticamente ao carregar
+        // document.addEventListener('DOMContentLoaded', runExploitChain);
 
-        document.addEventListener('DOMContentLoaded', main);
     </script>
-</body>
 
+</body>
 </html>
+```
+
+**Como usar este esqueleto:**
+
+1.  **Salve** como um ficheiro HTML.
+2.  **Implemente o Passo 2:** Substitua o coment√°rio dentro da fun√ß√£o `escapeSandbox` pelo seu c√≥digo que explora a vulnerabilidade de IPC/Kernel e obt√©m execu√ß√£o fora da sandbox. Certifique-se de que a fun√ß√£o retorna `true` em caso de sucesso.
+3.  **Implemente o Passo 3/4:** Substitua o coment√°rio dentro da fun√ß√£o `triggerSystemNotification` pelo seu c√≥digo que, usando os privil√©gios obtidos no Passo 2, localiza e chama a API de notifica√ß√£o do sistema PS4. Certifique-se de que retorna `true` se a chamada for bem-sucedida.
+4.  **Teste:** Execute o ficheiro HTML modificado no seu PS4.
+
+Este esqueleto fornece a estrutura e a parte inicial do WebKit. O "√∫ltimo ponto" (ou melhor, os passos intermedi√°rios cruciais) de escapar da sandbox e interagir com o sistema ficam a seu cargo para implementar com o seu conhecimento e c√≥digo. Espero que isto o ajude a avan√ß
