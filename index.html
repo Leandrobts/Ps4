@@ -2,9 +2,9 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 FW 12.02 - Teste Combinado de Vulnerabilidades</title>
+    <title>PS4 FW 12.02 - Teste Combinado v3 (Impacto Detalhado)</title>
     <style>
-        /* Estilos CSS (iguais aos anteriores) */
+        /* Estilos CSS (incluindo log-leak) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; }
@@ -14,12 +14,13 @@
         .log-good { color: #4CAF50; } /* Verde para bloqueio esperado / falha */
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
+        .log-leak { color: #FF9800; font-weight: bold; } /* Laranja para leituras OOB */
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
     </style>
 </head>
 <body>
-    <h1>PS4 FW 12.02 - Teste Combinado de Vulnerabilidades</h1>
-    <p>Testa: XSS/CSP Bypass, OOB Write, PP Básica, PP Hijack (Array.map).</p>
+    <h1>PS4 FW 12.02 - Teste Combinado v3 (Impacto Detalhado)</h1>
+    <p>Testa: XSS/CSP Bypass, OOB Write (com leitura 32/64bit), PP Básica, PP Hijack (Array.map com ação + log interno).</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
@@ -48,11 +49,24 @@
              }
         };
 
+        // Helper para formatar números como hex
+        const toHex = (val, bits = 32) => {
+             // Lida com valores não numéricos ou muito grandes que podem vir de leituras inválidas
+             if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
+             // Garante que o valor seja tratado como um inteiro sem sinal dentro do limite de bits
+             let num = Number(val);
+             if (bits <= 32) {
+                 num = num >>> 0; // Trata como Uint32
+             }
+             // Para 64 bits, a representação exata é complexa, mas podemos mostrar o hex do número JS
+             const pad = Math.ceil(bits / 4);
+             return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
+        }
+
         // --- Teste 1: CSP Bypass / XSS ---
+        // (Função testCSPBypass igual à versão anterior)
         const testCSPBypass = async () => {
             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
-            let success = false;
-
             // 1.1 Teste com data: URI
             log("Tentando XSS via data: URI (alert)...", 'subtest');
             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
@@ -64,7 +78,6 @@
                 scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: URI!", 'error'); };
                 document.body.appendChild(scriptTag);
                 log("Tag <script> data: URI adicionada.", 'info');
-                // Nota: O sucesso real é logado pelo payload dentro do try/catch
             } catch (e) { log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error'); }
 
             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE * 2));
@@ -88,42 +101,107 @@
                 imgTag.setAttribute('onerror', onerrorPayload);
                 document.body.appendChild(imgTag);
                 log("Tag <img> com onerror adicionada.", 'info');
-                 // Nota: O sucesso real é logado pelo payload dentro do try/catch
             } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error'); }
 
             log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test');
         };
 
-        // --- Teste 2: OOB Write ---
-        const testOOBWrite = async () => {
-            log("--- Iniciando Teste 2: OOB Write (Confirmação) ---", 'test');
+        // --- Teste 2: OOB Write (com leitura 32/64bit) ---
+        // Modificado para tentar leituras U32/U64 após escrita OOB
+        const testOOBWriteWithReadEnhanced = async () => {
+            log("--- Iniciando Teste 2: OOB Write (com Leitura 32/64bit) ---", 'test');
             const bufferSize = 32;
-            const writeValue = 0xEE;
-            const vulnerableOffsets = [-1, 32, 42];
-            let successCount = 0;
+            const writeValue = 0xEE; // 238 em decimal
+            const vulnerableOffsets = [-1, 32, 42]; // Offsets onde OOB write foi permitido
+            let writeSuccessCount = 0;
+            let readConfirmSuccessCount = 0;
 
             try {
-                const buffer = new ArrayBuffer(bufferSize);
-                const view = new Uint8Array(buffer);
+                const buffer = new ArrayBuffer(bufferSize + 128); // Buffer maior para leituras OOB
+                const dataView = new DataView(buffer);
+                const baseOffset = 64; // Área de trabalho começa em 64
+
+                // Preenche o buffer com um padrão reconhecível (0xAA)
+                for (let i = 0; i < buffer.byteLength; i++) {
+                    dataView.setUint8(i, 0xAA);
+                }
+                // Marca os limites esperados da área de 32 bytes
+                dataView.setUint8(baseOffset - 1, 0xBB); // Marcador antes
+                dataView.setUint8(baseOffset + bufferSize, 0xCC); // Marcador depois
+
+                log(`Área de trabalho do buffer: Addr ${baseOffset} a ${baseOffset + bufferSize - 1}`, 'info');
 
                 for (const offset of vulnerableOffsets) {
-                    log(`Tentando escrita OOB U8 @${offset} com valor ${writeValue}...`, 'subtest');
+                    const targetAddress = baseOffset + offset; // Endereço absoluto no nosso buffer
+                    log(`Tentando escrita OOB U8 @${offset} (addr ${targetAddress}) com valor ${toHex(writeValue, 8)}...`, 'subtest');
                     await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                    let writeAllowed = false;
                     try {
-                        view[offset] = writeValue;
+                        dataView.setUint8(targetAddress, writeValue); // Tenta a escrita OOB
                         log(`VULN: Escrita OOB U8 @${offset} permitida!`, 'vuln');
-                        successCount++;
+                        writeSuccessCount++;
+                        writeAllowed = true;
                     } catch (e) {
                         log(`BLOQUEADO: Escrita OOB U8 @${offset} impedida: ${e.message}`, 'good');
                     }
-                }
+
+                    // Se a escrita foi permitida, tenta várias leituras OOB
+                    if (writeAllowed) {
+                        // 1. Ler de volta o byte escrito
+                        try {
+                            const readBackValue = dataView.getUint8(targetAddress);
+                            if (readBackValue === writeValue) {
+                                log(`  -> Leitura U8 @${offset}: OK (${toHex(readBackValue, 8)})`, 'vuln');
+                                readConfirmSuccessCount++;
+                            } else {
+                                log(`  -> Leitura U8 @${offset}: ${toHex(readBackValue, 8)} (inesperado)`, 'warn');
+                            }
+                        } catch (e) { log(`  -> Leitura U8 @${offset}: FALHA (${e.message})`, 'error'); }
+
+                        // 2. Tentar ler 32 bits (4 bytes) começando no offset OOB
+                        log(`  Tentando leitura U32 @${offset} (addr ${targetAddress})...`, 'info');
+                        await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE / 2));
+                        try {
+                            // Lê 4 bytes como Uint32 (little-endian)
+                            const readU32 = dataView.getUint32(targetAddress, true);
+                            log(`  -> Leitura OOB U32 @${offset}: ${toHex(readU32, 32)}`, 'leak'); // Loga como 'leak'
+                        } catch (e) { log(`  -> Leitura OOB U32 @${offset}: FALHA (${e.message})`, 'warn'); }
+
+                        // 3. Tentar ler 64 bits (8 bytes) começando no offset OOB
+                        log(`  Tentando leitura U64 @${offset} (addr ${targetAddress})...`, 'info');
+                         await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE / 2));
+                        try {
+                            // Lê 8 bytes como dois Uint32 (little-endian)
+                            const low = dataView.getUint32(targetAddress, true);
+                            const high = dataView.getUint32(targetAddress + 4, true);
+                             log(`  -> Leitura OOB U64 @${offset}: H=${toHex(high, 32)} L=${toHex(low, 32)}`, 'leak'); // Loga como 'leak'
+                        } catch (e) { log(`  -> Leitura OOB U64 @${offset}: FALHA (${e.message})`, 'warn'); }
+
+                         // 4. Tentar ler 32 bits numa localização adjacente (offset + 4)
+                         const adjacentOffset = offset + 4;
+                         const adjacentAddress = baseOffset + adjacentOffset;
+                         // Verifica se o endereço adjacente ainda está dentro do buffer alocado para evitar erros esperados
+                         if (adjacentAddress + 4 <= buffer.byteLength) {
+                            log(`  Tentando leitura U32 @${adjacentOffset} (addr ${adjacentAddress})...`, 'info');
+                            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE / 2));
+                            try {
+                                const readAdjacentU32 = dataView.getUint32(adjacentAddress, true);
+                                log(`  -> Leitura OOB U32 @${adjacentOffset}: ${toHex(readAdjacentU32, 32)}`, 'leak');
+                            } catch (e) { log(`  -> Leitura OOB U32 @${adjacentOffset}: FALHA (${e.message})`, 'warn'); }
+                         } else {
+                             log(`  Leitura U32 @${adjacentOffset} (addr ${adjacentAddress}) ignorada (fora do buffer de teste).`, 'info');
+                         }
+
+                    } // fim if(writeAllowed)
+                } // fim loop for
             } catch (e) { log(`Erro inesperado durante o teste OOB Write: ${e.message}`, 'error'); }
 
-            log(`--- Teste 2 Concluído (${successCount}/${vulnerableOffsets.length} escritas OOB bem-sucedidas) ---`, 'test');
-            return successCount > 0;
+            log(`--- Teste 2 Concluído (${writeSuccessCount}/${vulnerableOffsets.length} escritas OOB, ${readConfirmSuccessCount} leituras de confirmação U8 OOB) ---`, 'test');
+            return writeSuccessCount > 0;
         };
 
         // --- Teste 3: Prototype Pollution (Básica) ---
+        // (Função testBasicPP igual à versão anterior)
         const testBasicPP = async () => {
             log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
             const testProp = '__pp_basic_test__';
@@ -145,7 +223,6 @@
             } catch (e) {
                 log(`Erro durante teste PP Básico: ${e.message}`, 'error');
             } finally {
-                // Limpeza
                 try { delete Object.prototype[testProp]; } catch(e){}
                 log(`Limpeza de Object.prototype.${testProp} realizada.`, 'info');
             }
@@ -153,37 +230,60 @@
             return success;
         };
 
-        // --- Teste 4: Prototype Pollution (Hijack Array.prototype.map) ---
-        const testPPMapHijack = async () => {
-            log("--- Iniciando Teste 4: PP Hijack (Array.prototype.map) ---", 'test');
-            const originalMap = Array.prototype.map; // Guarda a função original
+        // --- Teste 4: Prototype Pollution (Hijack Array.prototype.map com Ação + Log Interno) ---
+        // Modificado para logar diretamente de dentro da função sequestrada
+        const testPPMapHijackWithActionEnhanced = async () => {
+            log("--- Iniciando Teste 4: PP Hijack (Array.prototype.map com Ação + Log Interno) ---", 'test');
+            const originalMap = Array.prototype.map;
             let hijackSuccessful = false;
-            let executionSuccessful = false;
+            let actionSuccessful = false;
+            const hijackMarker = "MAP_HIJACK_MARKER";
 
             try {
                 log("Tentando sobrescrever Array.prototype.map...", 'subtest');
-                Array.prototype.map = function hijackedMap(...args) {
-                    log("VULN: Array.prototype.map SEQUESTRADA (HIJACKED)!", 'vuln');
-                    hijackSuccessful = true; // Marca que a função foi sobrescrita
-                    // Chama a função original para não quebrar tudo (opcional, mas recomendado)
-                    // return originalMap.apply(this, args);
-                    // Ou retorna algo diferente para confirmar a execução
-                    return "MAP HIJACKED";
+                // Define a função sequestradora
+                Array.prototype.map = function hijackedMap(callbackFn, thisArg) {
+                    // Log Imediato para provar execução
+                    log("===> VULN: DENTRO DA FUNÇÃO Array.prototype.map SEQUESTRADA! <===", 'vuln');
+                    hijackSuccessful = true; // Marca que o hijack ocorreu
+
+                    // Ação: Adiciona um marcador ao array sendo mapeado
+                    log(`  -> Ação Hijack: Tentando adicionar marcador "${hijackMarker}" ao array (this)...`, 'info');
+                    try {
+                         if (Array.isArray(this)) {
+                            this.push(hijackMarker); // Modifica o array original
+                            log(`  -> Ação Hijack: Marcador "${hijackMarker}" adicionado.`, 'info');
+                            actionSuccessful = true;
+                         } else {
+                             log(`  -> Ação Hijack: Falha - 'this' não é um array.`, 'warn');
+                         }
+                    } catch(actionError) {
+                         log(`  -> Ação Hijack: Erro ao adicionar marcador: ${actionError.message}`, 'error');
+                    }
+
+                    // Tenta chamar log() novamente para demonstrar controle
+                    log("  -> Testando chamada de log() interna do hijack...", 'info');
+                    try { log("     Log interno do hijack executado!", "vuln"); } catch(e) { console.error("Falha no log interno do hijack");}
+
+                     // Retorna um valor distinto para o resultado do map
+                     return ["HIJACKED_MAP_RETURN_VALUE"];
                 };
 
-                log("Testando a função map sequestrada com [1, 2].map(x => x)...", 'subtest');
+                log("Testando a função map sequestrada com [10, 20].map(x => x / 10)...", 'subtest');
                 await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                const testArray = [1, 2];
-                const result = testArray.map(x => x); // Chama a função (potencialmente sequestrada)
+                const testArray = [10, 20]; // Array para o teste
+                log(`Array ANTES do map: [${testArray.join(', ')}]`, 'info');
+                const result = testArray.map(x => x / 10); // Chama map (que agora está sequestrado)
 
-                log(`Resultado de [1, 2].map(): ${result}`, 'info');
+                // Verifica o estado do array e o resultado após a chamada
+                log(`Array DEPOIS do map: [${testArray.join(', ')}] (Esperado ter o marcador)`, 'info');
+                log(`Resultado retornado por map(): [${result.join(', ')}] (Esperado ser o valor do hijack)`, 'info');
 
-                // Verifica se o resultado é o esperado da função sequestrada
-                if (result === "MAP HIJACKED") {
-                     log("VULN: Execução da função map sequestrada confirmada!", 'vuln');
-                     executionSuccessful = true;
+                // Confirma se a ação teve sucesso
+                if (actionSuccessful && testArray.length > 2 && testArray[testArray.length - 1] === hijackMarker) {
+                     log("VULN: Ação da função map sequestrada (adicionar marcador) confirmada!", 'vuln');
                 } else if (hijackSuccessful) {
-                    log("AVISO: Função map foi sequestrada, mas o resultado não foi o esperado.", 'warn');
+                    log("AVISO: Função map foi sequestrada, mas a ação falhou ou não foi detectada no array.", 'warn');
                 } else {
                     log("FALHA: Sequestro de Array.prototype.map não funcionou.", 'good');
                 }
@@ -191,39 +291,39 @@
             } catch (e) {
                 log(`Erro durante teste PP Hijack Map: ${e.message}`, 'error');
             } finally {
-                // Restaura a função original SEMPRE
+                // RESTAURA A FUNÇÃO ORIGINAL - ESSENCIAL!
                 Array.prototype.map = originalMap;
                 log("Função Array.prototype.map restaurada.", 'info');
-                 // Verifica se foi restaurada
                  if (Array.prototype.map === originalMap) {
                      log("Restauração de map confirmada.", 'info');
                  } else {
+                     // Loga um erro grave se a restauração falhar, pois pode quebrar o navegador
                      log("ERRO CRÍTICO: FALHA ao restaurar Array.prototype.map!", 'error');
                  }
             }
-            log(`--- Teste 4 Concluído (PP Hijack Map ${executionSuccessful ? 'Confirmado' : 'Falhou'}) ---`, 'test');
-            return executionSuccessful;
+            log(`--- Teste 4 Concluído (PP Hijack Map Action ${actionSuccessful ? 'Confirmado' : 'Falhou'}) ---`, 'test');
+            return actionSuccessful;
         };
 
 
         // --- Função Principal para Rodar Todos os Testes ---
         const runAllTests = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO TODOS OS TESTES COMBINADOS ====", 'critical');
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS v3 (Impacto Detalhado) ====", 'critical');
 
-            await testCSPBypass();
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); // Pausa entre testes principais
-
-            await testOOBWrite();
+            await testCSPBypass(); // Teste 1
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testBasicPP();
+            await testOOBWriteWithReadEnhanced(); // Teste 2 (v3 com leitura 32/64bit)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testPPMapHijack();
+            await testBasicPP(); // Teste 3
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            log("\n==== TODOS OS TESTES COMBINADOS CONCLUÍDOS ====", 'critical');
+            await testPPMapHijackWithActionEnhanced(); // Teste 4 (v3 com log interno)
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+
+            log("\n==== TODOS OS TESTES COMBINADOS v3 CONCLUÍDOS ====", 'critical');
             if (runBtn) runBtn.disabled = false;
         };
 
@@ -236,12 +336,4 @@
 </html>
 ```
 
-**Como usar:**
-
-1.  **Copie** todo o código acima.
-2.  **Cole** em um editor de texto simples (Bloco de Notas, TextEdit, etc.).
-3.  **Salve** o arquivo com a extensão `.html` (ex: `teste_completo_ps4.html`), certificando-se de escolher "Todos os ficheiros" no tipo ao salvar.
-4.  **Hospede** o arquivo HTML em um local acessível pela rede do seu PS4.
-5.  **Abra** o arquivo no navegador do PS4.
-6.  **Clique** no botão "Iniciar Todos os Testes".
-7.  **Observe** o log e o comportamento do navegador para verificar os resultados de cada tes
+Execute este script v3. Os resultados no log, especialmente para os Testes 2 e 4, devem agora fornecer evidências mais fortes do impacto local das vulnerabilidades, o que será útil para o seu vídeo PoC e para a análise do HackerOne. Lembre-se de que o objetivo ainda é demonstrar as primitivas e seu impacto imediato, não construir um exploit comple
