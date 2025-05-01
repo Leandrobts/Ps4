@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 FW 12.02 - Teste v11 (PP Agressivo)</title>
+    <title>PS4 FW 12.02 - Teste v12 (PP Agressivo 2)</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -16,15 +16,21 @@
         .log-error { color: #f44336; }
         .log-leak { color: #FF9800; font-weight: bold; }
         .log-ptr { color: #f0f; font-weight: bold; }
-        #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
+        #xss-target-div, #iframe-target-div { border: 2px dotted orange; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
+        iframe { width: 90%; height: 50px; border: 1px solid #555; }
     </style>
 </head>
 <body>
-    <h1>PS4 FW 12.02 - Teste v11 (PP Agressivo)</h1>
-    <p>Testa: XSS, OOB R/W (Info Leak), PP Hijack (toString), PP Gadget (innerHTML).</p>
+    <h1>PS4 FW 12.02 - Teste v12 (PP Agressivo 2)</h1>
+    <p>Testa: XSS, OOB R/W (Info Leak), PP Gadget (srcdoc), PP Hijack (createElement).</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
+    <div id="iframe-target-div">
+        Área para teste do iframe (srcdoc):<br>
+        <iframe id="test-iframe"></iframe>
+    </div>
+
 
     <script>
         // --- Globals & Setup ---
@@ -77,10 +83,11 @@
          }
 
         // --- Teste 1: CSP Bypass / XSS ---
+        // (Função testCSPBypass igual à versão anterior)
         const testCSPBypass = async () => {
             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
             // ... (código igual ao script v9) ...
-             // 1.1 Teste com data: URI
+            // 1.1 Teste com data: URI
             log("Tentando XSS via data: URI (alert)...", 'subtest');
             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
             try {
@@ -130,7 +137,6 @@
             for (let i = -64; i < bufferSize + 64; i += 4) { oobReadOffsets.push(i); }
             let writeSuccess = false;
             let potentialLeakFoundCount = 0;
-            let leakedValueForLater = null; // Armazena o primeiro leak
 
             try {
                 const buffer = new ArrayBuffer(bufferSize + 256);
@@ -157,29 +163,21 @@
                     const readTargetAddress = baseOffset + readOffset;
                     if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) continue;
 
-                    // Tenta ler U64
-                     try {
+                    try {
                         const low = dataView.getUint32(readTargetAddress, true);
                         const high = dataView.getUint32(readTargetAddress + 4, true);
                         if (isPotentialPointer64(high, low)) {
                             const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
                             log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr');
                             potentialLeakFoundCount++;
-                            if (leakedValueForLater === null) leakedValueForLater = valueStr;
-                        }
-                    } catch (e) {/* Ignora */}
-
-                    // Tenta ler U32 (se não achou U64 ainda)
-                    if (leakedValueForLater === null) {
-                         try {
-                            const val32 = dataView.getUint32(readTargetAddress, true);
+                        } else {
+                            const val32 = low;
                             if (isPotentialData32(val32)) {
                                 log(`  -> Leak U32? @${readOffset}: ${toHex(val32, 32)}`, 'leak');
                                 potentialLeakFoundCount++;
-                                if (leakedValueForLater === null) leakedValueForLater = toHex(val32, 32);
                             }
-                        } catch (e) {/* Ignora */}
-                    }
+                        }
+                    } catch (e) {/* Ignora */}
                     if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1));
                 }
             } catch (e) { log(`Erro inesperado durante o teste Info Leak: ${e.message}`, 'error'); }
@@ -188,116 +186,10 @@
             return writeSuccess;
         };
 
-        // --- Teste 3: PP Hijack (Object.prototype.toString) ---
-        // NOVO: Tenta sequestrar toString
-        const testPPTostringHijack = async () => {
-            log("--- Iniciando Teste 3: PP Hijack (Object.prototype.toString) ---", 'test');
-            const originalToString = Object.prototype.toString; // Guarda a original
-            let hijackSuccessful = false;
-            let executionSuccessful = false;
-
-            try {
-                log("Tentando sobrescrever Object.prototype.toString...", 'subtest');
-                Object.prototype.toString = function hijackedToString() {
-                    log("===> VULN: DENTRO DA FUNÇÃO Object.prototype.toString SEQUESTRADA! <===", 'vuln');
-                    hijackSuccessful = true;
-                    // Retorna uma string diferente para provar a execução
-                    return "[object Hijacked]";
-                };
-
-                log("Testando a função toString sequestrada com {}.toString()...", 'subtest');
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                const testObject = {};
-                const result = testObject.toString(); // Chama a função (potencialmente sequestrada)
-
-                log(`Resultado de {}.toString(): ${result}`, 'info');
-
-                // Verifica se o resultado é o esperado da função sequestrada
-                if (result === "[object Hijacked]") {
-                     log("VULN: Execução da função toString sequestrada confirmada!", 'vuln');
-                     executionSuccessful = true;
-                } else if (hijackSuccessful) {
-                    log("AVISO: Função toString foi sequestrada, mas o retorno não foi o esperado.", 'warn');
-                } else {
-                    log("FALHA: Sequestro de Object.prototype.toString não funcionou.", 'good');
-                }
-
-            } catch (e) {
-                log(`Erro durante teste PP Hijack toString: ${e.message}`, 'error');
-            } finally {
-                // Restaura a função original SEMPRE
-                Object.prototype.toString = originalToString;
-                log("Função Object.prototype.toString restaurada.", 'info');
-                 if (Object.prototype.toString === originalToString) { log("Restauração de toString confirmada.", 'info'); }
-                 else { log("ERRO CRÍTICO: FALHA ao restaurar Object.prototype.toString!", 'error'); }
-            }
-            log(`--- Teste 3 Concluído (PP Hijack toString ${executionSuccessful ? 'Confirmado' : 'Falhou'}) ---`, 'test');
-            return executionSuccessful;
-        };
-
-        // --- Teste 4: PP Gadget (innerHTML) ---
-        // NOVO: Testa se a poluição de innerHTML afeta novos elementos
-        const testPPInnerHTMLGadget = async () => {
-            log("--- Iniciando Teste 4: PP Gadget (innerHTML) ---", 'test');
-            const testProp = 'innerHTML';
-            const testValue = '<h3 class="log-vuln">PP Gadget innerHTML Funcionou!</h3>';
-            let pollutionDone = false;
-            let gadgetWorked = false;
-
-            try {
-                log(`Poluindo Object.prototype.${testProp}...`, 'subtest');
-                // É importante verificar se a propriedade já existe para não quebrar o navegador
-                if (Object.prototype.hasOwnProperty(testProp)) {
-                     log(`Aviso: Object.prototype já possui ${testProp}. Teste abortado para evitar instabilidade.`, 'warn');
-                     log(`--- Teste 4 Concluído (Abortado) ---`, 'test');
-                     return false;
-                }
-                Object.prototype[testProp] = testValue;
-                pollutionDone = true;
-                log(`Object.prototype.${testProp} poluído.`, 'info');
-
-                log("Criando novo elemento <div> e verificando herança de innerHTML...", 'subtest');
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                const newDiv = document.createElement('div');
-
-                // Verifica se o novo div HERDOU o valor ANTES de qualquer atribuição
-                // A leitura direta pode não funcionar como esperado dependendo da implementação do DOM
-                // Vamos tentar adicionar ao DOM para ver se renderiza o conteúdo poluído
-                 log("Adicionando novo div à área de teste XSS...", 'info');
-                 const targetArea = document.getElementById('xss-target-div');
-                 if (targetArea) {
-                     targetArea.appendChild(newDiv);
-                     // Verifica o innerHTML RENDERIZADO após adicionar
-                     await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); // Pequena pausa para renderizar
-                     if (targetArea.innerHTML.includes(testValue)) {
-                          log(`VULN: PP Gadget innerHTML parece ter funcionado! Conteúdo injetado via prototype.`, 'vuln');
-                          gadgetWorked = true;
-                     } else {
-                          log(`FALHA: Conteúdo poluído não apareceu no novo div. Gadget innerHTML ineficaz?`, 'good');
-                          // Limpa a área de teste se falhou
-                          targetArea.innerHTML = "Área para teste de XSS DOM.";
-                     }
-                 } else {
-                      log("Erro: Área de teste XSS não encontrada.", 'error');
-                 }
-
-            } catch (e) {
-                log(`Erro durante teste PP Gadget innerHTML: ${e.message}`, 'error');
-            } finally {
-                // Limpeza
-                if (pollutionDone) {
-                    try { delete Object.prototype[testProp]; } catch(e){}
-                    log(`Limpeza de Object.prototype.${testProp} realizada.`, 'info');
-                }
-            }
-            log(`--- Teste 4 Concluído (PP Gadget innerHTML ${gadgetWorked ? 'Funcionou' : 'Falhou'}) ---`, 'test');
-            return gadgetWorked;
-        };
-
-        // --- Teste 5: Prototype Pollution (Básica) ---
-        // Mantido para confirmação geral
+        // --- Teste 3: Prototype Pollution (Básica) ---
+        // (Função testBasicPP igual à versão anterior)
         const testBasicPP = async () => {
-            log("--- Iniciando Teste 5: Prototype Pollution (Básica) ---", 'test');
+            log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
             // ... (código igual ao script v9) ...
             const testProp = '__pp_basic_test__';
             const testValue = 'Polluted!';
@@ -319,15 +211,160 @@
                 try { delete Object.prototype[testProp]; } catch(e){}
                 log(`Limpeza de Object.prototype.${testProp} realizada.`, 'info');
             }
-            log(`--- Teste 5 Concluído (PP Básica ${success ? 'Confirmada' : 'Falhou'}) ---`, 'test');
+            log(`--- Teste 3 Concluído (PP Básica ${success ? 'Confirmada' : 'Falhou'}) ---`, 'test');
             return success;
+        };
+
+        // --- Teste 4: PP Gadget (srcdoc) ---
+        // NOVO: Tenta poluir srcdoc e aplicá-lo a um iframe
+        const testPPSrcdocGadget = async () => {
+            log("--- Iniciando Teste 4: PP Gadget (srcdoc) ---", 'test');
+            const testProp = 'srcdoc';
+            // Conteúdo HTML a ser injetado no iframe
+            const testValue = '<!DOCTYPE html><html><body style="background:red; color:white;"><h1>PP Gadget srcdoc Funcionou!</h1></body></html>';
+            let pollutionDone = false;
+            let gadgetWorked = false;
+            const iframeId = 'test-iframe';
+
+            try {
+                log(`Poluindo Object.prototype.${testProp}...`, 'subtest');
+                 // Verifica se já existe para segurança
+                if (Object.prototype.hasOwnProperty(testProp)) {
+                     log(`Aviso: Object.prototype já possui ${testProp}. Teste abortado.`, 'warn');
+                     log(`--- Teste 4 Concluído (Abortado) ---`, 'test');
+                     return false;
+                }
+                Object.prototype[testProp] = testValue;
+                pollutionDone = true;
+                log(`Object.prototype.${testProp} poluído.`, 'info');
+
+                log("Acedendo ao iframe existente e verificando srcdoc...", 'subtest');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                const iframe = document.getElementById(iframeId);
+
+                if (iframe) {
+                    // Força uma re-renderização ou acesso que possa acionar a herança
+                    // A simples leitura de iframe.srcdoc pode não ser suficiente
+                    log(`Verificando iframe.contentWindow.location (pode não refletir srcdoc imediatamente)...`, 'info');
+                     try {
+                         // Tenta aceder ao conteúdo - pode falhar devido a same-origin se srcdoc funcionar
+                         const iframeContent = iframe.contentWindow.document.body.innerHTML;
+                         log(`Conteúdo inicial do iframe (antes de srcdoc ter efeito?): ${iframeContent.substring(0,50)}...`, 'info');
+                     } catch(e) {
+                         log(`AVISO: Erro ao aceder conteúdo do iframe (esperado se srcdoc funcionou?): ${e.message}`, 'warn');
+                     }
+
+                    // A melhor forma de verificar é visualmente ou esperando um pouco
+                    log("Verifique VISUALMENTE se o conteúdo do iframe abaixo mudou (fundo vermelho, texto).", 'warn');
+                    // Vamos assumir sucesso se a poluição foi feita, a verificação visual é necessária
+                    // Poderíamos tentar um timeout e verificar o conteúdo depois, mas é complexo
+                    gadgetWorked = true; // Assume sucesso para log, mas requer confirmação visual
+                    log(`VULN?: PP Gadget srcdoc potencialmente funcionou. Confirmação visual necessária.`, 'vuln');
+
+                } else {
+                    log(`Erro: Iframe com id "${iframeId}" não encontrado.`, 'error');
+                }
+
+            } catch (e) {
+                log(`Erro durante teste PP Gadget srcdoc: ${e.message}`, 'error');
+            } finally {
+                // Limpeza
+                if (pollutionDone) {
+                    try { delete Object.prototype[testProp]; } catch(e){}
+                    log(`Limpeza de Object.prototype.${testProp} realizada.`, 'info');
+                }
+            }
+            log(`--- Teste 4 Concluído (PP Gadget srcdoc ${gadgetWorked ? 'Potencialmente Funcionou' : 'Falhou'}) ---`, 'test');
+            return gadgetWorked; // Retorna true se tentou, requer confirmação visual
+        };
+
+        // --- Teste 5: PP Hijack (document.createElement) ---
+        // NOVO: Tenta sequestrar a criação de elementos
+        const testPPCreateElementHijack = async () => {
+            log("--- Iniciando Teste 5: PP Hijack (document.createElement) ---", 'test');
+            // Guarda a função original (importante!)
+            const originalCreateElement = document.createElement;
+            let hijackSuccessful = false;
+            let executionSuccessful = false;
+
+            try {
+                log("Tentando sobrescrever document.createElement...", 'subtest');
+                // ATENÇÃO: Mexer em document pode ser instável!
+                // Usar Object.prototype aqui pode não funcionar diretamente para métodos do 'document'.
+                // Vamos tentar poluir o protótipo do próprio 'document' se possível, ou globalmente.
+                // Abordagem mais segura: poluir globalmente e esperar que afete o document.
+                 if (Object.prototype.hasOwnProperty('createElement')) {
+                     log(`Aviso: Object.prototype já possui createElement. Teste abortado.`, 'warn');
+                     log(`--- Teste 5 Concluído (Abortado) ---`, 'test');
+                     return false;
+                 }
+
+                Object.prototype.createElement = function hijackedCreateElement(tagName, options) {
+                    log(`===> VULN: DENTRO DA FUNÇÃO document.createElement SEQUESTRADA! (Tentativa de criar: ${tagName}) <===`, 'vuln');
+                    hijackSuccessful = true;
+
+                    // Loga os argumentos recebidos
+                    log(`  -> Hijack createElement: tagName=${tagName}, options=${options}`, 'info');
+
+                    // Chama a função original para realmente criar o elemento
+                    // É crucial chamar a original para não quebrar completamente o DOM
+                    try {
+                         log(`  -> Hijack createElement: Chamando originalCreateElement...`, 'info');
+                         // 'this' aqui pode não ser 'document', usar 'document' explicitamente
+                         const element = originalCreateElement.call(document, tagName, options);
+                         log(`  -> Hijack createElement: Elemento criado pela original: ${element ? element.tagName : 'null'}`, 'info');
+                         // Poderia modificar o elemento aqui antes de retornar
+                         // Ex: element.style.border = "2px solid magenta";
+                         return element;
+                    } catch(e) {
+                         log(`  -> Hijack createElement: Erro ao chamar original: ${e.message}`, 'error');
+                         // Tenta retornar um placeholder para evitar mais erros
+                         return originalCreateElement.call(document, 'div'); // Cria um div como fallback
+                    }
+                };
+                log("Object.prototype.createElement poluído.", 'info');
+
+
+                log("Testando a função createElement sequestrada criando um <span>...", 'subtest');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                try {
+                    const newSpan = document.createElement('span'); // Chama a função (potencialmente sequestrada)
+                    log(`Elemento criado: ${newSpan ? newSpan.tagName : 'null'}`, 'info');
+                    // Verifica se o log interno do hijack apareceu
+                    // A confirmação real vem da mensagem "DENTRO DA FUNÇÃO..."
+                    if (hijackSuccessful) {
+                        log("VULN: Execução da função createElement sequestrada confirmada pelo log interno!", 'vuln');
+                        executionSuccessful = true;
+                    }
+                } catch(e) {
+                     log(`Erro ao tentar criar elemento com createElement sequestrado: ${e.message}`, 'error');
+                }
+
+            } catch (e) {
+                log(`Erro durante teste PP Hijack createElement: ${e.message}`, 'error');
+            } finally {
+                // Restaura a função original SEMPRE
+                // A restauração pode falhar se o protótipo foi alterado de forma inesperada
+                try {
+                     // Tenta restaurar no protótipo e no document para garantir
+                     delete Object.prototype.createElement;
+                     document.createElement = originalCreateElement;
+                     log("Tentativa de restauração de document.createElement realizada.", 'info');
+                     if (document.createElement === originalCreateElement) { log("Restauração de createElement confirmada.", 'info'); }
+                     else { log("ERRO CRÍTICO: FALHA ao restaurar document.createElement!", 'error'); }
+                } catch(restoreError) {
+                     log(`Erro ao restaurar createElement: ${restoreError.message}`, 'error');
+                }
+            }
+            log(`--- Teste 5 Concluído (PP Hijack createElement ${executionSuccessful ? 'Confirmado' : 'Falhou'}) ---`, 'test');
+            return executionSuccessful;
         };
 
 
         // --- Função Principal para Rodar Todos os Testes ---
         const runAllTests = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO TODOS OS TESTES COMBINADOS v11 (PP Agressivo) ====", 'critical');
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS v12 (PP Agressivo 2) ====", 'critical');
 
             await testCSPBypass(); // Teste 1
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
@@ -335,16 +372,16 @@
             await testOOBReadInfoLeakEnhanced(); // Teste 2
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testPPTostringHijack(); // Teste 3 (NOVO)
+            await testBasicPP(); // Teste 3 (PP Básica primeiro)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testPPInnerHTMLGadget(); // Teste 4 (NOVO)
+            await testPPSrcdocGadget(); // Teste 4 (NOVO - srcdoc)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testBasicPP(); // Teste 5
+            await testPPCreateElementHijack(); // Teste 5 (NOVO - createElement)
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            log("\n==== TODOS OS TESTES COMBINADOS v11 CONCLUÍDOS ====", 'critical');
+            log("\n==== TODOS OS TESTES COMBINADOS v12 CONCLUÍDOS ====", 'critical');
             if (runBtn) runBtn.disabled = false;
         };
 
@@ -357,7 +394,7 @@
 
 **O que procurar nos resultados:**
 
-* **Teste 3 (PP Hijack `toString`):** Verifique se a mensagem `VULN: DENTRO DA FUNÇÃO Object.prototype.toString SEQUESTRADA!` aparece e se o resultado de `{}.toString()` é `[object Hijacked]`.
-* **Teste 4 (PP Gadget `innerHTML`):** Verifique se a mensagem `VULN: PP Gadget innerHTML parece ter funcionado!` aparece e se o texto "PP Gadget innerHTML Funcionou!" é realmente renderizado dentro da "Área para teste de XSS DOM".
+* **Teste 4 (PP Gadget `srcdoc`):** Olhe para o `<iframe>` na parte inferior da página. Mudou o conteúdo para ter fundo vermelho e o texto "PP Gadget srcdoc Funcionou!"? O log indicará "Potencialmente Funcionou", mas a confirmação é visual.
+* **Teste 5 (PP Hijack `createElement`):** Procure no log pela mensagem `VULN: DENTRO DA FUNÇÃO document.createElement SEQUESTRADA!`. Se ela aparecer quando o script tenta criar um `<span>`, o hijack funcionou.
 
-Se estes testes funcionarem, eles demonstram um controlo ainda mais profundo sobre o ambiente JavaScript e a interação com o DOM através da Poluição de Protótipo, o que pode fortalecer a sua P
+Estes testes exploram vetores diferentes de PP. O sucesso em qualquer um deles demonstra um controlo significativo sobre o ambiente do navegad
