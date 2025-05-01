@@ -14,6 +14,7 @@
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
+        .log-leak { color: #FF9800; font-weight: bold; }
     </style>
 </head>
 <body>
@@ -38,6 +39,7 @@
 
             // ===========================================================================
             // <<< EDITE/ADICIONE alvos [Protótipo, Nome da Função, Ação p/ Chamar] >>>
+            //      Baseado na sua pesquisa externa por gadgets PP!
             const targets = [
                 // Array
                 { proto: Array.prototype,    key: 'map',      action: () => [1, 2].map(x => x), info: "Array Map" },
@@ -58,69 +60,80 @@
                 { proto: Object.prototype,   key: 'toString', action: () => ({}).toString(), info: "Object ToString" },
                 { proto: Object.prototype,   key: 'hasOwnProperty', action: () => ({}).hasOwnProperty('test'), info: "Object HasOwnProperty" },
                 { proto: Object.prototype,   key: 'valueOf', action: () => ({}).valueOf(), info: "Object ValueOf" },
-                 // DOM (Potencialmente mais arriscado/interessante)
-                //{ proto: Element.prototype,  key: 'innerHTML', setter: true, action: () => {let d=document.createElement('div'); d.innerHTML='test';}, info: "Element InnerHTML Setter"}, // Testar setter
-                //{ proto: Node.prototype,     key: 'appendChild', action: () => {let d=document.createElement('div'); d.appendChild(document.createElement('span'));}, info: "Node AppendChild"},
-                //{ proto: EventTarget.prototype, key: 'addEventListener', action: () => {document.addEventListener('click',()=>{})}, info: "EventTarget AddEvListener"},
+                 // DOM (Exemplos - podem precisar de mais contexto ou não ser poluíveis)
+                //{ proto: Element.prototype,  key: 'innerHTML', setter: true, action: () => {let d=document.createElement('div'); d.innerHTML='test';}, info: "Element InnerHTML Setter"},
+                //{ proto: Node.prototype,     key: 'appendChild', action: () => {let d=document.createElement('div'); try{d.appendChild(document.createElement('span'));}catch(e){}}, info: "Node AppendChild"},
+                //{ proto: EventTarget.prototype, key: 'addEventListener', action: () => {try{document.addEventListener('click',()=>{})}catch(e){}}, info: "EventTarget AddEvListener"},
             ];
              // ===========================================================================
 
             let overallSuccess = false;
 
             for (const target of targets) {
-                const { proto, key, action, info, setter = false } = target; // Adiciona flag 'setter'
-                // Validar
-                if (!proto || !key || typeof key !== 'string' || !action) continue;
-                const descriptor = Object.getOwnPropertyDescriptor(proto, key);
-                if (!descriptor && typeof proto[key] === 'undefined') { // Se não existe nem no proto
-                     log(`INFO: Propriedade '${key}' não encontrada no protótipo ${proto?.constructor?.name || 'Object'}. Pulando.`, 'info');
+                if (!outputDiv) { log("Output Div NULO, parando testes.", "error"); break; } // Checar div a cada iteração
+
+                const { proto, key, action, info, setter = false } = target;
+                // Validar se proto existe antes de acessar
+                 if (!proto || !key || typeof key !== 'string' || !action) {
+                     log(`INFO: Definição de alvo inválida para '${info || key}'. Pulando.`, 'warn');
                      continue;
-                }
-                 // Se for setter, o alvo é o descritor, não a função diretamente
-                 const originalValue = setter ? descriptor : proto[key];
+                 }
+                 const protoName = proto.constructor?.name || 'Object'; // Nome mais robusto
+
+                // Validar se a chave existe E é uma função (ou tem setter)
+                const descriptor = Object.getOwnPropertyDescriptor(proto, key);
+                const originalValue = setter ? descriptor : proto[key]; // Salvar original
+
+                if (setter && (!descriptor || !descriptor.set)) {
+                    log(`INFO: Propriedade '${key}' não tem um setter no protótipo ${protoName}. Pulando.`, 'info');
+                    continue;
+                 }
                  if (!setter && typeof originalValue !== 'function') {
-                    log(`INFO: Propriedade '${key}' não é uma função no protótipo ${proto?.constructor?.name || 'Object'}. Pulando.`, 'info');
+                    log(`INFO: Propriedade '${key}' não é uma função no protótipo ${protoName}. Pulando.`, 'info');
                     continue;
                  }
 
                 log(`Testando Hijack de: ${info || key}`, 'subtest');
                 let hijackDetected = false;
-                const spyIdentifier = `__SPY_FOR_${key}__`;
+                const spyIdentifier = `__SPY_FOR_${key}__`; // Identificador único
 
                  // Função/Setter espião
-                 const spyFunction = function(...args) {
-                    hijackDetected = true;
-                    log(`>> HIJACK DETECTADO! Chamada para ${key} interceptada! <<`, "vuln");
-                    // Para setters, não retornar valor, apenas logar
-                    if(setter) return;
-                    return `HIJACKED_${key}`;
+                 const createSpyFunction = (keyName) => {
+                     return function(...args) {
+                        if (!outputDiv) return; // Checar log div dentro da spy
+                        hijackDetected = true;
+                        log(`>> HIJACK DETECTADO! Chamada para ${keyName} interceptada! <<`, "vuln");
+                        return `HIJACKED_${keyName}`;
+                    };
                  };
-                 const spySetter = function(value) {
-                     hijackDetected = true;
-                     log(`>> HIJACK DETECTADO! Setter para ${key} interceptado! (Valor=${value}) <<`, "vuln");
-                     // Chamar setter original? MUITO ARRISCADO.
+                 const createSpySetter = (keyName) => {
+                      return function(value) {
+                         if (!outputDiv) return;
+                         hijackDetected = true;
+                         log(`>> HIJACK DETECTADO! Setter para ${keyName} interceptado! (Valor=${String(value).substring(0,30)}) <<`, "vuln");
+                     };
                  };
+
+                const spyHandler = setter ? createSpySetter(key) : createSpyFunction(key);
 
                 try {
                     // Poluir
-                    log(`  Poluindo ${proto.constructor.name}.prototype.${key}...`, 'info');
+                    log(`  Poluindo ${protoName}.prototype.${key}...`, 'info');
                     if (setter) {
-                        Object.defineProperty(proto, key, { set: spySetter, configurable: true });
-                        proto[spyIdentifier] = true; // Marcar que poluímos o setter
+                        Object.defineProperty(proto, key, { set: spyHandler, configurable: true });
+                        proto[spyIdentifier] = true;
                     } else {
-                         proto[key] = spyFunction;
+                         proto[key] = spyHandler;
                     }
 
-                    // Verificar (simples)
-                    let pollutionOK = setter ? (Object.getOwnPropertyDescriptor(proto, key)?.set === spySetter) : (proto[key] === spyFunction);
+                    // Verificar
+                    let pollutionOK = setter ? (Object.getOwnPropertyDescriptor(proto, key)?.set === spyHandler) : (proto[key] === spyHandler);
                     if (pollutionOK) {
-                         log(`  Poluição parece OK. Executando ação de gatilho...`, 'info');
-                         // Executar Ação
+                         log("  Poluição parece OK. Executando ação de gatilho...", 'info');
                          try {
-                            hijackDetected = false; // Resetar
+                            hijackDetected = false;
                             action(); // Chamar ação
-                            // Pequena pausa para eventos assíncronos se necessário
-                            await new Promise(r => setTimeout(r, SHORT_PAUSE/2));
+                            await new Promise(r => setTimeout(r, SHORT_PAUSE/2)); // Pausa curta
                             log(`  Ação executada. Verificando se hijack ocorreu...`, 'info');
                             if(hijackDetected) {
                                 log(`  CONFIRMADO: Hijack bem-sucedido para '${key}'.`, 'vuln');
@@ -129,7 +142,7 @@
                                 log(`  AVISO: Ação executada, mas hijack NÃO detectado para '${key}'.`, 'warn');
                             }
                          } catch (e) {
-                              log(`  ERRO ao executar ação para '${key}': ${e.message}`, 'leak');
+                              log(`  ERRO ao executar ação para '${key}' (efeito PP?): ${e.message}`, 'leak');
                               if(hijackDetected) { log(`  CONFIRMADO: Hijack ocorreu para '${key}' (antes do erro).`, 'vuln'); overallSuccess = true; }
                          }
                     } else {
@@ -138,24 +151,27 @@
                 } catch (e) {
                     log(`  Erro GERAL no teste de hijack para '${key}': ${e.message}`, 'error');
                 } finally {
-                    // Restaurar
+                    // Restaurar SEMPRE
                     if (proto && key && originalValue) {
                          const currentValue = setter ? Object.getOwnPropertyDescriptor(proto, key) : proto[key];
-                         // Restaurar apenas se ainda estiver diferente do original
                          if ((setter && (currentValue?.set !== originalValue?.set || proto[spyIdentifier])) || (!setter && currentValue !== originalValue))
                          {
-                            log(`  Restaurando ${proto.constructor.name}.prototype.${key} original...`, 'info');
-                            if (setter) {
-                                 Object.defineProperty(proto, key, originalValue); // Restaurar descritor original
-                                 delete proto[spyIdentifier];
-                            } else {
-                                proto[key] = originalValue;
+                            log(`  Restaurando ${protoName}.prototype.${key} original...`, 'info');
+                            try {
+                                if (setter) {
+                                    Object.defineProperty(proto, key, originalValue);
+                                    delete proto[spyIdentifier];
+                                } else {
+                                    proto[key] = originalValue;
+                                }
+                                 // Verificar restauração
+                                const restoredValue = setter ? Object.getOwnPropertyDescriptor(proto, key) : proto[key];
+                                const checkRestored = setter ? (restoredValue?.set === originalValue?.set && !proto[spyIdentifier]) : (restoredValue === originalValue);
+                                if (checkRestored) { log("  Restauração OK.", 'good'); }
+                                else { log(`  FALHA AO RESTAURAR '${key}'!`, 'error'); }
+                            } catch (restoreError) {
+                                 log(`  ERRO AO RESTAURAR '${key}': ${restoreError.message}`, 'error');
                             }
-                            // Verificar restauração
-                             const restoredValue = setter ? Object.getOwnPropertyDescriptor(proto, key) : proto[key];
-                             const checkRestored = setter ? (restoredValue?.set === originalValue?.set && !proto[spyIdentifier]) : (restoredValue === originalValue);
-                             if (checkRestored) { log("  Restauração OK.", 'good'); }
-                             else { log(`  FALHA AO RESTAURAR '${key}'!`, 'error'); }
                          }
                     }
                 }
@@ -182,7 +198,7 @@
             log("Iniciando todos os testes (PP FUNCTION HIJACKING v9)...");
             const tests = [ // Sequência atualizada
                 runCSP_XSS_Check,           // T1: Check XSS/Entrada
-                runPPHijackTest_v9,         // T2: Teste Hijack Funções PP (NOVO)
+                runPPHijackTest_v9,         // T2: Teste Hijack Funções PP (NOVO - Editável)
                 runOOBTestU8_Confirm,       // T3: OOB Confirm Base
             ];
              for(let i=0; i < tests.length; i++){ /* ... loop igual ao v8 ... */ if(!outputDiv){console.error("Output NULO");break;} try{ log(`--- EXECUTANDO TESTE ${i+1}/${tests.length}: ${tests[i].name} ---`,'test'); const fn=tests[i];const res=fn(); if(res instanceof Promise){await res;} }catch(e){log(`ERRO TESTE ${i+1}: ${e.message} ${e.stack}`,'error');} if(i<tests.length-1&&outputDiv){log(`Pausa ${PAUSE_DURATION}ms...`,'info');await new Promise(r=>setTimeout(r,PAUSE_DURATION));} }
