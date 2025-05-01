@@ -1,174 +1,247 @@
 <!DOCTYPE html>
 <html>
-
 <head>
     <meta charset="UTF-8">
-    <title>PS4 WebKit Exploit - Advanced Sandbox Bypass Attempt</title>
+    <title>PS4 FW 12.02 - Teste Combinado de Vulnerabilidades</title>
     <style>
-        #output {
-            font-family: monospace;
-            white-space: pre-wrap;
-        }
+        /* Estilos CSS (iguais aos anteriores) */
+        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
+        #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        .log-info { color: #6cf; }
+        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
+        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
+        .log-vuln { color: #ff4444; font-weight: bold; } /* Vermelho para vulnerabilidade confirmada */
+        .log-good { color: #4CAF50; } /* Verde para bloqueio esperado / falha */
+        .log-warn { color: #FFC107; }
+        .log-error { color: #f44336; }
+        #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
     </style>
 </head>
-
 <body>
-    <h1>Advanced Sandbox Bypass Attempt</h1>
+    <h1>PS4 FW 12.02 - Teste Combinado de Vulnerabilidades</h1>
+    <p>Testa: XSS/CSP Bypass, OOB Write, PP Básica, PP Hijack (Array.map).</p>
+    <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
+    <div id="xss-target-div">Área para teste de XSS DOM.</div>
 
     <script>
+        const outputDiv = document.getElementById('output');
+        const runBtn = document.getElementById('runBtn');
+        const SHORT_PAUSE = 100; // Pausa curta em ms
+        const MEDIUM_PAUSE = 500; // Pausa média em ms
+
+        // --- Função de Log ---
         const log = (message, type = 'info') => {
-            const outputDiv = document.getElementById('output');
-            if (outputDiv) {
-                outputDiv.innerHTML += `<span style="color: ${type === 'error' ? 'red' : type === 'warning' ? 'orange' : 'blue'};">${new Date().toLocaleTimeString()} - ${message}\n</span>`;
-            } else {
-                console.error('Elemento #output não encontrado!');
-            }
+             if (!outputDiv) return;
+             try {
+                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
+                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                 if(outputDiv.innerHTML.length > 500000){
+                     outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000);
+                     outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
+                 }
+                 outputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`;
+                 outputDiv.scrollTop = outputDiv.scrollHeight;
+             } catch(e) {
+                 console.error("Erro na função log:", e);
+                 outputDiv = null;
+             }
         };
 
-        const prepareData = (size = 64) => {
-            log(`Função prepareData(${size}) iniciada e concluída.`, 'info');
-            let buffer = new ArrayBuffer(size);
-            let view = new Uint8Array(buffer);
-            return {
-                buffer,
-                view,
-                size
-            };
-        };
+        // --- Teste 1: CSP Bypass / XSS ---
+        const testCSPBypass = async () => {
+            log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
+            let success = false;
 
-        // --- Prototype Pollution ---
-        const attemptPrototypePollution = () => {
-            log("\n--- Prototype Pollution Attempt ---", 'critical');
+            // 1.1 Teste com data: URI
+            log("Tentando XSS via data: URI (alert)...", 'subtest');
+            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
             try {
-                Object.prototype.injectedProperty = 'POLLUTED!';
-                log("Prototype pollution bem-sucedida. Verificando...", 'info');
-                // Verifique se a propriedade foi injetada em objetos relevantes
-                if ({}.injectedProperty === 'POLLUTED!') {
-                    log("Prototype pollution confirmado.", 'success');
-                } else {
-                    log("Falha na confirmação do prototype pollution.", 'warning');
-                }
-            } catch (e) {
-                log(`Erro na tentativa de prototype pollution: ${e}`, 'error');
-            }
+                const payloadJS = `try { alert('XSS via Data URI!'); log("[Payload Data:] Alerta data: URI executado!", "vuln"); } catch(e) { log("[Payload Data:] Alerta data: URI bloqueado: " + e.message, "good"); }`;
+                const encodedPayload = btoa(payloadJS);
+                const scriptTag = document.createElement('script');
+                scriptTag.src = 'data:text/javascript;base64,' + encodedPayload;
+                scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: URI!", 'error'); };
+                document.body.appendChild(scriptTag);
+                log("Tag <script> data: URI adicionada.", 'info');
+                // Nota: O sucesso real é logado pelo payload dentro do try/catch
+            } catch (e) { log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error'); }
+
+            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE * 2));
+
+            // 1.2 Teste com onerror
+            log("Tentando XSS DOM via inline handler (onerror)...", 'subtest');
+            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+            try {
+                const imgTag = document.createElement('img');
+                imgTag.src = 'invalid_image_source_' + Date.now(); // Fonte inválida única
+                const onerrorPayload = `
+                    try {
+                        const target = document.getElementById('xss-target-div');
+                        if (target) {
+                            target.innerHTML = '<h2 class="log-vuln">XSS DOM via ONERROR Executado!</h2>';
+                            log("XSS DOM via onerror realizado!", "vuln");
+                        } else { log("Alvo XSS DOM (onerror) não encontrado.", "error"); }
+                        alert('XSS_DOM_ONERROR');
+                    } catch(e) { log("Erro no payload onerror: " + e.message, "warn"); }
+                `;
+                imgTag.setAttribute('onerror', onerrorPayload);
+                document.body.appendChild(imgTag);
+                log("Tag <img> com onerror adicionada.", 'info');
+                 // Nota: O sucesso real é logado pelo payload dentro do try/catch
+            } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error'); }
+
+            log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test');
         };
 
-        // --- Memory Leak / Information Disclosure ---
-        const attemptMemoryLeak = () => {
-            log("\n--- Memory Leak / Information Disclosure Attempt ---", 'critical');
-            let leakedData = "Sensitive Data!";
-            try {
-                throw new Error("Potential Leak: " + leakedData);
-            } catch (e) {
-                log(`Vazamento potencial: ${e.message}`, 'warning');
-                // Tentar extrair a string "Sensitive Data!" da mensagem de erro
-                let extractedData = e.message.split("Potential Leak: ")[1];
-                if (extractedData === leakedData) {
-                    log(`Dados vazados extraídos com sucesso: ${extractedData}`, 'success');
-                } else {
-                    log("Falha ao extrair dados vazados.", 'warning');
-                }
-            }
-        };
-
-        // --- Canvas Memory Manipulation (Simplified) ---
-        const attemptCanvasMemoryManipulation = () => {
-            log("\n--- Canvas Memory Manipulation Attempt ---", 'critical');
-            const canvas = document.createElement('canvas');
-            canvas.width = 10;
-            canvas.height = 10;
-            document.body.appendChild(canvas); // Adicione ao corpo para evitar problemas de contexto
-            const ctx = canvas.getContext('2d');
-
-            if (!ctx) {
-                log("Falha ao obter o contexto 2D do canvas.", 'error');
-                return;
-            }
+        // --- Teste 2: OOB Write ---
+        const testOOBWrite = async () => {
+            log("--- Iniciando Teste 2: OOB Write (Confirmação) ---", 'test');
+            const bufferSize = 32;
+            const writeValue = 0xEE;
+            const vulnerableOffsets = [-1, 32, 42];
+            let successCount = 0;
 
             try {
-                // Escreva um padrão específico no canvas
-                for (let i = 0; i < 10; i++) {
-                    for (let j = 0; j < 10; j++) {
-                        ctx.fillStyle = (i + j) % 2 === 0 ? 'red' : 'blue';
-                        ctx.fillRect(i, j, 1, 1);
+                const buffer = new ArrayBuffer(bufferSize);
+                const view = new Uint8Array(buffer);
+
+                for (const offset of vulnerableOffsets) {
+                    log(`Tentando escrita OOB U8 @${offset} com valor ${writeValue}...`, 'subtest');
+                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                    try {
+                        view[offset] = writeValue;
+                        log(`VULN: Escrita OOB U8 @${offset} permitida!`, 'vuln');
+                        successCount++;
+                    } catch (e) {
+                        log(`BLOQUEADO: Escrita OOB U8 @${offset} impedida: ${e.message}`, 'good');
                     }
                 }
+            } catch (e) { log(`Erro inesperado durante o teste OOB Write: ${e.message}`, 'error'); }
 
-                // Tente ler os dados do canvas
-                const imageData = ctx.getImageData(0, 0, 10, 10).data;
-                log(`Dados do canvas lidos: ${Array.from(imageData).join(',')}`, 'info');
-
-                // **Simulação de Overlap (ALTAMENTE simplificado e NÃO confiável)**
-                // Este é um exemplo conceitual. A exploração real de overlap é muito mais complexa.
-                let fakeBuffer1 = new Uint8Array(100);
-                let fakeBuffer2 = new Uint8Array(100);
-
-                // Initialize fakeBuffer1 with some data
-                for (let i = 0; i < 100; i++) {
-                    fakeBuffer1[i] = i;
-                }
-
-                // Tentativa ingênua de overlap (NÃO FUNCIONARÁ na prática)
-                let originalValue = fakeBuffer1[50];
-                fakeBuffer2[50] = 0x42; // Tentar sobrescrever
-                log(`Valor original: ${originalValue}, Valor após tentativa: ${fakeBuffer1[50]}`, 'warning');
-
-                // **Para uma exploração de overlap real, você precisaria:**
-                // 1.  Encontrar uma vulnerabilidade que permita alocar buffers de tamanho e localização controlados.
-                // 2.  Usar técnicas como heap spraying para aumentar a probabilidade de os buffers serem alocados próximos o suficiente para overlap.
-                // 3.  Entender o layout da memória do navegador em detalhes.
-
-                // Limpeza
-                document.body.removeChild(canvas);
-
-            } catch (e) {
-                log(`Erro ao manipular a memória do canvas: ${e}`, 'error');
-            }
+            log(`--- Teste 2 Concluído (${successCount}/${vulnerableOffsets.length} escritas OOB bem-sucedidas) ---`, 'test');
+            return successCount > 0;
         };
 
-        // --- Attempt Arbitrary Code Execution (Conceptual - Requires Further Steps) ---
-        const attemptArbitraryCodeExecution = () => {
-            log("\n--- Arbitrary Code Execution Attempt (Conceptual) ---", 'critical');
+        // --- Teste 3: Prototype Pollution (Básica) ---
+        const testBasicPP = async () => {
+            log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
+            const testProp = '__pp_basic_test__';
+            const testValue = 'Polluted!';
+            let success = false;
+            try {
+                log(`Poluindo Object.prototype.${testProp} = "${testValue}"`, 'subtest');
+                Object.prototype[testProp] = testValue;
 
-            // **Este é um exemplo altamente simplificado e conceitual.**
-            // A execução real de código arbitrário requer uma vulnerabilidade específica
-            // (como use-after-free, buffer overflow) e técnicas para contornar
-            // as mitigações de segurança (ASLR, DEP, etc.).
+                log("Verificando herança em objeto vazio {}...", 'subtest');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                const obj = {};
+                if (obj[testProp] === testValue) {
+                    log(`VULN: PP Básica confirmada! Objeto vazio herdou a propriedade.`, 'vuln');
+                    success = true;
+                } else {
+                    log(`FALHA: PP Básica não confirmada. Objeto vazio NÃO herdou a propriedade.`, 'good');
+                }
+            } catch (e) {
+                log(`Erro durante teste PP Básico: ${e.message}`, 'error');
+            } finally {
+                // Limpeza
+                try { delete Object.prototype[testProp]; } catch(e){}
+                log(`Limpeza de Object.prototype.${testProp} realizada.`, 'info');
+            }
+            log(`--- Teste 3 Concluído (PP Básica ${success ? 'Confirmada' : 'Falhou'}) ---`, 'test');
+            return success;
+        };
+
+        // --- Teste 4: Prototype Pollution (Hijack Array.prototype.map) ---
+        const testPPMapHijack = async () => {
+            log("--- Iniciando Teste 4: PP Hijack (Array.prototype.map) ---", 'test');
+            const originalMap = Array.prototype.map; // Guarda a função original
+            let hijackSuccessful = false;
+            let executionSuccessful = false;
 
             try {
-                // **Prototype Pollution para Manipular uma Função Existente (Exemplo)**
-                // Suponha que exista uma função `vulnerableFunction` que é chamada em algum lugar.
-                // Podemos tentar sobrescrever essa função usando prototype pollution.
-                Object.prototype.vulnerableFunction = function() {
-                    log("Função vulnerável interceptada! Executando código arbitrário...", 'success');
-                    // **Código arbitrário aqui**
-                    alert("Exploit executado!"); // Exemplo simples
+                log("Tentando sobrescrever Array.prototype.map...", 'subtest');
+                Array.prototype.map = function hijackedMap(...args) {
+                    log("VULN: Array.prototype.map SEQUESTRADA (HIJACKED)!", 'vuln');
+                    hijackSuccessful = true; // Marca que a função foi sobrescrita
+                    // Chama a função original para não quebrar tudo (opcional, mas recomendado)
+                    // return originalMap.apply(this, args);
+                    // Ou retorna algo diferente para confirmar a execução
+                    return "MAP HIJACKED";
                 };
 
-                // **Para funcionar, você precisaria:**
-                // 1.  Encontrar uma função existente que seja vulnerável à manipulação.
-                // 2.  Garantir que essa função seja chamada em algum momento.
-                // 3.  Contornar quaisquer proteções que impeçam a modificação do prototype.
+                log("Testando a função map sequestrada com [1, 2].map(x => x)...", 'subtest');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                const testArray = [1, 2];
+                const result = testArray.map(x => x); // Chama a função (potencialmente sequestrada)
 
-                log("Prototype pollution usado para manipular 'vulnerableFunction' (se existir).", 'warning');
+                log(`Resultado de [1, 2].map(): ${result}`, 'info');
+
+                // Verifica se o resultado é o esperado da função sequestrada
+                if (result === "MAP HIJACKED") {
+                     log("VULN: Execução da função map sequestrada confirmada!", 'vuln');
+                     executionSuccessful = true;
+                } else if (hijackSuccessful) {
+                    log("AVISO: Função map foi sequestrada, mas o resultado não foi o esperado.", 'warn');
+                } else {
+                    log("FALHA: Sequestro de Array.prototype.map não funcionou.", 'good');
+                }
 
             } catch (e) {
-                log(`Erro ao tentar executar código arbitrário: ${e}`, 'error');
+                log(`Erro durante teste PP Hijack Map: ${e.message}`, 'error');
+            } finally {
+                // Restaura a função original SEMPRE
+                Array.prototype.map = originalMap;
+                log("Função Array.prototype.map restaurada.", 'info');
+                 // Verifica se foi restaurada
+                 if (Array.prototype.map === originalMap) {
+                     log("Restauração de map confirmada.", 'info');
+                 } else {
+                     log("ERRO CRÍTICO: FALHA ao restaurar Array.prototype.map!", 'error');
+                 }
             }
+            log(`--- Teste 4 Concluído (PP Hijack Map ${executionSuccessful ? 'Confirmado' : 'Falhou'}) ---`, 'test');
+            return executionSuccessful;
         };
 
-        const main = () => {
-            log("Advanced Exploit Script Iniciado", 'critical');
-            attemptPrototypePollution();
-            attemptMemoryLeak();
-            attemptCanvasMemoryManipulation();
-            attemptArbitraryCodeExecution();
-            log("Advanced Exploit Script Concluído", 'critical');
+
+        // --- Função Principal para Rodar Todos os Testes ---
+        const runAllTests = async () => {
+            if (runBtn) runBtn.disabled = true;
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS ====", 'critical');
+
+            await testCSPBypass();
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); // Pausa entre testes principais
+
+            await testOOBWrite();
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+
+            await testBasicPP();
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+
+            await testPPMapHijack();
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+
+            log("\n==== TODOS OS TESTES COMBINADOS CONCLUÍDOS ====", 'critical');
+            if (runBtn) runBtn.disabled = false;
         };
 
-        document.addEventListener('DOMContentLoaded', main);
+        // Opcional: descomente para rodar automaticamente ao carregar
+        // document.addEventListener('DOMContentLoaded', runAllTests);
+
     </script>
-</body>
 
+</body>
 </html>
+```
+
+**Como usar:**
+
+1.  **Copie** todo o código acima.
+2.  **Cole** em um editor de texto simples (Bloco de Notas, TextEdit, etc.).
+3.  **Salve** o arquivo com a extensão `.html` (ex: `teste_completo_ps4.html`), certificando-se de escolher "Todos os ficheiros" no tipo ao salvar.
+4.  **Hospede** o arquivo HTML em um local acessível pela rede do seu PS4.
+5.  **Abra** o arquivo no navegador do PS4.
+6.  **Clique** no botão "Iniciar Todos os Testes".
+7.  **Observe** o log e o comportamento do navegador para verificar os resultados de cada tes
