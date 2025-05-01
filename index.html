@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PS4 FW 12.02 - Teste v13 (Tentativa UAF Simples)</title>
+    <title>PS4 FW 12.02 - Teste v14 (PP Hijack fetch)</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -20,8 +20,8 @@
     </style>
 </head>
 <body>
-    <h1>PS4 FW 12.02 - Teste v13 (Tentativa UAF Simples)</h1>
-    <p>Testa: XSS, Tentativa de Use-After-Free (UAF), PP Básica.</p>
+    <h1>PS4 FW 12.02 - Teste v14 (PP Hijack fetch)</h1>
+    <p>Testa: XSS, OOB R/W (Info Leak), PP Básica, PP Hijack (fetch).</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Todos os Testes</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
@@ -30,9 +30,8 @@
         // --- Globals & Setup ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
-        const SHORT_PAUSE = 100; // ms
+        const SHORT_PAUSE = 50; // ms
         const MEDIUM_PAUSE = 500; // ms
-        const LONG_PAUSE = 1500; // Pausa mais longa para tentar dar tempo ao GC
 
         // --- Função de Log ---
         const log = (message, type = 'info') => {
@@ -58,11 +57,30 @@
              return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
         }
 
+        // --- Heurística Simples para Detetar Potenciais Ponteiros (64-bit) ---
+        const isPotentialPointer64 = (high, low) => {
+            if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
+            if (high === 0 && low === 0) return false;
+            if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
+            if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false;
+            if (high === 0 && low < 0x100000) return false;
+            return true;
+        };
+
+         // --- Heurística Simples para Detetar Potenciais Dados U32 ---
+         const isPotentialData32 = (val) => {
+             if (val === null || typeof val !== 'number') return false;
+             val = val >>> 0;
+             if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false;
+             if (val < 0x1000) return false;
+             return true;
+         }
+
         // --- Teste 1: CSP Bypass / XSS ---
         // (Função testCSPBypass igual à versão anterior)
         const testCSPBypass = async () => {
             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
-            // ... (código igual ao script v10) ...
+            // ... (código igual ao script v11) ...
             // 1.1 Teste com data: URI
             log("Tentando XSS via data: URI (alert)...", 'subtest');
             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
@@ -101,107 +119,72 @@
             log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test');
         };
 
-
-        // --- Teste 2: Tentativa de Use-After-Free (UAF) Simples ---
-        // NOVO TESTE
-        const testSimpleUAF = async () => {
-            log("--- Iniciando Teste 2: Tentativa de Use-After-Free (UAF) Simples ---", 'test');
-            log("AVISO: Este teste depende do timing do Garbage Collector e pode não ser fiável.", 'warn');
-            const bufferSize = 128; // Tamanho do buffer para o teste
-            const pattern = 0x41424344; // Padrão "ABCD" em little-endian
-            let uafDetected = false;
+        // --- Teste 2: OOB Write/Read Extensivo (Info Leak Aprimorado) ---
+        // (Função igual à v7/v9/v10 - focada em info leak)
+        const testOOBReadInfoLeakEnhanced = async () => {
+            log("--- Iniciando Teste 2: OOB Write/Read Extensivo (Info Leak Aprimorado) ---", 'test');
+            // ... (código igual ao script v11) ...
+            const bufferSize = 32;
+            const writeValue = 0xEE;
+            const oobWriteOffset = 32;
+            const oobReadOffsets = [];
+            for (let i = -64; i < bufferSize + 64; i += 4) { oobReadOffsets.push(i); }
+            let writeSuccess = false;
+            let potentialLeakFoundCount = 0;
 
             try {
-                // 1. Aloca o objeto "vítima" e guarda uma referência
-                log("Alocando Buffer A (vítima)...", 'subtest');
-                let bufferA = new ArrayBuffer(bufferSize);
-                let viewA = new DataView(bufferA);
-                // Guarda uma referência extra que manteremos
-                let danglingRef = bufferA;
-                let danglingView = viewA; // Referência para a view também
+                const buffer = new ArrayBuffer(bufferSize + 256);
+                const dataView = new DataView(buffer);
+                const baseOffset = 128;
+                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
 
-                // Escreve um padrão reconhecível no Buffer A
-                for (let i = 0; i < bufferSize; i += 4) {
-                    viewA.setUint32(i, pattern, true); // Little endian
-                }
-                log(`Buffer A preenchido com padrão ${toHex(pattern)}`, 'info');
-                log(`Referência 'danglingRef' criada.`, 'info');
-
-                // 2. Tenta "libertar" Buffer A
-                log("Removendo referências principais (bufferA, viewA) e esperando GC...", 'subtest');
-                bufferA = null;
-                viewA = null;
-                // Não há como forçar GC em JavaScript padrão. Apenas esperamos.
-                await new Promise(resolve => setTimeout(resolve, LONG_PAUSE)); // Pausa longa
-
-                // 3. Aloca um novo objeto (Buffer B) do mesmo tamanho
-                log("Alocando Buffer B (substituto) do mesmo tamanho...", 'subtest');
-                let bufferB = new ArrayBuffer(bufferSize);
-                let viewB = new DataView(bufferB);
-                 // Preenche B com um padrão diferente para contraste
-                 for (let i = 0; i < bufferSize; i += 4) {
-                    viewB.setUint32(i, 0xBBBBBBBB, true);
-                 }
-                 log(`Buffer B alocado e preenchido com padrão 0xBBBBBBBB.`, 'info');
-
-                // 4. Tenta aceder à memória "libertada" através da referência antiga (danglingRef)
-                log("Tentando ler a memória através da referência antiga (danglingRef)...", 'subtest');
+                const writeTargetAddress = baseOffset + oobWriteOffset;
+                log(`Tentando escrita OOB U8 @${oobWriteOffset}...`, 'subtest');
                 await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
                 try {
-                    // Acede usando a view antiga (danglingView) que apontava para bufferA
-                    const valueRead = danglingView.getUint32(0, true); // Lê os primeiros 4 bytes
-                    log(`Valor lido via danglingView[0]: ${toHex(valueRead)}`, 'info');
-
-                    // Verifica se o valor lido corresponde ao padrão do Buffer B
-                    if (valueRead === 0xBBBBBBBB) {
-                        log(`VULN: UAF DETETADO! A referência antiga leu dados do Buffer B!`, 'vuln');
-                        uafDetected = true;
-                    } else if (valueRead === pattern) {
-                        log(`INFO: Referência antiga ainda contém o padrão original (${toHex(pattern)}). GC não reutilizou ou UAF não ocorreu.`, 'good');
-                    } else {
-                         log(`AVISO: Referência antiga contém dados inesperados (${toHex(valueRead)}).`, 'warn');
-                    }
-
-                    // Tenta escrever através da referência antiga para corromper B
-                    const corruptValue = 0xDEADBEEF;
-                    log(`Tentando escrever ${toHex(corruptValue)} via danglingView[4]...`, 'subtest');
-                    danglingView.setUint32(4, corruptValue, true);
-                    log("Escrita via danglingView realizada. Verificando Buffer B...", 'info');
-                    await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                    const valueInB = viewB.getUint32(4, true);
-                    log(`Valor em viewB[4]: ${toHex(valueInB)}`, 'info');
-                    if (valueInB === corruptValue) {
-                         log(`VULN: UAF CONFIRMADO COM ESCRITA! Buffer B foi corrompido pela referência antiga!`, 'vuln');
-                         uafDetected = true; // Confirma UAF se a escrita funcionou
-                    } else {
-                         log(`INFO: Escrita via referência antiga não afetou Buffer B.`, 'good');
-                    }
-
+                    dataView.setUint8(writeTargetAddress, writeValue);
+                    log(`VULN: Escrita OOB U8 @${oobWriteOffset} permitida!`, 'vuln');
+                    writeSuccess = true;
                 } catch (e) {
-                    // Um erro ao aceder danglingView pode indicar que o buffer foi realmente invalidado
-                    log(`ERRO ao aceder via referência antiga: ${e.message}. (Pode ser bom sinal se buffer foi invalidado).`, 'good');
+                    log(`BLOQUEADO: Escrita OOB U8 @${oobWriteOffset} impedida: ${e.message}`, 'good');
+                    log("--- Teste 2 Interrompido (Escrita OOB falhou) ---", 'test');
+                    return false;
                 }
 
-                // Limpeza explícita (pode ajudar?)
-                danglingRef = null;
-                danglingView = null;
-                bufferB = null;
-                viewB = null;
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                log(`Tentando leituras OOB U32/U64 em ${oobReadOffsets.length} offsets...`, 'subtest');
+                for (const readOffset of oobReadOffsets) {
+                    const readTargetAddress = baseOffset + readOffset;
+                    if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) continue;
 
-            } catch (e) {
-                log(`Erro inesperado durante o teste UAF: ${e.message}`, 'error');
-            }
+                    try {
+                        const low = dataView.getUint32(readTargetAddress, true);
+                        const high = dataView.getUint32(readTargetAddress + 4, true);
+                        if (isPotentialPointer64(high, low)) {
+                            const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`;
+                            log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr');
+                            potentialLeakFoundCount++;
+                        } else {
+                            const val32 = low;
+                            if (isPotentialData32(val32)) {
+                                log(`  -> Leak U32? @${readOffset}: ${toHex(val32, 32)}`, 'leak');
+                                potentialLeakFoundCount++;
+                            }
+                        }
+                    } catch (e) {/* Ignora */}
+                    if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1));
+                }
+            } catch (e) { log(`Erro inesperado durante o teste Info Leak: ${e.message}`, 'error'); }
 
-            log(`--- Teste 2 Concluído (UAF ${uafDetected ? 'Detetado/Confirmado' : 'Não Detetado'}) ---`, 'test');
-            return uafDetected;
+            log(`--- Teste 2 Concluído (${potentialLeakFoundCount} potenciais leaks encontrados) ---`, 'test');
+            return writeSuccess;
         };
-
 
         // --- Teste 3: Prototype Pollution (Básica) ---
         // (Função testBasicPP igual à versão anterior)
         const testBasicPP = async () => {
             log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
-            // ... (código igual ao script v9) ...
+            // ... (código igual ao script v11) ...
             const testProp = '__pp_basic_test__';
             const testValue = 'Polluted!';
             let success = false;
@@ -226,23 +209,112 @@
             return success;
         };
 
+        // --- Teste 4: PP Hijack (window.fetch) ---
+        // NOVO: Tenta sequestrar a API fetch
+        const testPPFetchHijack = async () => {
+            log("--- Iniciando Teste 4: PP Hijack (window.fetch) ---", 'test');
+            const originalFetch = window.fetch; // Guarda a função original
+            let hijackSuccessful = false;
+            let executionSuccessful = false;
+
+            try {
+                log("Tentando sobrescrever window.fetch...", 'subtest');
+                // Polui o protótipo do objeto global (window)
+                 if (Object.prototype.hasOwnProperty('fetch')) {
+                     log(`Aviso: Object.prototype já possui fetch. Teste abortado.`, 'warn');
+                     log(`--- Teste 4 Concluído (Abortado) ---`, 'test');
+                     return false;
+                 }
+
+                Object.prototype.fetch = async function hijackedFetch(resource, options) {
+                    log("===> VULN: DENTRO DA FUNÇÃO window.fetch SEQUESTRADA! <===", 'vuln');
+                    hijackSuccessful = true;
+
+                    // Loga os detalhes do pedido intercetado
+                    let resourceStr = resource instanceof Request ? resource.url : String(resource);
+                    log(`  -> Hijack fetch: Recurso solicitado: ${resourceStr}`, 'leak');
+                    if (options) {
+                        try {
+                            log(`  -> Hijack fetch: Opções: ${JSON.stringify(options)}`, 'leak');
+                        } catch (e) { log(`  -> Hijack fetch: Opções: (não serializável)`, 'leak');}
+                    }
+
+                    // Impede o pedido real e retorna dados falsos
+                    log("  -> Hijack fetch: Bloqueando pedido original e retornando resposta falsa.", 'warn');
+                    executionSuccessful = true; // Marca que o hijack foi executado
+                    return Promise.resolve(
+                        new Response('{"hijacked": true, "data": "Dados Falsos"}', {
+                            status: 200,
+                            statusText: 'OK',
+                            headers: { 'Content-Type': 'application/json' }
+                        })
+                    );
+
+                    // Alternativa: Chamar a original (menos útil para PoC de impacto)
+                    // log("  -> Hijack fetch: Chamando fetch original...", 'info');
+                    // return originalFetch.call(window, resource, options);
+                };
+                log("Object.prototype.fetch poluído.", 'info');
+
+
+                log("Testando a função fetch sequestrada com fetch('/fake/api')...", 'subtest');
+                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+                try {
+                    const response = await fetch('/fake/api', { method: 'POST', body: 'test' }); // Chama fetch (sequestrado)
+                    log(`Fetch concluído. Status: ${response.status}`, 'info');
+                    const data = await response.json();
+                    log(`Dados recebidos do fetch: ${JSON.stringify(data)}`, 'info');
+
+                    // Verifica se recebemos a resposta falsa do hijack
+                    if (data && data.hijacked === true) {
+                        log("VULN: Resposta falsa do fetch sequestrado recebida!", 'vuln');
+                    } else {
+                         log("AVISO: Resposta do fetch não foi a esperada do hijack.", 'warn');
+                    }
+
+                } catch(e) {
+                     log(`Erro ao tentar executar fetch sequestrado: ${e.message}`, 'error');
+                     // Um erro aqui pode indicar que o hijack falhou ou que a resposta falsa não era válida
+                }
+
+            } catch (e) {
+                log(`Erro durante teste PP Hijack fetch: ${e.message}`, 'error');
+            } finally {
+                // Restaura a função original SEMPRE
+                try {
+                    delete Object.prototype.fetch; // Remove do protótipo
+                    // Restaura no window se necessário (pode não ser preciso se não foi afetado)
+                    window.fetch = originalFetch;
+                    log("Tentativa de restauração de window.fetch realizada.", 'info');
+                    if (window.fetch === originalFetch) { log("Restauração de fetch confirmada.", 'info'); }
+                    else { log("ERRO CRÍTICO: FALHA ao restaurar window.fetch!", 'error'); }
+                } catch (restoreError) {
+                     log(`Erro ao restaurar fetch: ${restoreError.message}`, 'error');
+                }
+            }
+            log(`--- Teste 4 Concluído (PP Hijack fetch ${executionSuccessful ? 'Confirmado' : 'Falhou'}) ---`, 'test');
+            return executionSuccessful;
+        };
+
+
         // --- Função Principal para Rodar Todos os Testes ---
         const runAllTests = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO TODOS OS TESTES COMBINADOS v13 (UAF Attempt) ====", 'critical');
+            log("==== INICIANDO TODOS OS TESTES COMBINADOS v14 (PP Hijack fetch) ====", 'critical');
 
             await testCSPBypass(); // Teste 1
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            await testSimpleUAF(); // Teste 2 (NOVO - UAF)
+            await testOOBReadInfoLeakEnhanced(); // Teste 2
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
             await testBasicPP(); // Teste 3
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            // Removidos outros testes para focar no UAF
+            await testPPFetchHijack(); // Teste 4 (NOVO - fetch)
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
 
-            log("\n==== TODOS OS TESTES COMBINADOS v13 CONCLUÍDOS ====", 'critical');
+            log("\n==== TODOS OS TESTES COMBINADOS v14 CONCLUÍDOS ====", 'critical');
             if (runBtn) runBtn.disabled = false;
         };
 
@@ -253,11 +325,12 @@
 </html>
 ```
 
-**O que procurar nos resultados do Teste 2:**
+**O que procurar nos resultados:**
 
-* **Sucesso Ideal (Leitura):** O log mostra `VULN: UAF DETETADO! A referência antiga leu dados do Buffer B!`.
-* **Sucesso Ideal (Escrita):** O log mostra `VULN: UAF CONFIRMADO COM ESCRITA! Buffer B foi corrompido pela referência antiga!`.
-* **Falha (Não Detetado):** O log indica que a referência antiga ainda continha o padrão original ou que a escrita não afetou o Buffer B.
-* **Falha (Erro):** O log mostra um erro ao tentar aceder `danglingView`. Isto pode ser um bom sinal (o navegador invalidou a referência antiga), mas não confirma o UAF explorável.
+* **Teste 4 (PP Hijack `fetch`):**
+    * Procure pela mensagem `VULN: DENTRO DA FUNÇÃO window.fetch SEQUESTRADA!`.
+    * Verifique se o log mostra os detalhes do pedido `fetch` que foi intercetado (`Recurso solicitado`, `Opções`).
+    * Veja se o log indica que o pedido foi bloqueado e uma resposta falsa foi retornada.
+    * Confirme se os "Dados recebidos do fetch" no log correspondem à resposta falsa `{"hijacked": true, "data": "Dados Falsos"}`.
 
-Como disse, UAF é sensível ao timing. Pode ser necessário executar o script várias vezes para ter hipótese de ver o padrão de sucesso. Se funcionar, demonstra outro tipo de vulnerabilidade de corrupção de memór
+Se este teste funcionar, ele demonstra claramente a capacidade de intercetar e manipular pedidos de rede, o que é um impacto significativo e uma prova de controlo mais "contundent
