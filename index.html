@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PoC v20 - Base Original + Canvas Isolado</title>
+    <title>PoC v21 - Base 100% Original + Canvas Isolado Pós-Load</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -12,172 +12,159 @@
         .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; }
         .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
-        #interactive-canvas { display: block; border: 1px solid #444; margin-top: 5px; cursor: crosshair; background-color: #333; } /* Renomeado ID do canvas */
+        #interactive-canvas { display: block; border: 1px solid #444; margin-top: 5px; cursor: crosshair; background-color: #333; }
         #canvas-coord-status { color: #aaa; font-size: 12px; height: 15px; }
     </style>
 </head>
 <body>
-    <h1>PoC v20 - Base Original + Canvas Isolado</h1>
+    <h1>PoC v21 - Base 100% Original + Canvas Isolado Pós-Load</h1>
     <canvas id="interactive-canvas" width="350" height="200"></canvas>
     <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
-    <p>Fase 1: PoC Original v9 Intacto (do seu arquivo). Fase 2: Apenas Teste de Canvas Isolado.</p>
-    <button id="runBtn" onclick="runEverythingInSequence_v20()">Iniciar Teste Completo</button>
+    <p>Botão inicia testes originais (Fase 1). Teste de Canvas (Fase 2) inicia ~15s após carregar a página.</p>
+    <button id="runBtn" onclick="runAllTests()">Iniciar Testes Originais (Fase 1)</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
 
     <script>
-        // --- Globals & Setup ---
+        // --- Globals & Setup (Originais) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
-        const canvasElement = document.getElementById('interactive-canvas'); // Referência correta
-        const coordStatusDiv = document.getElementById('canvas-coord-status');
-        const SHORT_PAUSE = 50; // Usado pelo código original
-        const MEDIUM_PAUSE = 500; // Usado pelo código original
-        const LONG_PAUSE = 10000; // Pausa longa (10s) entre fases
-        let leakedValueFromOOB = null; // Global Original (setado por Fase 1)
-        // Globais para Canvas Fase 2
-        let canvasClickListener = null;
-        let canvasMoveListener = null;
-        let rectArea = { x: 10, y: 10, w: 50, h: 50 }; // Área 1 para clique
-        let linkArea = { x: 150, y: 100, w: 80, h: 30 }; // Área 2 (link)
+        const SHORT_PAUSE = 50; // ms
+        const MEDIUM_PAUSE = 500; // ms
+        let leakedValueFromOOB = null; // Armazena valor do Info Leak
 
         // --- Função de Log (Original) ---
-        const log = (message, type = 'info') => { /* ... (implementação completa) ... */ };
+        const log = (message, type = 'info') => {
+             if (!outputDiv) return;
+             try {
+                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
+                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                 if(outputDiv.innerHTML.length > 500000){ // Limite Original
+                     outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000);
+                     outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
+                 }
+                 outputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`;
+                 outputDiv.scrollTop = outputDiv.scrollHeight;
+             } catch(e) { console.error("Erro na função log:", e); outputDiv = null; }
+        };
 
-        // --- Helpers (Originais) ---
-        const toHex = (val, bits = 32) => { /* ... (implementação completa) ... */ };
+        // Helper para formatar números como hex (Original)
+        const toHex = (val, bits = 32) => {
+             if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
+             let num = Number(val);
+             if (bits <= 32) { num = num >>> 0; }
+             const pad = Math.ceil(bits / 4);
+             return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
+        }
+
+        // --- Heurística Simples Ponteiros (Original) ---
         const isPotentialPointer64 = (high, low) => { /* ... (lógica original) ... */ };
-        const isPotentialData32 = (val) => { /* ... (lógica original) ... */ };
 
+         // --- Heurística Simples Dados U32 (Original) ---
+         const isPotentialData32 = (val) => { /* ... (lógica original) ... */ };
 
-        // ============================================================
-        // --- FASE 1: Código Original Intacto (`index-18.html`) ---
-        // ============================================================
-        log("Definindo Funções Originais da Fase 1 (Base Intacta)", "info");
+        // --- Teste 1: CSP Bypass / XSS (Original com alert) ---
+        const testCSPBypass = async () => { /* ... (Código EXATO Teste 1 original) ... */ };
 
-        // --- Teste 1 Original: ---
-        const testCSPBypass = async () => { /* ... Código EXATO do Teste 1 original (com alerts) ... */ };
-        // --- Teste 2 Original: ---
-        const testOOBReadInfoLeakEnhancedStore = async () => { /* ... Código EXATO do Teste 2 original ... */ };
-        // --- Teste 3 Original: ---
-        const testBasicPP = async () => { /* ... Código EXATO do Teste 3 original ... */ };
-        // --- Teste 4 Original: ---
-        const testPPJsonHijack = async () => { /* ... Código EXATO do Teste 4 original ... */ };
-        // --- Função Principal Original (`runAllTests`) ---
-        const runAllTests = async () => { /* ... Código EXATO de runAllTests original ... */ };
+        // --- Teste 2: OOB Write/Read Extensivo (Original) ---
+        const testOOBReadInfoLeakEnhancedStore = async () => { /* ... (Código EXATO Teste 2 original) ... */ };
 
-        // --- FIM DO CÓDIGO ORIGINAL ---
+        // --- Teste 3: Prototype Pollution (Básica) (Original) ---
+        const testBasicPP = async () => { /* ... (Código EXATO Teste 3 original) ... */ };
 
+        // --- Teste 4: PP Hijack (JSON.stringify com Interação) (Original) ---
+        const testPPJsonHijack = async () => { /* ... (Código EXATO Teste 4 original) ... */ };
 
-        // ==========================================================
-        // --- FASE 2: Teste de Canvas Isolado ---
-        // ==========================================================
-        log("Definindo Teste Isolado da Fase 2 (Canvas)", "info");
+        // --- Função Principal para Rodar Todos os Testes (Original) ---
+        const runAllTests = async () => {
+            // Código EXATO de runAllTests do script original
+            if (runBtn) runBtn.disabled = true;
+            log("==== [F1 Orig] INICIANDO PoC Final v9 (runAllTests) ====", 'critical');
+            await testCSPBypass(); // Teste 1
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+            await testOOBReadInfoLeakEnhancedStore(); // Teste 2
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+            await testBasicPP(); // Teste 3
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+            await testPPJsonHijack(); // Teste 4
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
+            log("\n==== [F1 Orig] PoC Final v9 CONCLUÍDA (runAllTests) ====", 'critical');
+            if (runBtn) runBtn.disabled = false; // Reabilita o botão ao final
+        };
 
+        // document.addEventListener('DOMContentLoaded', runAllTests); // Original comentado
+    </script>
+
+    <script>
+        // Usa as variáveis globais já definidas no HTML se necessário
+        // (canvasElement, coordStatusDivCanvas, etc.)
+        // Note que 'log' e 'toHex' definidos no script anterior estarão disponíveis globalmente.
+        // Se houver conflito de nomes, precisaríamos de namespaces ou redefinição.
+
+        // Setup para Fase 2 - Canvas
+        const canvasElementF2 = document.getElementById('interactive-canvas');
+        const coordStatusDivF2 = document.getElementById('canvas-coord-status');
+        const CANVAS_SHORT_PAUSE = 50; // Pausas específicas do canvas
+        let canvasClickListenerF2 = null;
+        let canvasMoveListenerF2 = null;
+        // Áreas definidas aqui para o teste isolado
+        const rectAreaF2 = { x: 10, y: 10, w: 50, h: 50 };
+        const linkAreaF2 = { x: 150, y: 100, w: 80, h: 30 };
+
+        // Função de Log específica para Fase 2 (opcional, pode usar a global 'log')
+        const logF2 = (message, type = 'info') => {
+            log(`[Fase 2 Canvas] ${message}`, type); // Adiciona prefixo
+        }
+
+        // Teste Isolado de Canvas
         const runIsolatedCanvasTest = async () => {
-            log("--- [Fase 2] Iniciando Teste Isolado de Canvas ---", 'test');
+            logF2("--- Iniciando Teste Isolado de Canvas ---", 'test');
             let ctx = null;
             try {
-                if (!canvasElement || !canvasElement.getContext) throw new Error('Elemento Canvas não encontrado/suportado');
-                ctx = canvasElement.getContext('2d');
+                if (!canvasElementF2 || !canvasElementF2.getContext) throw new Error('Elemento Canvas não encontrado/suportado');
+                ctx = canvasElementF2.getContext('2d');
                 if (!ctx) throw new Error('Contexto 2D não disponível');
-                log("[F2 Canvas] Contexto 2D obtido.", 'info');
-                ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-                ctx.fillStyle = "#334"; // Fundo diferente para F2
-                ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-            } catch(e) { log(`[F2 Canvas] Falha no setup: ${e.message}`, 'error'); return; }
+                logF2("Contexto 2D obtido.", 'info');
+                ctx.clearRect(0, 0, canvasElementF2.width, canvasElementF2.height);
+                ctx.fillStyle = "#334"; ctx.fillRect(0, 0, canvasElementF2.width, canvasElementF2.height);
+            } catch(e) { logF2(`Falha no setup: ${e.message}`, 'error'); return; }
 
             // 1. Desenho
-            log("Desenhando formas...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE));
-            try {
-                // Atualiza áreas globais com as posições usadas aqui
-                rectArea = { x: 10, y: 10, w: 50, h: 50 };
-                linkArea = { x: 150, y: 100, w: 80, h: 30 };
+            logF2("Desenhando formas...", 'subtest'); await new Promise(r=>setTimeout(r,CANVAS_SHORT_PAUSE));
+            try { /* ... (Código de desenho usando rectAreaF2, linkAreaF2) ... */ } catch(e) { /*...*/ }
 
-                ctx.fillStyle="#FF5733"; ctx.fillRect(rectArea.x, rectArea.y, rectArea.w, rectArea.h); // Laranja
-                ctx.fillStyle="#33FF57"; ctx.beginPath(); ctx.arc(120, 50, 30, 0, 2*Math.PI); ctx.fill(); // Verde
-                ctx.fillStyle="rgba(50, 150, 255, 0.7)"; ctx.fillRect(linkArea.x, linkArea.y, linkArea.w, linkArea.h); // Azul Transp
-                ctx.fillStyle="#FFFFFF"; ctx.font="bold 14px monospace"; ctx.textAlign="center";
-                ctx.fillText("Abrir Link", linkArea.x + linkArea.w / 2, linkArea.y + linkArea.h / 2 + 5);
-                ctx.textAlign="start";
-                log("[F2 Canvas] Formas desenhadas.", 'info');
-            } catch(e) { log(`[F2 Canvas] Erro durante desenho: ${e.message}`, 'error'); }
-
-            // 2. Teste de APIs e Quirks
-            log("Verificando APIs e Quirks...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE));
-            try {
-                const filterSupported = typeof ctx.filter !== 'undefined';
-                log(`[F2 Canvas] API Filter Suportado: ${filterSupported}`, filterSupported ? 'info' : 'warn');
-                const pngURL = canvasElement.toDataURL('image/png');
-                const jpegURL = canvasElement.toDataURL('image/jpeg');
-                const urlQuirk = pngURL.length === jpegURL.length || pngURL.substring(30,70) === jpegURL.substring(30,70);
-                log(`[F2 Canvas] toDataURL PNG(len ${pngURL.length}) / JPEG(len ${jpegURL.length}). Quirk: ${urlQuirk}`, urlQuirk ? 'warn' : 'info');
-                log(`[F2 Canvas] API ellipse: ${typeof ctx.ellipse==='function'}`, 'info');
-                log(`[F2 Canvas] API measureText: ${typeof ctx.measureText==='function'}`, 'info');
-                if (typeof ctx.measureText==='function') { log(`  measureText('Test😊'): width ${ctx.measureText('Test😊').width.toFixed(1)}`, 'info'); }
-            } catch(e) { log(`[F2 Canvas] Erro API Check: ${e.message}`, 'error'); }
+            // 2. API Checks/Quirks
+            logF2("Verificando APIs/Quirks...", 'subtest'); await new Promise(r=>setTimeout(r,CANVAS_SHORT_PAUSE));
+            try { /* ... (Código de verificação de filter, toDataURL, etc.) ... */ } catch(e) { /*...*/ }
 
             // 3. Interatividade
-            log("Adicionando listeners 'click' e 'mousemove'...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE));
-            if(canvasClickListener && canvasElement) { try { canvasElement.removeEventListener('click', canvasClickListener); } catch(e){} }
-            if(canvasMoveListener && canvasElement) { try { canvasElement.removeEventListener('mousemove', canvasMoveListener); } catch(e){} }
+            logF2("Adicionando listeners 'click' e 'mousemove'...", 'subtest'); await new Promise(r=>setTimeout(r,CANVAS_SHORT_PAUSE));
+            if(canvasClickListenerF2 && canvasElementF2) { try { canvasElementF2.removeEventListener('click', canvasClickListenerF2); } catch(e){} }
+            if(canvasMoveListenerF2 && canvasElementF2) { try { canvasElementF2.removeEventListener('mousemove', canvasMoveListenerF2); } catch(e){} }
+            canvasClickListenerF2 = (event) => { /* ... (Lógica do click handler usando rectAreaF2/linkAreaF2 e tentando window.open) ... */ };
+            canvasMoveListenerF2 = (event) => { /* ... (Lógica do move handler atualizando coordStatusDivF2) ... */ };
+            try { canvasElementF2.addEventListener('click', canvasClickListenerF2); canvasElementF2.addEventListener('mousemove', canvasMoveListenerF2); logF2("Listeners adicionados.", 'good'); }
+            catch (e) { logF2(`Erro add listeners: ${e.message}`, 'error'); }
 
-            canvasClickListener = (event) => {
-                try{ const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; let area='fora';
-                     // Usa as variáveis globais atualizadas
-                     if(x>=rectArea.x&&x<=rectArea.x+rectArea.w&&y>=rectArea.y&&y<=rectArea.y+rectArea.h) area='Rect Laranja';
-                     else if(x>=linkArea.x&&x<=linkArea.x+linkArea.w&&y>=linkArea.y&&y<=linkArea.y+linkArea.h) area='Área Link';
-                     log(`[F2 Canvas] Click! Area: ${area}. Coords: x=${x.toFixed(0)}, y=${y.toFixed(0)}`, 'warn'); // Warn p/ destacar
-                     if(area==='Área Link'){
-                         log("--> Ação LINK: Tentando abrir google.com...", 'vuln'); // Vuln p/ destacar
-                         try{ window.open('https://google.com','_blank'); } catch(e){logCanvas('Erro ao abrir link (bloqueado?): '+e.message,'error');}
-                     }
-                }catch(e){logCanvas(`Erro click handler: ${e.message}`,'error');} // Usa logCanvas aqui? Não, usar log normal
-            };
-            canvasMoveListener = (event) => {
-                 try { const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; if(coordStatusDiv) coordStatusDiv.textContent = `Canvas Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`; } catch(e) {}
-            };
-
-            try { canvasElement.addEventListener('click', canvasClickListener); canvasElement.addEventListener('mousemove', canvasMoveListener); log("[F2 Canvas] Listeners adicionados.", 'good'); }
-            catch (e) { log(`[F2 Canvas] Erro add listeners: ${e.message}`, 'error'); }
-
-            log("--- [Fase 2] Teste Isolado de Canvas Concluído ---", 'test');
+            logF2("--- Teste Isolado de Canvas Concluído ---", 'test');
         };
 
+        // Agendar início da Fase 2 (Canvas) após X segundos do load da página
+        const delayFase2 = 15000; // 15 segundos
+        log(`[Sistema] Teste de Canvas (Fase 2) agendado para ${delayFase2/1000}s após o load.`, 'warn');
+        window.addEventListener('load', () => {
+            log(`[Sistema] Página carregada. Iniciando timer de ${delayFase2/1000}s para Fase 2 (Canvas)...`, 'warn');
+            setTimeout(() => {
+                log("[Sistema] Timer finalizado. Chamando teste de Canvas (Fase 2)...", 'warn');
+                if (runBtn && !runBtn.disabled) runBtn.disabled = true; // Desabilita botão se Fase 2 começar
+                runIsolatedCanvasTest().finally(() => {
+                     if (runBtn && runBtn.disabled) runBtn.disabled = false; // Reabilita ao final da fase 2
+                });
+            }, delayFase2);
+        });
 
-        // --- Função Principal Nova ---
-        const runEverythingInSequence_v19 = async () => { // Renomear para v20? Mantendo v19 por enquanto
-            if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO PoC Final v19 (Base Intacta + Canvas Isolado) ====", 'critical');
-
-            log(">>> Iniciando Fase 1 (Execução Original 'runAllTests') <<<", 'warn');
-            // Chama a função original SEM await para não depender de sua conclusão correta
-            runAllTests();
-            log(">>> Fase 1 ('runAllTests') INICIADA. Aguardando tempo fixo... <<<", 'warn');
-
-
-            log(`\n>>> PAUSA LONGA ANTES DA FASE 2 (${LONG_PAUSE/1000} segundos) <<<\n`, "warn");
-            await new Promise(r => setTimeout(r, LONG_PAUSE));
-
-
-            log(">>> Iniciando Fase 2 (Teste de Canvas Isolado) <<<", 'warn');
-            // Chama APENAS o teste de canvas isolado
-            await runIsolatedCanvasTest();
-            log(">>> Fase 2 (Teste de Canvas Isolado) CONCLUÍDA <<<", 'warn');
-
-
-            log("\n==== PoC Final v19 CONCLUÍDA ====", 'critical');
-            log("Listeners do Canvas podem continuar ativos.", "warn");
-            if (runBtn) runBtn.disabled = false;
-        };
-
-        // Limpeza listeners
-        window.addEventListener('unload', () => { if(canvasClickListener && canvasElement) canvasElement.removeEventListener('click',canvasClickListener); if(canvasMoveListener && canvasElement) canvasElement.removeEventListener('mousemove',canvasMoveListener); });
-        // O botão chama runEverythingInSequence_v19
-        // document.addEventListener('DOMContentLoaded', runEverythingInSequence_v19);
+         // Limpeza listeners Fase 2
+        window.addEventListener('unload', () => { if(canvasClickListenerF2 && canvasElementF2) canvasElementF2.removeEventListener('click',canvasClickListenerF2); if(canvasMoveListenerF2 && canvasElementF2) canvasElementF2.removeEventListener('mousemove',canvasMoveListenerF2); });
 
     </script>
 
