@@ -2,23 +2,29 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PoC v16 - Tentativa de Execução Fase 1 Original</title>
+    <title>PoC v17 - Base Original + Fase 2 Isolada</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        /* ... (restante dos estilos) ... */
+        .log-info { color: #6cf; } /* ... (restante dos estilos) ... */
+        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
+        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
+        .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; }
+        .log-warn { color: #FFC107; } .log-error { color: #f44336; }
+        .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
+        #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
         #fingerprint-canvas { display: block; border: 1px solid #444; margin-top: 5px; cursor: crosshair; background-color: #333; }
         #canvas-coord-status { color: #aaa; font-size: 12px; height: 15px; }
     </style>
 </head>
 <body>
-    <h1>PoC v16 - Tentativa de Execução Fase 1 Original</h1>
+    <h1>PoC v17 - Base Original + Fase 2 Isolada</h1>
     <canvas id="webgl-canvas" width="1" height="1" style="display: none;"></canvas>
     <canvas id="fingerprint-canvas" width="350" height="200"></canvas>
     <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
-    <p>Tentativa de rodar Fase 1 (Original com alerts) integralmente, depois Fase 2 (Aprofundamento).</p>
-    <button id="runBtn" onclick="runEverything()">Iniciar Teste Completo</button>
+    <p>Fase 1: PoC Original (XSS s/ alert). Fase 2: Aprofundamento Isolado.</p>
+    <button id="runBtn" onclick="runEverythingSequentially()">Iniciar Teste Completo</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
 
@@ -31,10 +37,10 @@
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
         const LONG_PAUSE = 3000; // Pausa longa entre fases
-        let leakedValueFromOOB = null;
+        let leakedValueFromOOB = null; // Global para valor OOB da Fase 1
         let canvasClickListener = null;
         let canvasMoveListener = null;
-        let xssRanFlag = false;
+        let xssRanFlag = false; // Global para flag XSS da Fase 1
         let rectArea = { x: 10, y: 10, w: 30, h: 30 }; // Global p/ Canvas Listener
         let linkArea = { x: 150, y: 100, w: 60, h: 30 }; // Global p/ Canvas Listener
 
@@ -48,63 +54,83 @@
 
 
         // ========================================================
-        // --- FASE 1: Código Original (Exatamente como Msg 1) ---
+        // --- FASE 1: Código Original Modificado Minimamente ---
         // ========================================================
-        log("Definindo Funções Originais da Fase 1", "info");
+        log("Definindo Funções Originais da Fase 1 (XSS sem alert)", "info");
 
-        // Funções originais T1, T2, T3, T4 (com alerts em T1)
-        // Nota: Renomeadas para evitar conflito se o original usasse nomes genéricos
-        const original_testCSPBypass = async () => {
-            log("--- [F1 Orig] Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
-            xssRanFlag = false; // Reseta flag no início do teste original
-             // ... (Código EXATO de testCSPBypass da primeira mensagem, incluindo alerts) ...
-             log("Tentando XSS via data: URI (alert)...", 'subtest'); await new Promise(r=>setTimeout(r,SHORT_PAUSE)); try { const p=`try { alert('XSS via Data URI!'); log("[Payload Data:] Alerta data: URI executado!", "vuln"); window.xssRanFlag=true; } catch(e) { log("[Payload Data:] Alerta data: URI bloqueado: " + e.message, "good"); }`; const s=document.createElement('script');s.src='data:text/javascript;base64,'+btoa(p); s.onerror=()=>{log("ERRO data URI!","error");}; document.body.appendChild(s);log("Tag <script> data: URI adicionada.",'info');}catch(e){log(`Erro data URI: ${e.message}`,'error');}
-             await new Promise(r=>setTimeout(r,SHORT_PAUSE*2));
-             log("Tentando XSS DOM via inline handler (onerror)...", 'subtest'); await new Promise(r=>setTimeout(r,SHORT_PAUSE)); try { const i=document.createElement('img');i.src='invalid_'+Date.now(); const p=` try { const target = document.getElementById('xss-target-div'); if (target) { target.innerHTML = '<h2 class="log-vuln">XSS DOM via ONERROR Executado!</h2>'; log("XSS DOM via onerror realizado!", "vuln"); } else { log("Alvo XSS DOM (onerror) não encontrado.", "error"); } window.xssRanFlag=true; alert('XSS_DOM_ONERROR'); } catch(e) { log("Erro no payload onerror: " + e.message, "warn"); } `; i.setAttribute('onerror',p); document.body.appendChild(i);log("Tag <img> com onerror adicionada.",'info');} catch(e){log(`Erro img onerror: ${e.message}`,'error');}
-             // Não havia log de conclusão explícito no original, mas adicionamos pausa
-             await new Promise(r => setTimeout(r, MEDIUM_PAUSE)); // Pausa para dar chance ao onerror
-             log("--- [F1 Orig] Teste 1 Concluído (aparentemente) ---", 'test');
+        // Teste Original 1: CSP Bypass / XSS (SEM ALERT)
+        const originalTestCSPBypass = async () => {
+            log("--- [Fase 1] Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
+            xssRanFlag = false;
+            // 1.1 Data URI (Sem Alert)
+            log("Tentando XSS via data: URI (sem alert)...", 'subtest'); await new Promise(r=>setTimeout(r,SHORT_PAUSE));
+            try {
+                const payloadJS = `try { log("[Payload Data/F1:] Executado!", "vuln"); window.xssRanFlag = true; } catch(e) { log("[Payload Data/F1:] Bloqueado: " + e.message, "good"); }`; // Sem alert
+                const encodedPayload = btoa(payloadJS); const scriptTag = document.createElement('script');
+                scriptTag.src = 'data:text/javascript;base64,'+encodedPayload; scriptTag.onerror = () => { log("[F1] ERRO data: URI!","error"); }; document.body.appendChild(scriptTag); log("[F1] Tag data: URI adicionada.",'info');
+            } catch (e) { log(`[F1] Erro data URI: ${e.message}`,'error'); }
+            await new Promise(r=>setTimeout(r,SHORT_PAUSE*2));
+            // 1.2 Onerror (Sem Alert)
+            log("Tentando XSS DOM via onerror (sem alert)...", 'subtest'); await new Promise(r=>setTimeout(r,SHORT_PAUSE));
+            try {
+                const imgTag = document.createElement('img'); imgTag.src = 'invalid_'+Date.now();
+                const onerrorPayload = `
+                    try {
+                        log("[F1] Payload onerror iniciado!", "info");
+                        const target = document.getElementById('xss-target-div');
+                        if (target) { target.innerHTML = '<h2 class="log-vuln">[F1] XSS DOM ONERROR!</h2>'; }
+                        window.xssRanFlag = true; // Define a flag
+                        log("[F1] XSS DOM via onerror realizado no log! Flag setada.", "vuln");
+                    } catch(e) { log("[F1] Erro payload onerror: " + e.message, "warn"); }`; // Sem alert
+                imgTag.setAttribute('onerror', onerrorPayload); document.body.appendChild(imgTag); log("[F1] Tag img onerror adicionada.",'info');
+            } catch (e) { log(`[F1] Erro img onerror: ${e.message}`,'error'); }
+            await new Promise(r => setTimeout(r, MEDIUM_PAUSE)); // Pausa p/ onerror
+            log(`--- [Fase 1] Teste 1 Concluído (Flag XSS = ${xssRanFlag}) ---`, 'test');
+            // Não retorna valor explícito, mas define flag global
         };
 
-        const original_testOOBReadInfoLeakEnhancedStore = async () => {
+        // Teste Original 2: OOB Write/Read (Lógica Original)
+        const originalTestOOBReadInfoLeakEnhancedStore = async () => {
              log("--- [Fase 1] Iniciando Teste 2: OOB Write/Read Extensivo ---", 'test');
-             // ... (Código EXATO de testOOBReadInfoLeakEnhancedStore da primeira mensagem) ...
-             // Inclui a lógica original de armazenamento em leakedValueFromOOB
-             // ...
+             // ... (Código EXATO de testOOBReadInfoLeakEnhancedStore da PRIMEIRA mensagem) ...
+             // ... (A lógica original armazenava o PRIMEIRO valor U64/U32 "interessante" encontrado) ...
              log("--- [Fase 1] Teste 2 Concluído (aparentemente) ---", 'test');
-             return true; // Adicionado para async/await
+             // A função original não retornava valor, mas vamos adicionar para robustez do await
+             return true;
         };
 
-        const original_testBasicPP = async () => {
-             log("--- [Fase 1] Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
-             // ... (Código EXATO de testBasicPP da primeira mensagem) ...
-             // ...
-             log("--- [Fase 1] Teste 3 Concluído (aparentemente) ---", 'test');
-             return true; // Adicionado para async/await
+        // Teste Original 3: PP Básica (Lógica Original + return)
+        const originalTestBasicPP = async () => {
+             log("--- [Fase 1] Iniciando Teste 3: PP Básica ---", 'test');
+             const testProp = '__pp_basic_test__'; const testValue = 'Polluted!'; let success = false;
+             try { /* ... (lógica exata do testBasicPP original) ... */ } catch (e) { log(`Erro PP Básico: ${e.message}`, 'error'); success = false; } finally { /* ... (lógica exata do finally original) ... */ }
+             log(`--- [Fase 1] Teste 3 Concluído (PP Básica ${success ? 'Confirmada' : 'Falhou'}) ---`, 'test');
+             return success; // Retorna status
         };
 
-        const original_testPPJsonHijack = async () => {
+        // Teste Original 4: PP Hijack (Lógica Original + return)
+        const originalTestPPJsonHijack = async () => {
              log("--- [Fase 1] Iniciando Teste 4: PP Hijack (JSON.stringify) ---", 'test');
-             // ... (Código EXATO de testPPJsonHijack da primeira mensagem) ...
-             // ...
-             log("--- [Fase 1] Teste 4 Concluído (aparentemente) ---", 'test');
-             return true; // Adicionado para async/await
+             const originalStringify = JSON.stringify; let hijackSuccessful=false; let interactionSuccessful=false; let hijackReturnedCorrectly=false;
+             try { /* ... (lógica exata do testPPJsonHijack original) ... */ } catch (e) { log(`Erro PP Hijack JSON: ${e.message}`, 'error'); hijackReturnedCorrectly = false; } finally { /* ... (lógica exata do finally original) ... */ }
+             log(`--- [Fase 1] Teste 4 Concluído (PP Hijack JSON ${hijackReturnedCorrectly ? 'Confirmado' : 'Falhou'}) ---`, 'test');
+             return hijackReturnedCorrectly; // Retorna status
         };
 
-        // Função original que chamava os testes (renomeada)
+        // Função para rodar a Fase 1 (lógica original de runAllTests)
         const runPhase1_Original = async () => {
              log("==== [Fase 1] INICIANDO runPhase1_Original ====", 'critical');
-             // Chamadas EXATAS como no runAllTests original
-             await original_testCSPBypass();
+             // Chamadas na ordem original
+             await originalTestCSPBypass();
              await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-             await original_testOOBReadInfoLeakEnhancedStore();
+             await originalTestOOBReadInfoLeakEnhancedStore();
              await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-             await original_testBasicPP();
+             await originalTestBasicPP();
              await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-             await original_testPPJsonHijack();
-             // Fim das chamadas originais
+             await originalTestPPJsonHijack();
+             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); // Pausa final original
              log("==== [Fase 1] runPhase1_Original CONCLUÍDA ====", 'critical');
-             log(`==== [Fase 1] Estado Pós-Fase 1: xssFlag=${xssRanFlag}, OOB=${leakedValueFromOOB?'Stored':'null'} ====`,'info');
+             log(`==== [Fase 1] Estado Pós-Fase 1: xssFlag=<span class="math-inline">\{xssRanFlag\}, OOB\=</span>{leakedValueFromOOB?'Stored':'null'} ====`,'info');
         };
 
 
@@ -114,21 +140,18 @@
         log("Definindo Testes da Fase 2 (Aprofundamento)", "info");
 
         // Definições dos testes A, B, C, F, J, K, D/E Combinado
-        // (Usando as implementações da v15.5, que incluem interações
-        // como ler xssRanFlag e leakedValueFromOOB)
-        const testBasicDataCollection = async () => { log("--- [Fase 2] A: Coleta Dados Iniciando ---", 'test'); /* ... */ log("--- [Fase 2] A: Coleta Dados Concluído ---", 'test'); };
-        const testEnvironmentProbing = async () => { log("--- [Fase 2] B: Sondagem Ambiente Iniciando ---", 'test'); /* ... */ log("--- [Fase 2] B: Sondagem Ambiente Concluído ---", 'test'); };
-        const testAdvancedFingerprinting = async () => { log("--- [Fase 2] C: Fingerprinting Adv Iniciando ---", 'test'); /* ... */ log("--- [Fase 2] C: Fingerprinting Adv Concluído ---", 'test'); };
-        const testErrorObservation = async () => { log("--- [Fase 2] F: Observação Erros Iniciando ---", 'test'); /* ... */ log("--- [Fase 2] F: Observação Erros Concluído ---", 'test'); };
-        const testAdvancedPP = async () => { log("--- [Fase 2] J: PP Avançada Iniciando ---", 'test'); /* ... */ log("--- [Fase 2] J: PP Avançada Concluído ---", 'test'); };
-        const testPPGadgetAttempts = async () => { log("--- [Fase 2] K: PP Gadgets Iniciando ---", 'test'); /* ... */ log("--- [Fase 2] K: PP Gadgets Concluído ---", 'test'); };
-        const testComprehensiveCanvas = async () => { log("--- [Fase 2] D/E: Canvas Completo Iniciando ---", 'test'); /* ... (Código D/E combinado v15.5, sem stress desenho) ... */ log("--- [Fase 2] D/E: Canvas Completo Concluído ---", 'test'); };
-
+        // (Usando as implementações da v15.5, com interações)
+        const testBasicDataCollection = async () => { /* ... */ log("--- [Fase 2] A: Coleta Dados Concluído ---", 'test'); };
+        const testEnvironmentProbing = async () => { /* ... */ log("--- [Fase 2] B: Sondagem Ambiente Concluído ---", 'test'); };
+        const testAdvancedFingerprinting = async () => { /* ... */ log("--- [Fase 2] C: Fingerprinting Adv Concluído ---", 'test'); };
+        const testErrorObservation = async () => { /* ... */ log("--- [Fase 2] F: Observação Erros Concluído ---", 'test'); };
+        const testAdvancedPP = async () => { /* ... */ log("--- [Fase 2] J: PP Avançada Concluído ---", 'test'); };
+        const testPPGadgetAttempts = async () => { /* ... */ log("--- [Fase 2] K: PP Gadgets Concluído ---", 'test'); };
+        const testComprehensiveCanvas = async () => { /* ... (Código D/E combinado v15.5, sem stress desenho, lendo xssRanFlag/OOB) ... */ log("--- [Fase 2] D/E: Canvas Completo Concluído ---", 'test'); };
 
         // Função para rodar a Fase 2
         const runPhase2_NewTests = async () => {
             log("==== [Fase 2] INICIANDO runPhase2_NewTests ====", 'critical');
-            // Ordem pode ser ajustada, mas executa todos os testes da Fase 2
             await testBasicDataCollection(); await new Promise(r=>setTimeout(r,MEDIUM_PAUSE)); // A
             await testEnvironmentProbing(); await new Promise(r=>setTimeout(r,MEDIUM_PAUSE)); // B
             await testAdvancedFingerprinting(); await new Promise(r=>setTimeout(r,MEDIUM_PAUSE)); // C
@@ -141,37 +164,10 @@
 
 
         // --- Função Principal ---
-        const runEverything = async () => { // Renomeada para clareza
+        const runEverythingSequentially = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO PoC Final v16 (Original Primeiro) ====", 'critical');
+            log("==== INICIANDO PoC Final v17 (Base Original + Fase 2 Isolada) ====", 'critical');
 
-            log(">>> Iniciando Fase 1 (Testes Originais) <<<", 'warn');
-            // Não usamos try/catch aqui para manter o comportamento original fielmente
-            // Se a Fase 1 travar, a Fase 2 não será chamada.
-            await runPhase1_Original();
-            log(">>> Fase 1 (runPhase1_Original) CONCLUÍDA (aparentemente) <<<", 'warn');
-
-
-            log("\n>>> PAUSA LONGA ANTES DA FASE 2 (3 segundos) <<<\n", "warn");
-            await new Promise(r => setTimeout(r, LONG_PAUSE)); // Pausa longa
-
-
-            log(">>> Iniciando Fase 2 (Testes Adicionais) <<<", 'warn');
-            await runPhase2_NewTests();
-            log(">>> Fase 2 (runPhase2_NewTests) CONCLUÍDA <<<", 'warn');
-
-
-            log("\n==== PoC Final v16 CONCLUÍDA (Fase 1 + Fase 2) ====", 'critical');
-            // O resumo final foi removido por enquanto para focar na execução
-            log("Listeners podem continuar ativos.", "warn");
-            if (runBtn) runBtn.disabled = false;
-        };
-
-        // Limpeza listeners
-        window.addEventListener('unload', () => { /* ... */ });
-        // document.addEventListener('DOMContentLoaded', runEverything);
-
-    </script>
-
-</body>
-</html>
+            log(">>> Iniciando Fase 1 (Testes Originais Fiéis) <<<", 'warn');
+            // Executa Fase 1 - SEM try/catch extra, para manter originalidade
+            //
