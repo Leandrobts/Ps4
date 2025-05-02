@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Teste de Canvas v21 (Isolado)</title>
+    <title>Teste de Canvas v21.1 (Isolado - Debug)</title>
     <style>
         /* Estilos CSS */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -14,59 +14,80 @@
     </style>
 </head>
 <body>
-    <h1>Teste de Canvas v21 (Isolado)</h1>
-    <p>Testa desenho, APIs, interatividade (clique/movimento) e link simulado no Canvas 2D.</p>
+    <h1>Teste de Canvas v21.1 (Isolado - Debug)</h1>
+    <p>Teste isolado de Canvas 2D com mais logs e verificações.</p>
     <canvas id="interactive-canvas" width="350" height="200"></canvas>
     <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
     <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste de Canvas</button>
-    <div id="output-canvas"></div>
-
-    <script>
+    <div id="output-canvas"></div> <script>
         // --- Setup Canvas Test ---
-        const canvasOutputDiv = document.getElementById('output-canvas');
-        const canvasRunBtn = document.getElementById('runCanvasBtn');
-        const canvasElement = document.getElementById('interactive-canvas');
-        const coordStatusDivCanvas = document.getElementById('canvas-coord-status');
+        // Variáveis globais para elementos, inicializadas como null
+        let canvasOutputDiv = null;
+        let canvasRunBtn = null;
+        let canvasElement = null;
+        let coordStatusDivCanvas = null;
+        let ctx = null; // Contexto global para fácil acesso
+
         const SHORT_PAUSE_CANVAS = 50;
         const MEDIUM_PAUSE_CANVAS = 300;
         let canvasClickListenerCanvas = null;
         let canvasMoveListenerCanvas = null;
-        // Áreas definidas para este teste isolado
         const rectAreaCanvas = { x: 10, y: 10, w: 50, h: 50 };
         const linkAreaCanvas = { x: 150, y: 100, w: 80, h: 30 };
 
-        // --- Função de Log ---
+        // --- Função de Log (Mais Robusta) ---
         const logCanvas = (message, type = 'info') => {
-             if (!canvasOutputDiv) return;
+             // Log no console sempre, para o caso do DIV falhar
+             console.log(`[${type.toUpperCase()}] ${message}`);
+             if (!canvasOutputDiv) {
+                 console.error("logCanvas ERRO: output-canvas DIV não encontrado!");
+                 return;
+             }
              try {
                  const timestamp = `[${new Date().toLocaleTimeString()}]`;
                  const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                 if(canvasOutputDiv.innerHTML.length > 500000){ // Limite
+                 // Limite de log
+                 if(canvasOutputDiv.innerHTML.length > 500000){
                      canvasOutputDiv.innerHTML = canvasOutputDiv.innerHTML.substring(canvasOutputDiv.innerHTML.length - 250000);
                      canvasOutputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + canvasOutputDiv.innerHTML;
                  }
                  canvasOutputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`;
                  canvasOutputDiv.scrollTop = canvasOutputDiv.scrollHeight;
-             } catch(e) {}
+             } catch(e) {
+                 // Loga erro no console se falhar em escrever no DIV
+                 console.error("logCanvas ERRO ao escrever no DIV:", e);
+             }
         };
 
-         // --- Helper toHex (se necessário para logs futuros, opcional aqui) ---
+         // --- Helper toHex (Opcional, mas pode ser útil) ---
          const toHex = (val, bits = 32) => { try { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } catch { return 'Error'; } };
 
-
-        // --- Teste de Canvas Compreensivo e Interativo (Isolado) ---
-        const runIsolatedCanvasTest = async () => {
+        // --- Função Principal do Teste de Canvas ---
+        const testComprehensiveCanvasIsolated = async () => {
             logCanvas("--- Iniciando Teste Isolado de Canvas ---", 'test');
-            if (canvasRunBtn) canvasRunBtn.disabled = true;
-            let ctx = null;
             try {
-                if (!canvasElement || !canvasElement.getContext) throw new Error('Elemento Canvas não encontrado/suportado');
-                ctx = canvasElement.getContext('2d');
-                if (!ctx) throw new Error('Contexto 2D não disponível');
-                logCanvas("Contexto Canvas 2D obtido.", 'info');
+                // Verifica se o contexto já foi obtido (evita erro se chamado múltiplas vezes)
+                if (!ctx) {
+                    if (!canvasElement) throw new Error('Elemento Canvas é null');
+                    ctx = canvasElement.getContext('2d');
+                    if (!ctx) throw new Error('Contexto 2D não disponível');
+                    logCanvas("Contexto Canvas 2D obtido pela primeira vez.", 'info');
+                } else {
+                    logCanvas("Contexto Canvas 2D já existente.", 'info');
+                }
+
+                // Limpa e desenha fundo
                 ctx.clearRect(0, 0, canvasElement.width, canvasElement.height);
-                ctx.fillStyle = "#333"; ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
-            } catch(e) { logCanvas(`Falha no setup do Canvas: ${e.message}`, 'error'); if (canvasRunBtn) canvasRunBtn.disabled = false; return; }
+                ctx.fillStyle = "#334"; // Fundo diferente
+                ctx.fillRect(0, 0, canvasElement.width, canvasElement.height);
+                logCanvas("Canvas limpo e fundo desenhado.", 'info');
+
+            } catch(e) {
+                logCanvas(`Falha CRÍTICA no setup do Canvas: ${e.message}`, 'error');
+                logCanvas("--- Teste de Canvas Isolado ABORTADO (Setup) ---", 'test');
+                if (canvasRunBtn) canvasRunBtn.disabled = false; // Reabilita botão se falhar aqui
+                return; // Aborta o resto do teste
+            }
 
             // 1. Desenho
             logCanvas("Desenhando formas...", 'subtest');
@@ -90,7 +111,7 @@
                 const pngURL = canvasElement.toDataURL('image/png');
                 const jpegURL = canvasElement.toDataURL('image/jpeg');
                 const urlQuirk = pngURL.length === jpegURL.length || pngURL.substring(30,70) === jpegURL.substring(30,70);
-                logCanvas(` toDataURL PNG(len ${pngURL.length}) / JPEG(len ${jpegURL.length}). Quirk similaridade: ${urlQuirk}`, urlQuirk ? 'warn' : 'info');
+                logCanvas(` toDataURL PNG(len ${pngURL.length}) / JPEG(len ${jpegURL.length}). Quirk: ${urlQuirk}`, urlQuirk ? 'warn' : 'info');
                 logCanvas(` API ellipse: ${typeof ctx.ellipse==='function'}`, 'info');
                 logCanvas(` API measureText: ${typeof ctx.measureText==='function'}`, 'info');
                 if (typeof ctx.measureText==='function') { logCanvas(`  measureText('Test😊'): width ${ctx.measureText('Test😊').width.toFixed(1)}`, 'info');}
@@ -102,31 +123,52 @@
             if(canvasClickListenerCanvas && canvasElement) { try { canvasElement.removeEventListener('click', canvasClickListenerCanvas); } catch(e){} }
             if(canvasMoveListenerCanvas && canvasElement) { try { canvasElement.removeEventListener('mousemove', canvasMoveListenerCanvas); } catch(e){} }
 
-            canvasClickListenerCanvas = (event) => {
-                try{ const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; let area='fora';
-                     if(x>=rectAreaCanvas.x&&x<=rectAreaCanvas.x+rectAreaCanvas.w&&y>=rectAreaCanvas.y&&y<=rectAreaCanvas.y+rectAreaCanvas.h) area='Rect Laranja';
-                     else if(x>=linkAreaCanvas.x&&x<=linkAreaCanvas.x+linkAreaCanvas.w&&y>=linkAreaCanvas.y&&y<=linkAreaCanvas.y+linkAreaCanvas.h) area='Área Link';
-                     logCanvas(`--> Click! Area: ${area}. Coords: x=${x.toFixed(0)}, y=${y.toFixed(0)}`, 'warn');
-                     if(area==='Área Link'){
-                         logCanvas("--> Ação LINK: Tentando abrir google.com...", 'vuln');
-                         try{ window.open('https://google.com','_blank'); } catch(e){logCanvas('Erro ao abrir link (bloqueado?): '+e.message,'error');}
-                     }
-                }catch(e){logCanvas(`Erro click handler: ${e.message}`,'error');}
-            };
-            canvasMoveListenerCanvas = (event) => {
-                 try { const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; if(coordStatusDivCanvas) coordStatusDivCanvas.textContent = `Canvas Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`; } catch(e) {}
-            };
+            canvasClickListenerCanvas = (event) => { /* ... (lógica click v19, usando logCanvas) ... */ try{const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; let area='fora';if(x>=rectAreaCanvas.x&&x<=rectAreaCanvas.x+rectAreaCanvas.w&&y>=rectAreaCanvas.y&&y<=rectAreaCanvas.y+rectAreaCanvas.h)area='Rect Laranja'; else if(x>=linkAreaCanvas.x&&x<=linkAreaCanvas.x+linkAreaCanvas.w&&y>=linkAreaCanvas.y&&y<=linkAreaCanvas.y+linkAreaCanvas.h)area='Área Link'; logCanvas(`--> Click! Area: ${area}. Coords: x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'warn'); if(area==='Área Link'){logCanvas("--> Ação LINK: Tentando abrir google.com...",'vuln'); try{window.open('https://google.com','_blank');}catch(e){logCanvas('Erro ao abrir link (bloqueado?): '+e.message,'error');}}}catch(e){logCanvas(`Erro click handler: ${e.message}`,'error');} };
+            canvasMoveListenerCanvas = (event) => { /* ... (lógica move v19, usando coordStatusDivCanvas) ... */ try{const r=canvasElement.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; if(coordStatusDivCanvas) coordStatusDivCanvas.textContent = `Canvas Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`;}catch(e){} };
 
             try { canvasElement.addEventListener('click', canvasClickListenerCanvas); canvasElement.addEventListener('mousemove', canvasMoveListenerCanvas); logCanvas("Listeners adicionados. TESTE CLICANDO E MOVENDO O MOUSE NO CANVAS!", 'good'); }
             catch (e) { logCanvas(`Erro add listeners: ${e.message}`, 'error'); }
 
             logCanvas("--- Teste de Canvas Isolado Concluído ---", 'test');
-            if (canvasRunBtn) canvasRunBtn.disabled = false;
+            if (canvasRunBtn) canvasRunBtn.disabled = false; // Reabilita botão no final
         };
 
-         // Limpeza listeners
-        window.addEventListener('unload', () => { if(canvasClickListenerCanvas && canvasElement) canvasElement.removeEventListener('click',canvasClickListenerCanvas); if(canvasMoveListenerCanvas && canvasElement) canvasElement.removeEventListener('mousemove',canvasMoveListenerCanvas); });
-        // document.addEventListener('DOMContentLoaded', runCanvasTest);
+        // --- Função chamada pelo botão ---
+        const runCanvasTest = async () => {
+            logCanvas("Botão 'Iniciar Teste de Canvas' clicado.", "info");
+            if (canvasRunBtn) canvasRunBtn.disabled = true;
+            // Garante que os elementos globais foram pegos antes de rodar
+             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
+                 logCanvas("ERRO FATAL: Elementos HTML essenciais não encontrados no carregamento.", "error");
+                 if (canvasRunBtn) canvasRunBtn.disabled = false;
+                 return;
+             }
+            await testComprehensiveCanvasIsolated();
+            // O botão é reabilitado dentro do testComprehensiveCanvasIsolated se ele completar
+        };
+
+         // --- Inicialização e Limpeza ---
+         // Pega referências aos elementos assim que o script carrega
+         try {
+             canvasOutputDiv = document.getElementById('output-canvas');
+             canvasRunBtn = document.getElementById('runCanvasBtn');
+             canvasElement = document.getElementById('interactive-canvas');
+             coordStatusDivCanvas = document.getElementById('canvas-coord-status');
+             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
+                console.error("Falha ao obter todos os elementos HTML necessários na carga inicial!");
+                // Logar no body se o outputDiv falhar?
+                if (!outputDiv) document.body.innerHTML += '<p style="color:red;">ERRO: Falha ao obter DIV de output!</p>';
+             } else {
+                 console.log("Elementos HTML para Teste de Canvas encontrados.");
+             }
+         } catch (e) {
+             console.error("Erro crítico durante setup inicial:", e);
+             alert("Erro crítico no setup inicial, veja o console (F12).");
+         }
+
+         // Limpeza listeners ao sair
+         window.addEventListener('unload', () => { if(canvasClickListenerCanvas && canvasElement) canvasElement.removeEventListener('click',canvasClickListenerCanvas); if(canvasMoveListenerCanvas && canvasElement) canvasElement.removeEventListener('mousemove',canvasMoveListenerCanvas); });
+         // document.addEventListener('DOMContentLoaded', runCanvasTest); // Para rodar auto
 
     </script>
 
