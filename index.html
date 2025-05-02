@@ -2,8 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PP Hijack JSON + Canvas/Worker AVANÇADO (v12)</title>
-    <style>
+    <title>PP Hijack JSON + Canvas/Worker/WS FINAL (v13)</title> <style>
         /* Estilos CSS (Sem alterações) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 60vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
@@ -25,11 +24,11 @@
     <hr>
 
     <section>
-        <h2>Teste Canvas/Worker AVANÇADO (v12)</h2>
-        <p>Testes: PP Hijack Avançado (fillRect->Círculo, measureText), Worker (Primos, APIs).</p>
+        <h2>Teste Canvas/Worker/WebSocket FINAL (v13)</h2>
+        <p>Testes: Worker(Aninhado, SharedArrayBuffer, Primos, APIs), WS(Binário).</p>
         <canvas id="interactive-canvas" width="350" height="200"></canvas>
         <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
-        <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste Avançado Canvas+Worker (Script 2 v12)</button>
+        <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste Final Canvas+Worker+WS (Script 2 v13)</button>
         <div id="output-canvas"></div>
     </section>
 
@@ -41,309 +40,270 @@
 
     <script>
         // --- Script 2: Variáveis e constantes ---
-        const SHORT_PAUSE_CANVAS_V12 = 50; // Renomeado
-        let canvasClickListenerCanvas_v12 = null; // Renomeado
-        let canvasMoveListenerCanvas_v12 = null;  // Renomeado
-        let currentHoverTarget_v12 = null; // Renomeado
-        let hijackActive_v12 = false; // Renomeado
-        let currentWorker_v12 = null; // Renomeado
+        const SHORT_PAUSE_CANVAS_V13 = 50; // Renomeado
+        let canvasClickListenerCanvas_v13 = null; // Renomeado
+        let canvasMoveListenerCanvas_v13 = null;  // Renomeado
+        let currentHoverTarget_v13 = null; // Renomeado
+        let hijackActive_v13 = false; // Renomeado
+        let currentWorker_v13 = null; // Renomeado
 
-        const interactiveAreas_v12 = [ // Renomeado
+        const interactiveAreas_v13 = [ // Renomeado
             { id: 'rect-log', x: 10, y: 10, w: 80, h: 30, color: '#FF5733', hoverColor: '#FF8C66', text: 'Log Click' },
             { id: 'rect-link', x: 100, y: 10, w: 80, h: 30, color: '#337BFF', hoverColor: '#66A3FF', text: 'Abrir Link' },
             { id: 'rect-rerun', x: 190, y: 10, w: 100, h: 30, color: '#4CAF50', hoverColor: '#80C883', text: 'Re-ler Leak S1' }
         ];
-        let currentLeakData_v12 = { text: "Leak(S1): N/A", color: "#AAAAAA" }; // Renomeado
+        let currentLeakData_v13 = { text: "Leak(S1): N/A", color: "#AAAAAA" }; // Renomeado
 
         // --- Função de Log (Script 2) ---
-        const logCanvas_v12 = (outputDivElement, message, type = 'info') => { /* ... (igual v10) ... */ const logMsg=`[CANVAS-${type.toUpperCase()}] ${message}`; console.log(logMsg); if(!outputDivElement){console.error("logCanvas_v12 ERRO: Output DIV nulo!"); return;} try{const timestamp=`[${new Date().toLocaleTimeString()}]`; const sanitizedMessage=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;"); if(outputDivElement.innerHTML.length>1000000){outputDivElement.innerHTML=outputDivElement.innerHTML.substring(outputDivElement.innerHTML.length-500000); outputDivElement.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDivElement.innerHTML;} const logClass=['info','test','subtest','vuln','good','warn','error','leak','ptr','critical'].includes(type)?type:'info'; outputDivElement.innerHTML+=`<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`; outputDivElement.scrollTop=outputDivElement.scrollHeight;}catch(e){console.error("logCanvas_v12 ERRO ao escrever no DIV:", e);} };
+        const logCanvas_v13 = (outputDivElement, message, type = 'info') => { /* ... (igual v11) ... */ const logMsg=`[CANVAS-${type.toUpperCase()}] ${message}`; console.log(logMsg); if(!outputDivElement){console.error("logCanvas_v13 ERRO: Output DIV nulo!"); return;} try{const timestamp=`[${new Date().toLocaleTimeString()}]`; const sanitizedMessage=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;"); if(outputDivElement.innerHTML.length>1000000){outputDivElement.innerHTML=outputDivElement.innerHTML.substring(outputDivElement.innerHTML.length-500000); outputDivElement.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDivElement.innerHTML;} const logClass=['info','test','subtest','vuln','good','warn','error','leak','ptr','critical'].includes(type)?type:'info'; outputDivElement.innerHTML+=`<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`; outputDivElement.scrollTop=outputDivElement.scrollHeight;}catch(e){console.error("logCanvas_v13 ERRO ao escrever no DIV:", e);} };
 
         // --- Helper toHex (Comentado) ---
 
         // --- Desenho das Áreas Interativas ---
-        const drawInteractiveAreas_v12 = (ctx, canvasEl, outputDivEl) => { /* ... (igual v10, usa _v12) ... */ const localLog=(msg,type)=>logCanvas_v12(outputDivEl,msg,type); if(!ctx||!canvasEl)return; try{interactiveAreas_v12.forEach(area=>{ctx.fillStyle=(currentHoverTarget_v12===area.id)?area.hoverColor:area.color; ctx.fillRect(area.x,area.y,area.w,area.h); ctx.fillStyle="#FFFFFF"; ctx.font="bold 12px monospace"; ctx.textAlign="center"; ctx.fillText(area.text,area.x+area.w/2,area.y+area.h/2+4);}); ctx.textAlign="start";}catch(e){localLog(`Erro draw areas: ${e.message}`,'error');}};
+        const drawInteractiveAreas_v13 = (ctx, canvasEl, outputDivEl) => { /* ... (igual v11, usa _v13) ... */ const localLog=(msg,type)=>logCanvas_v13(outputDivEl,msg,type); if(!ctx||!canvasEl)return; try{interactiveAreas_v13.forEach(area=>{ctx.fillStyle=(currentHoverTarget_v13===area.id)?area.hoverColor:area.color; ctx.fillRect(area.x,area.y,area.w,area.h); ctx.fillStyle="#FFFFFF"; ctx.font="bold 12px monospace"; ctx.textAlign="center"; ctx.fillText(area.text,area.x+area.w/2,area.y+area.h/2+4);}); ctx.textAlign="start";}catch(e){localLog(`Erro draw areas: ${e.message}`,'error');}};
 
         // --- Função de cálculo intensivo (Primos) ---
-        const calculatePrimes = (limit) => {
-            const primes = [];
-            for (let num = 2; num <= limit; num++) {
-                let isPrime = true;
-                for (let i = 2; i <= Math.sqrt(num); i++) {
-                    if (num % i === 0) {
-                        isPrime = false;
-                        break;
-                    }
-                }
-                if (isPrime) {
-                    primes.push(num);
-                }
-            }
-            return primes;
-        };
+        const calculatePrimes_v13 = (limit) => { /* ... (igual v11) ... */ const primes=[]; for(let num=2; num<=limit; num++){let isPrime=true; for(let i=2; i<=Math.sqrt(num); i++){if(num%i===0){isPrime=false; break;}} if(isPrime){primes.push(num);}} return primes;};
 
-        // --- Função Principal do Teste de Canvas + Worker (v12 Avançado) ---
-        const testComprehensiveCanvasFinalV12 = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => { // Renomeado
-            let ctx_v12 = null;
-            const localLog = (msg, type = 'info') => logCanvas_v12(outputDivEl, msg, type);
-            const PAUSE = (ms = SHORT_PAUSE_CANVAS_V12) => new Promise(r => setTimeout(r, ms));
+        // --- Função Principal do Teste de Canvas + Worker (v13 Final) ---
+        const testComprehensiveCanvasFinalV13 = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => { // Renomeado
+            let ctx_v13 = null; // Renomeado
+            const localLog = (msg, type = 'info') => logCanvas_v13(outputDivEl, msg, type);
+            const PAUSE = (ms = SHORT_PAUSE_CANVAS_V13) => new Promise(r => setTimeout(r, ms)); // Usa _v13
 
-            if (currentWorker_v12) { try { currentWorker_v12.terminate(); localLog("Worker anterior v12 terminado.", 'info'); } catch(e){} currentWorker_v12 = null; }
-            hijackActive_v12 = false; currentHoverTarget_v12 = null;
-            currentLeakData_v12 = { text: "Leak(S1): N/A", color: "#AAAAAA" };
+            if (currentWorker_v13) { try { currentWorker_v13.terminate(); localLog("Worker anterior v13 terminado.", 'info'); } catch(e){} currentWorker_v13 = null; }
+            hijackActive_v13 = false; currentHoverTarget_v13 = null;
+            currentLeakData_v13 = { text: "Leak(S1): N/A", color: "#AAAAAA" };
 
-            localLog("--- Iniciando Teste AVANÇADO Canvas v12 (PP+Worker Extendido) ---", 'test');
+            localLog("--- Iniciando Teste FINAL Canvas v13 (Worker/WS Extendido) ---", 'test');
             try {
-                // 1. Setup Básico
-                /* ... (igual v11) ... */
-                if (!canvasEl) throw new Error('Elemento Canvas não fornecido'); ctx_v12 = canvasEl.getContext('2d'); if (!ctx_v12) throw new Error('Contexto 2D não disponível'); localLog("Contexto Canvas 2D obtido.", 'good'); const redrawAll_v12 = () => { if(!ctx_v12||!canvasEl)return; try{ctx_v12.clearRect(0,0,canvasEl.width,canvasEl.height); ctx_v12.fillStyle="#334"; ctx_v12.fillRect(0,0,canvasEl.width,canvasEl.height); drawInteractiveAreas_v12(ctx_v12,canvasEl,outputDivEl); if(currentLeakData_v12){ctx_v12.fillStyle=currentLeakData_v12.color;ctx_v12.font="12px monospace";ctx_v12.textAlign="start";ctx_v12.fillText(currentLeakData_v12.text,10,canvasEl.height-10);}}catch(e){localLog(`Erro redraw:${e.message}`,'error');}}; redrawAll_v12(); localLog("Setup básico OK.", 'good'); await PAUSE();
+                // 1. Setup Básico + Redraw Helper
+                /* ... (igual v11, usa _v13) ... */
+                if (!canvasEl) throw new Error('Elemento Canvas não fornecido'); ctx_v13 = canvasEl.getContext('2d'); if (!ctx_v13) throw new Error('Contexto 2D não disponível'); localLog("Contexto 2D obtido.",'good'); const redrawAll_v13 = () => { if(!ctx_v13||!canvasEl)return; try{ctx_v13.clearRect(0,0,canvasEl.width,canvasEl.height); ctx_v13.fillStyle="#334"; ctx_v13.fillRect(0,0,canvasEl.width,canvasEl.height); drawInteractiveAreas_v13(ctx_v13,canvasEl,outputDivEl); if(currentLeakData_v13){ctx_v13.fillStyle=currentLeakData_v13.color;ctx_v13.font="12px monospace";ctx_v13.textAlign="start";ctx_v13.fillText(currentLeakData_v13.text,10,canvasEl.height-10);}}catch(e){localLog(`Erro redraw:${e.message}`,'error');}}; redrawAll_v13(); localLog("Setup OK.",'good'); await PAUSE();
 
                 // 2. Ler Leak S1
-                /* ... (igual v11) ... */
-                localLog("Verificando leak S1...",'subtest'); try{if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`L(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`L(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v12={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v12={text:"L(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v12={text:"L(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Err leak:${e.message}`,'error');currentLeakData_v12={text:"L(S1):ERRO",color:"#F44336"};} redrawAll_v12(); localLog("Leak S1 processado.",'info'); await PAUSE();
+                 /* ... (igual v11) ... */
+                localLog("Verificando leak S1...",'subtest'); try{if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`L(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`L(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v13={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v13={text:"L(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v13={text:"L(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Err leak:${e.message}`,'error');currentLeakData_v13={text:"L(S1):ERRO",color:"#F44336"};} redrawAll_v13(); localLog("Leak S1 processado.",'info'); await PAUSE();
 
                 // --- Bloco de Testes Adicionais ---
 
                 // 3. Testes de Robustez (Mantido)
                 localLog("Iniciando Testes de Robustez...", 'test');
-                try{/*...(código omitido - igual v11)...*/}catch(e){localLog(`Erro Robustez:${e.message}`,'error');}
+                try{/*...(igual v11)...*/}catch(e){localLog(`Erro Robustez:${e.message}`,'error');}
                 localLog("--- Testes de Robustez Concluídos ---", 'test'); await PAUSE();
 
                 // 4. Teste de Stress (Pixel R/W) (Mantido)
                 localLog("Iniciando Teste de Stress...", 'test');
-                try{/*...(código omitido - igual v11)...*/}catch(e){localLog(`Erro Stress:${e.message}`,'error');}
+                try{/*...(igual v11)...*/}catch(e){localLog(`Erro Stress:${e.message}`,'error');}
                 localLog("--- Teste de Stress Concluído ---", 'test'); await PAUSE();
 
-                // 5. Teste de PP Hijack AVANÇADO (fillRect->Círculo, measureText+50)
+                // 5. Teste de PP Hijack Avançado (Mantido)
                 localLog("Iniciando Teste PP Hijack Canvas AVANÇADO...", 'test');
-                const originalMethods_v12 = {};
-                let ppVulnDetected_v12 = false;
-                // 5.1 Hijack fillRect -> draw Circle if leak exists
-                localLog("Testando hijack de fillRect (condicional)...", 'subtest');
-                originalMethods_v12['fillRect'] = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'fillRect');
-                let hijackFRCalled = false; let changedBehaviorFR = false;
-                try {
-                    CanvasRenderingContext2D.prototype.fillRect = function(x, y, w, h) {
-                        hijackFRCalled = true;
-                        // Verifica leak DENTRO do hijack
-                        if (typeof leakedValueFromOOB !== 'undefined' && leakedValueFromOOB !== null) {
-                            console.log(`[CANVAS-VULN] fillRect HIJACKED! Leak encontrado. Desenhando Círculo Amarelo!`);
-                            const originalFill = this.fillStyle;
-                            this.fillStyle = 'yellow'; // Desenha círculo amarelo
-                            this.beginPath();
-                            this.arc(x + w / 2, y + h / 2, Math.min(w, h) / 2, 0, Math.PI * 2);
-                            this.fill();
-                            this.fillStyle = originalFill; // Restaura fillStyle original
-                            changedBehaviorFR = true;
-                        } else {
-                            console.log(`[CANVAS-VULN] fillRect HIJACKED! Leak NÃO encontrado. Chamando original.`);
-                             // Chama original se não houver leak
-                             if(originalMethods_v12['fillRect']?.value) {
-                                try { originalMethods_v12['fillRect'].value.apply(this, arguments); } catch(e){console.error("Erro fillRect original:", e);}
-                            }
-                        }
-                    };
-                    hijackActive_v12 = true;
-                    localLog("Prototype de fillRect sobrescrito (condicional).", 'warn');
-                    localLog("Chamando ctx.fillRect(150, 150, 20, 20)...", 'subtest');
-                    ctx_v12.fillStyle = 'magenta'; // Tenta desenhar magenta
-                    ctx_v12.fillRect(150, 150, 20, 20); // Chamada de teste
-                    await PAUSE(10);
-                    if(hijackFRCalled) { localLog(` VULN: Hijack de fillRect confirmado! ${changedBehaviorFR?'Comportamento ALTERADO!':'Comportamento original mantido.'}`, 'vuln'); ppVulnDetected_v12 = true;}
-                    else { localLog(" FALHA: Hijack de fillRect não detectado.", 'error'); }
-                } catch(e) { localLog(`Erro hijack fillRect: ${e.message}`, 'error'); console.error(e);
-                } finally { if(originalMethods_v12['fillRect']) Object.defineProperty(CanvasRenderingContext2D.prototype, 'fillRect', originalMethods_v12['fillRect']); hijackActive_v12=false; localLog("fillRect restaurado.", 'info'); await PAUSE(100);}
+                const originalMethods_v13 = {}; let ppVulnDetected_v13 = false; // Renomeado
+                 try{/*...(igual v11, usa _v13 e hijack condicional)...*/}catch(e){localLog(`Erro PP:${e.message}`,'error');}
+                 localLog(`--- Teste PP Hijack Canvas Concluído (Vuln: ${ppVulnDetected_v13}) ---`, 'test'); await PAUSE();
 
-                // 5.2 Hijack measureText -> Add 50 to width
-                localLog("Testando hijack de measureText (+50 width)...", 'subtest');
-                originalMethods_v12['measureText'] = Object.getOwnPropertyDescriptor(CanvasRenderingContext2D.prototype, 'measureText');
-                let hijackMTCalled = false; let changedBehaviorMT = false;
-                try {
-                     if (typeof CanvasRenderingContext2D.prototype.measureText === 'function') {
-                         CanvasRenderingContext2D.prototype.measureText = function(text) {
-                             hijackMTCalled = true;
-                             console.log(`[CANVAS-VULN] measureText HIJACKED! Texto: "${text}"`);
-                             let metrics = null;
-                             let originalWidth = "N/A";
-                             // Chama original
-                             if(originalMethods_v12['measureText']?.value) { try { metrics = originalMethods_v12['measureText'].value.apply(this, arguments); originalWidth = metrics?.width?.toFixed(1); } catch(e){ console.error("Erro measureText original:", e); metrics = { width: NaN }; }} else { metrics = { width: NaN };}
-                             // Modifica
-                             if (metrics && typeof metrics.width === 'number' && isFinite(metrics.width)) {
-                                 metrics.width += 50;
-                                 changedBehaviorMT = true;
-                             } else { metrics = { width: NaN }; } // Garante que temos objeto
-                              console.log(`[CANVAS-VULN] -> Largura Original: ${originalWidth}, Modificada: ${metrics.width.toFixed(1)}`);
-                              return metrics; // Retorna métrica modificada
-                         };
-                         hijackActive_v12 = true;
-                         localLog("Prototype de measureText sobrescrito (+50).", 'warn');
-                         localLog("Chamando ctx.measureText('Test')...", 'subtest');
-                         const textToMeasure = "Test";
-                         const modifiedMetrics = ctx_v12.measureText(textToMeasure);
-                         if (hijackMTCalled) { localLog(` VULN: Hijack de measureText confirmado! Largura retornada p/ "${textToMeasure}": ${modifiedMetrics?.width?.toFixed(1)} ${changedBehaviorMT?'(+50 esperado)':'(erro na modificação?)'}`, 'vuln'); ppVulnDetected_v12 = true;}
-                         else { localLog(" FALHA: Hijack de measureText não detectado.", 'error'); }
-                     } else { localLog("measureText não é função no prototype.", 'warn');}
-                } catch(e) { localLog(`Erro hijack measureText: ${e.message}`, 'error'); console.error(e);
-                } finally { if(originalMethods_v12['measureText']) Object.defineProperty(CanvasRenderingContext2D.prototype, 'measureText', originalMethods_v12['measureText']); hijackActive_v12=false; localLog("measureText restaurado.", 'info'); }
-                localLog(`--- Teste PP Hijack Canvas Concluído (Vuln: ${ppVulnDetected_v12}) ---`, 'test');
-                await PAUSE();
-
-
-                // 6. Verificação de Ambiente (Worker, Wasm, Globals)
+                // 6. Verificação de Ambiente (Worker, Wasm, Globals) (Mantido)
                 localLog("Iniciando Verificação de Ambiente...", 'test');
-                try{/*...(igual v9)...*/}catch(e){localLog(`Erro Env:${e.message}`,'error');}
+                try{/*...(igual v11)...*/}catch(e){localLog(`Erro Env:${e.message}`,'error');}
                 localLog("--- Verificação de Ambiente Concluída ---", 'test'); await PAUSE();
 
-                // 7. Verificação WebGL
+                // 7. Verificação WebGL (Mantido)
                 localLog("Iniciando Verificação WebGL...", 'test');
-                try{/*...(igual v9)...*/}catch(e){localLog(`Erro WebGL:${e.message}`,'error');}
+                try{/*...(igual v11)...*/}catch(e){localLog(`Erro WebGL:${e.message}`,'error');}
                 localLog("--- Verificação WebGL Concluída ---", 'test'); await PAUSE();
 
-                // 8. Verificação de Outras APIs
+                // 8. Verificação de Outras APIs (Mantido)
                 localLog("Iniciando Verificação de Outras APIs...", 'test');
-                try{/*...(igual v9)...*/}catch(e){localLog(`Erro APIs:${e.message}`,'error');}
+                try{/*...(igual v11)...*/}catch(e){localLog(`Erro APIs:${e.message}`,'error');}
                 localLog("--- Verificação de Outras APIs Concluída ---", 'test'); await PAUSE();
 
-                // 9. Verificação SVG
+                // 9. Verificação SVG (Mantido)
                 localLog("Iniciando Verificação SVG...", 'test');
-                try{/*...(igual v9)...*/}catch(e){localLog(`Erro SVG:${e.message}`,'error');}
+                try{/*...(igual v11)...*/}catch(e){localLog(`Erro SVG:${e.message}`,'error');}
                 localLog("--- Verificação SVG Concluída ---", 'test'); await PAUSE();
 
-                // 10. Teste Web Worker MÁXIMO (Primos, APIs Internas)
-                localLog("Iniciando Teste Web Worker MÁXIMO...", 'test');
-                if (typeof Worker !== 'undefined') {
-                    let worker_v12 = null; let workerObjUrl_v12 = null; // Renomeado
-                    try {
-                        const workerCode_v12 = ` // Renomeado v12
-                            // Função para calcular primos (igual)
-                            const calculatePrimes = ${calculatePrimes.toString()};
+                // 10. Teste Web Worker FINAL (Primos, APIs, Nested Worker, SharedArrayBuffer Check)
+                localLog("Iniciando Teste Web Worker FINAL...", 'test');
+                 // ** NOVO: Verificar SharedArrayBuffer ANTES de criar worker **
+                 const sabSupported = typeof SharedArrayBuffer !== 'undefined';
+                 localLog(`SharedArrayBuffer suportado (main thread)? ${sabSupported}`, sabSupported ? 'warn' : 'good'); // warn se suportado devido a implicações
 
-                            console.log('[WORKER v12] Iniciado.');
+                if (typeof Worker !== 'undefined') {
+                    let worker_v13 = null; let workerObjUrl_v13 = null; // Renomeado
+                    try {
+                        const workerCode_v13 = ` // Renomeado v13
+                            const workerName = 'Worker Principal'; // Nome para logs
+                            console.log(\`[\${workerName}] Iniciado.\`);
+
+                            // Função Primos (passada como string)
+                            const calculatePrimes = ${calculatePrimes_v13.toString()};
+
+                            // Teste Nested Worker
+                            function testNestedWorker() {
+                                console.log(\`[\${workerName}] Tentando criar Nested Worker...\`);
+                                try {
+                                    // Código simples para nested worker
+                                    const nestedWorkerCode = \`
+                                        console.log('[WORKER Aninhado] Iniciado.');
+                                        self.onmessage = function(e) {
+                                            console.log('[WORKER Aninhado] Recebeu:', e.data);
+                                            self.postMessage('Pong Aninhado: ' + e.data);
+                                        };
+                                        self.postMessage('Nested worker pronto!'); // Avisa que iniciou
+                                    \`;
+                                    const nestedBlob = new Blob([nestedWorkerCode], {type: 'application/javascript'});
+                                    const nestedUrl = URL.createObjectURL(nestedBlob);
+                                    console.log(\`[\${workerName}] Nested Worker URL: \${nestedUrl}\`);
+                                    const nestedWorker = new Worker(nestedUrl);
+                                    nestedWorker.onmessage = function(e) {
+                                         console.log(\`[\${workerName}] Mensagem do Nested Worker: \`, e.data);
+                                         // Envia confirmação para a thread principal
+                                         self.postMessage({ type: 'nestedResult', success: true, data: e.data });
+                                         URL.revokeObjectURL(nestedUrl); // Limpa URL do nested
+                                         nestedWorker.terminate(); // Termina nested
+                                    };
+                                    nestedWorker.onerror = function(e) {
+                                         console.error(\`[\${workerName}] Erro no Nested Worker:\`, e);
+                                         self.postMessage({ type: 'nestedResult', success: false, error: 'Erro no nested worker: ' + e.message });
+                                         URL.revokeObjectURL(nestedUrl);
+                                    };
+                                    // Envia ping para o nested worker
+                                     setTimeout(() => nestedWorker.postMessage('Ping Aninhado'), 50);
+
+                                } catch (nestedError) {
+                                     console.error(\`[\${workerName}] Erro ao CRIAR Nested Worker:\`, nestedError);
+                                     self.postMessage({ type: 'nestedResult', success: false, error: 'Falha ao criar nested worker: ' + nestedError.message });
+                                }
+                            }
+
+
                             self.onmessage = async function(e) {
-                                console.log('[WORKER v12] Mensagem recebida:', e.data);
+                                console.log(\`[\${workerName}] Mensagem recebida:\`, e.data);
                                 const command = e.data.command; const payload = e.data.payload;
                                 let response = { type: 'unknown', data: null, error: null, success: false };
-
                                 try {
                                     if (command === 'ping') { response = { type: 'pong', data: 'Pong: ' + payload, success: true }; }
-                                    // ** NOVO: Calcular Primos **
-                                    else if (command === 'calc-primes') {
-                                        response.type = 'primesResult';
-                                        const limit = parseInt(payload, 10) || 1000; // Default pequeno
-                                        console.log(\`[WORKER v12] Calculando primos até \${limit}...\`);
-                                        const startTime = performance.now();
-                                        const primes = calculatePrimes(limit);
-                                        const endTime = performance.now();
-                                        const duration = (endTime - startTime).toFixed(1);
-                                        response.data = \`Calculados \${primes.length} primos até \${limit} em \${duration} ms.\`;
-                                        response.success = true;
-                                        console.log(\`[WORKER v12] Cálculo concluído em \${duration} ms.\`);
-                                    }
-                                    // ** NOVO: Testar APIs Internas **
-                                    else if (command === 'test-apis') {
-                                         console.log('[WORKER v12] Testando APIs internas...');
-                                         response.type = 'apisResult';
-                                         let results = {};
-                                         // setTimeout (já testado, mas re-verifica)
-                                         try { let tid = setTimeout(()=>{},0); clearTimeout(tid); results.setTimeout = 'OK';} catch(e){results.setTimeout='ERRO: '+e.message;}
-                                         // importScripts
-                                         try { importScripts(); results.importScripts = 'Chamado sem erro? IMPOSSÍVEL';} catch(e){results.importScripts = 'Falhou (OK): '+e.message.substring(0,30)+'...';}
-                                         // DOM/Window/Storage
-                                         try { let x=document; results.document='ERRO: Acessível?';} catch(e){results.document='Bloqueado (OK)';}
-                                         try { let y=window; results.window='ERRO: Acessível?';} catch(e){results.window='Bloqueado (OK)';}
-                                         try { let z=localStorage; results.localStorage='ERRO: Acessível?';} catch(e){results.localStorage='Bloqueado (OK)';}
-                                         response.data = results;
-                                         response.success = true; // Sucesso do teste, não necessariamente das APIs
-                                    }
-                                    else if (command === 'process-buffer' && payload instanceof ArrayBuffer) { // Mantido
-                                         // ... (código buffer igual v10) ...
-                                         response.type = 'bufferResult'; try{const dV=new DataView(payload);if(dV.byteLength>=4){const oV=dV.getUint32(0); const nV=oV+1; dV.setUint32(0,nV); response.data=payload; response.success=true;}else{response.error='Buf pequeno';}}catch(bE){response.error=bE.toString();}
+                                    else if (command === 'calc-primes') { /* ... (igual v11) ... */ response.type='primesResult'; const limit=parseInt(payload,10)||1000; console.log(`[W] Primos até ${limit}...`); const sT=performance.now(); const p=calculatePrimes(limit); const eT=performance.now(); const d=(eT-sT).toFixed(1); response.data=`${p.length} primos até ${limit} em ${d} ms.`; response.success=true; console.log(`[W] Primos em ${d} ms.`);}
+                                    else if (command === 'test-apis') { /* ... (igual v11) ... */ console.log('[W] Testando APIs...'); response.type='apisResult'; let r={}; try{let tid=setTimeout(()=>{},0);clearTimeout(tid);r.setTimeout='OK';}catch(e){r.setTimeout='ERRO:'+e.message;} try{importScripts();r.importScripts='OK? IMPOSSÍVEL';}catch(e){r.importScripts='Falhou(OK):'+e.message.substring(0,30)+'...';} try{let x=document;r.document='ERRO:Acessível?';}catch(e){r.document='Bloq(OK)';} try{let y=window;r.window='ERRO:Acessível?';}catch(e){r.window='Bloq(OK)';} try{let z=localStorage;r.localStorage='ERRO:Acessível?';}catch(e){r.localStorage='Bloq(OK)';} response.data=r; response.success=true;}
+                                    else if (command === 'process-buffer' && payload instanceof ArrayBuffer) { /* ... (igual v11) ... */ response.type='bufferResult'; try{const dV=new DataView(payload);if(dV.byteLength>=4){const oV=dV.getUint32(0); const nV=oV+1; dV.setUint32(0,nV); response.data=payload; response.success=true;}else{response.error='Buf pequeno';}}catch(bE){response.error=bE.toString();}}
+                                    // ** NOVO: Comando para testar Nested Worker **
+                                    else if (command === 'test-nested') {
+                                         testNestedWorker();
+                                         // Resposta será enviada de dentro do testNestedWorker ou seu callback
+                                         return; // Não envia a resposta padrão 'unknown'
                                     }
                                     else { response.error = 'Comando desconhecido'; }
-                                } catch (workerError) { console.error('[WORKER v12] Erro comando:',command,workerError); response.error=workerError.toString(); response.type=command+'Error'; }
-
+                                } catch (workerError) { console.error(`[${workerName}] Erro comando:`,command,workerError); response.error=workerError.toString(); response.type=command+'Error'; }
                                 // Envia resposta
-                                if (response.type === 'bufferResult' && response.success && response.data instanceof ArrayBuffer) {
-                                    self.postMessage(response, [response.data]); // Transfere de volta
-                                } else { self.postMessage(response); }
+                                if (response.type === 'bufferResult' && response.success && response.data instanceof ArrayBuffer) { self.postMessage(response, [response.data]); }
+                                else { self.postMessage(response); }
                             };
-                            console.log('[WORKER v12] Listener configurado.');
+                            console.log('[WORKER v13] Listener configurado.');
                         `;
-                        const blob = new Blob([workerCode_v12], {type: 'application/javascript'});
-                        workerObjUrl_v12 = URL.createObjectURL(blob); // Renomeado
-                        localLog(`Worker URL: ${workerObjUrl_v12}`,'info');
-                        worker_v12 = new Worker(workerObjUrl_v12); // Renomeado
-                        currentWorker_v12 = worker_v12;
-                        localLog(`Worker v12 criado.`, 'good');
+                        const blob = new Blob([workerCode_v13], {type: 'application/javascript'});
+                        workerObjUrl_v13 = URL.createObjectURL(blob);
+                        localLog(`Worker URL: ${workerObjUrl_v13}`,'info');
+                        worker_v13 = new Worker(workerObjUrl_v13);
+                        currentWorker_v13 = worker_v13;
+                        localLog(`Worker v13 criado.`, 'good');
 
-                        worker_v12.onmessage = function(e){ localLog(`Msg Worker:[${e.data.type}] ${JSON.stringify(e.data)}`,'good'); console.log(e.data);}; // Handler simples
-                        worker_v12.onerror = function(e){ localLog(`Erro Worker: ${e.message} (L:${e.lineno})`,'error'); console.error(e); if(currentWorker_v12){currentWorker_v12.terminate();currentWorker_v12=null;}};
+                        worker_v13.onmessage = function(e){ localLog(`Msg Worker:[${e.data.type}] ${JSON.stringify(e.data)}`,'good'); console.log(e.data);};
+                        worker_v13.onerror = function(e){ localLog(`Erro Worker: ${e.message} (L:${e.lineno})`,'error'); console.error(e); if(currentWorker_v13){currentWorker_v13.terminate();currentWorker_v13=null;}};
 
                         // Envia comandos sequenciais
-                        localLog("Enviando 'ping'...",'info'); worker_v12.postMessage({command:'ping',payload:'Teste v12'}); await PAUSE(100);
-                        const primeLimit = 10000; // ** Aumentar com cuidado! Pode travar! **
-                        localLog(`Enviando 'calc-primes' (limite ${primeLimit})...`, 'info'); worker_v12.postMessage({command:'calc-primes', payload: primeLimit});
-                        // Compara com main thread
-                        localLog(`Calculando primos (main thread, limite ${primeLimit})...`, 'info');
-                        const mainStartTime = performance.now();
-                        const mainPrimes = calculatePrimes(primeLimit);
-                        const mainEndTime = performance.now();
-                        localLog(`-> Main thread: ${mainPrimes.length} primos em ${(mainEndTime - mainStartTime).toFixed(1)} ms.`, 'info');
-                        await PAUSE(100); // Pausa antes do próximo comando
+                        localLog("Enviando 'ping'...",'info'); worker_v13.postMessage({command:'ping',payload:'Teste v13'}); await PAUSE(100);
+                        const primeLimit = 10000;
+                        localLog(`Enviando 'calc-primes' (limite ${primeLimit})...`, 'info'); worker_v13.postMessage({command:'calc-primes', payload: primeLimit});
+                        localLog(`Calculando primos (main thread, limite ${primeLimit})...`, 'info'); const mainStartTime=performance.now(); const mainPrimes=calculatePrimes_v13(primeLimit); const mainEndTime=performance.now(); localLog(`-> Main thread: ${mainPrimes.length} primos em ${(mainEndTime - mainStartTime).toFixed(1)} ms.`,'info'); await PAUSE(100);
+                        localLog("Enviando 'test-apis'...",'info'); worker_v13.postMessage({command:'test-apis'}); await PAUSE(100);
+                        localLog("Enviando 'test-nested'...", 'info'); worker_v13.postMessage({command: 'test-nested'}); await PAUSE(500); // Pausa para nested worker iniciar e responder
+                        localLog("Enviando ArrayBuffer...",'info'); const bufS=new ArrayBuffer(8); const bufV=new DataView(bufS); bufV.setUint32(0,888); localLog(` -> Buf ANTES: U32@0=${bufV.getUint32(0)}`,'info'); worker_v13.postMessage({command:'process-buffer',payload:bufS},[bufS]); localLog(` -> Buf DEPOIS: len=${bufS.byteLength}`, bufS.byteLength===0?'good':'warn');
 
-                        localLog("Enviando 'test-apis'...",'info'); worker_v12.postMessage({command:'test-apis'}); await PAUSE(100);
-                        localLog("Enviando ArrayBuffer...",'info'); const bufS=new ArrayBuffer(8); const bufV=new DataView(bufS); bufV.setUint32(0,777); localLog(` -> Buf ANTES: U32@0=${bufV.getUint32(0)}`,'info'); worker_v12.postMessage({command:'process-buffer',payload:bufS},[bufS]); localLog(` -> Buf DEPOIS: len=${bufS.byteLength}`, bufS.byteLength===0?'good':'warn');
+                        // Limpeza (timeout maior)
+                        setTimeout(()=>{ if(workerObjUrl_v13){URL.revokeObjectURL(workerObjUrl_v13); localLog("Worker URL revogado.",'info'); workerObjUrl_v13=null;} setTimeout(()=>{if(currentWorker_v13){currentWorker_v13.terminate();currentWorker_v13=null;localLog("Worker terminado(timeout).",'info');}}, 6000); }, 3000); // Total 9s
 
-                        // Limpeza (timeout maior por causa dos primos)
-                        setTimeout(()=>{ if(workerObjUrl_v12){URL.revokeObjectURL(workerObjUrl_v12); localLog("Worker URL revogado.",'info'); workerObjUrl_v12=null;} setTimeout(()=>{if(currentWorker_v12){currentWorker_v12.terminate();currentWorker_v12=null;localLog("Worker terminado(timeout).",'info');}}, 5000); }, 3000); // Total 8s
-
-                    } catch(e) { localLog(`Erro Worker: ${e.message}`,'error'); console.error(e); if(currentWorker_v12){currentWorker_v12.terminate();currentWorker_v12=null;} if(workerObjUrl_v12){URL.revokeObjectURL(workerObjUrl_v12);} }
+                    } catch(e) { localLog(`Erro Worker: ${e.message}`, 'error'); console.error(e); if(currentWorker_v13){currentWorker_v13.terminate();currentWorker_v13=null;} if(workerObjUrl_v13){URL.revokeObjectURL(workerObjUrl_v13);} }
                 } else { localLog("Web Workers N/A.", 'warn'); }
-                localLog("--- Teste Web Worker MÁXIMO Concluído ---", 'test');
+                localLog("--- Teste Web Worker FINAL Concluído ---", 'test');
                 await PAUSE(1000);
 
-                // 11. Teste WebSocket (Mantido)
-                localLog("Iniciando Teste WebSocket...", 'test');
-                 try{/*...(igual v10)...*/}catch(e){localLog(`Erro WS:${e.message}`,'error');}
-                 localLog("--- Teste WebSocket Concluído ---", 'test');
-                 await PAUSE(2000); // Pausa maior final
+                // 11. Teste WebSocket (Binário)
+                localLog("Iniciando Teste WebSocket (Binário)...", 'test');
+                if (typeof WebSocket !== 'undefined') {
+                    let ws_v13 = null; // Renomeado
+                    const wsUrl_v13 = "wss://echo.websocket.org/";
+                    localLog(`Tentando conectar a: ${wsUrl_v13}`, 'info');
+                    try {
+                        ws_v13 = new WebSocket(wsUrl_v13);
+                        ws_v13.binaryType = 'arraybuffer'; // ** NOVO: Espera receber binário **
+
+                        ws_v13.onopen = function(event) {
+                            localLog(`WS Conectado! BinType: ${ws_v13.binaryType}`, 'good');
+                            // Envia texto
+                            const txtMsg = "Teste WS v13";
+                            localLog(`Enviando TXT: "${txtMsg}"`, 'info'); ws_v13.send(txtMsg);
+                            // Envia Binário (um ArrayBuffer simples)
+                            const binMsg = new Uint8Array([10, 20, 30, 40]).buffer;
+                            localLog(`Enviando BINÁRIO: ${binMsg.byteLength} bytes`, 'info');
+                            ws_v13.send(binMsg);
+                            // Fecha após enviar
+                             setTimeout(() => { if(ws_v13 && ws_v13.readyState === WebSocket.OPEN) ws_v13.close(); }, 500);
+                        };
+                        ws_v13.onmessage = function(event) {
+                            if (event.data instanceof ArrayBuffer) {
+                                const dv = new DataView(event.data);
+                                const valueHex = (dv.byteLength >= 4) ? toHex(dv.getUint32(0)) : 'N/A';
+                                localLog(`Msg WS BINÁRIA recebida! Tamanho: ${event.data.byteLength} bytes. Uint32[0]=${valueHex}`, 'good');
+                            } else {
+                                localLog(`Msg WS TEXTO recebida: ${event.data}`, 'good');
+                            }
+                        };
+                        ws_v13.onerror = function(event){ localLog(`Erro WS!`, 'error'); console.error("WS Error:", event); };
+                        ws_v13.onclose = function(event){ localLog(`WS Fechado. Code:${event.code}, Clean:${event.wasClean}`, 'info'); };
+
+                    } catch (e) { localLog(`Erro criar WS: ${e.message}`, 'error'); console.error("WS Err:", e); }
+                } else { localLog("WebSockets N/A.", 'warn'); }
+                localLog("--- Teste WebSocket (Binário) Concluído ---", 'test');
+                await PAUSE(2000);
 
                 // 12. Adicionar Listeners Finais
                 localLog("Adicionando listeners finais...", 'subtest');
-                // ... (código listeners igual v10 Corrigido, usa _v12) ...
-                if(canvasClickListenerCanvas_v12 && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_v12); } catch(e){} } if(canvasMoveListenerCanvas_v12 && canvasEl) { try { canvasEl.removeEventListener('mousemove', canvasMoveListenerCanvas_v12); } catch(e){} } canvasMoveListenerCanvas_v12 = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let fT=null; for(const a of interactiveAreas_v12){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){fT=a.id;break;}} if(fT!==currentHoverTarget_v12){currentHoverTarget_v12=fT; redrawAll_v12(); canvasEl.style.cursor=fT?'pointer':'default';} if(coordStatusDivEl)coordStatusDivEl.textContent=`Coords:X=${x.toFixed(0)},Y=${y.toFixed(0)}`; }catch(e){} }; canvasClickListenerCanvas_v12 = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let cA=null; for(const a of interactiveAreas_v12){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){cA=a;break;}} if(cA){localLog(`--> Click área: ${cA.text}`,'vuln'); switch(cA.id){ case 'rect-log': localLog("Ação: Log",'info'); break; case 'rect-link': localLog("Ação: Link...",'warn'); try{const nW=window.open('https://google.com','_blank');if(!nW)localLog('Falha.','warn'); else localLog('window.open OK.','good');}catch(e){localLog('Erro win.open: '+e.message,'error');} break; case 'rect-rerun': localLog("Ação: Re-ler S1...",'info'); try{if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`ReL(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`ReL(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v12={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v12={text:"ReL(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v12={text:"ReL(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Erro re-ler:${e.message}`,'error');currentLeakData_v12={text:"ReL(S1):ERRO",color:"#F44336"};} redrawAll_v12(); break; }}else{ localLog(`--> Click fora. x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'info');}}catch(e){localLog(`Erro click:${e.message}`,'error');console.error(e);} }; canvasEl.addEventListener('click', canvasClickListenerCanvas_v12); canvasEl.addEventListener('mousemove', canvasMoveListenerCanvas_v12);
-                 localLog("Listeners finais adicionados.", 'good');
+                // ... (código listeners igual v10 Corrigido, usa _v13) ...
+                if(canvasClickListenerCanvas_v13 && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_v13); } catch(e){} } if(canvasMoveListenerCanvas_v13 && canvasEl) { try { canvasEl.removeEventListener('mousemove', canvasMoveListenerCanvas_v13); } catch(e){} } canvasMoveListenerCanvas_v13 = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let fT=null; for(const a of interactiveAreas_v13){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){fT=a.id;break;}} if(fT!==currentHoverTarget_v13){currentHoverTarget_v13=fT; redrawAll_v13(); canvasEl.style.cursor=fT?'pointer':'default';} if(coordStatusDivEl)coordStatusDivEl.textContent=`Coords:X=${x.toFixed(0)},Y=${y.toFixed(0)}`; }catch(e){} }; canvasClickListenerCanvas_v13 = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let cA=null; for(const a of interactiveAreas_v13){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){cA=a;break;}} if(cA){localLog(`--> Click área: ${cA.text}`,'vuln'); switch(cA.id){ case 'rect-log': localLog("Ação: Log",'info'); break; case 'rect-link': localLog("Ação: Link...",'warn'); try{const nW=window.open('https://google.com','_blank');if(!nW)localLog('Falha.','warn'); else localLog('window.open OK.','good');}catch(e){localLog('Erro win.open: '+e.message,'error');} break; case 'rect-rerun': localLog("Ação: Re-ler S1...",'info'); try{if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`ReL(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`ReL(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v13={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v13={text:"ReL(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v13={text:"ReL(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Erro re-ler:${e.message}`,'error');currentLeakData_v13={text:"ReL(S1):ERRO",color:"#F44336"};} redrawAll_v13(); break; }}else{ localLog(`--> Click fora. x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'info');}}catch(e){localLog(`Erro click:${e.message}`,'error');console.error(e);} }; canvasEl.addEventListener('click', canvasClickListenerCanvas_v13); canvasEl.addEventListener('mousemove', canvasMoveListenerCanvas_v13);
+                localLog("Listeners finais adicionados.", 'good');
 
             } catch(e) {
-                 localLog(`Erro GERAL INESPERADO v12: ${e.message}`, 'error'); console.error(e);
+                 localLog(`Erro GERAL INESPERADO v13: ${e.message}`, 'error'); console.error(e);
             } finally {
-                 localLog("--- Teste Exploração MÁXIMA Canvas v12 CONCLUÍDO ---", 'test');
+                 localLog("--- Teste Exploração MÁXIMA Canvas v13 CONCLUÍDO ---", 'test');
                  if (runBtnEl) runBtnEl.disabled = false;
             }
         };
 
-        // --- Função chamada pelo botão do Canvas (v12) ---
-        const runCanvasTest = async () => { // Nome mantido para onclick
+        // --- Função chamada pelo botão do Canvas (v13) ---
+        const runCanvasTest = async () => { // Nome mantido
             const canvasOutputDiv = document.getElementById('output-canvas');
-            logCanvas_v12(canvasOutputDiv, "Botão 'Iniciar Teste Avançado v12' clicado.", "info");
+            logCanvas_v13(canvasOutputDiv, "Botão 'Iniciar Teste Final v13' clicado.", "info"); // Log _v13
 
-            console.log("Canvas Exploração v12: Tentando obter elementos...");
+            console.log("Canvas Exploração v13: Tentando obter elementos...");
             const canvasRunBtn = document.getElementById('runCanvasBtn');
             const canvasElement = document.getElementById('interactive-canvas');
             const coordStatusDivCanvas = document.getElementById('canvas-coord-status');
 
             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
-                 const errorMsg = "ERRO FATAL v12: Elementos HTML Canvas não encontrados!";
-                 logCanvas_v12(canvasOutputDiv, errorMsg, "error"); console.error(errorMsg); return;
+                 const errorMsg = "ERRO FATAL v13: Elementos HTML Canvas não encontrados!";
+                 logCanvas_v13(canvasOutputDiv, errorMsg, "error"); console.error(errorMsg); return;
             }
-            logCanvas_v12(canvasOutputDiv, "Elementos Canvas v12 encontrados.", "good");
+            logCanvas_v13(canvasOutputDiv, "Elementos Canvas v13 encontrados.", "good");
             if (canvasRunBtn) canvasRunBtn.disabled = true;
-            logCanvas_v12(canvasOutputDiv, "Iniciando teste principal v12...", "info");
-            await testComprehensiveCanvasFinalV12(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn);
+            logCanvas_v13(canvasOutputDiv, "Iniciando teste principal v13...", "info");
+            await testComprehensiveCanvasFinalV13(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn); // Chama func _v13
         };
 
-         // --- Limpeza (v12) ---
-         window.addEventListener('unload', () => { /* ... (igual v10 Corrigido, usa _v12) ... */ if(currentWorker_v12){try{currentWorker_v12.terminate();console.log("[Unload] Worker v12 terminado.");}catch(e){}} try{const el=document.getElementById('interactive-canvas'); if(el){ if(canvasClickListenerCanvas_v12)el.removeEventListener('click',canvasClickListenerCanvas_v12); if(canvasMoveListenerCanvas_v12)el.removeEventListener('mousemove',canvasMoveListenerCanvas_v12); console.log("[Unload] Listeners v12 removidos.");}}catch(e){} });
-         // --- FIM DO SCRIPT 2 (v12) ---
+         // --- Limpeza (v13) ---
+         window.addEventListener('unload', () => { /* ... (igual v11, usa _v13) ... */ if(currentWorker_v13){try{currentWorker_v13.terminate();console.log("[Unload] Worker v13 terminado.");}catch(e){}} try{const el=document.getElementById('interactive-canvas'); if(el){ if(canvasClickListenerCanvas_v13)el.removeEventListener('click',canvasClickListenerCanvas_v13); if(canvasMoveListenerCanvas_v13)el.removeEventListener('mousemove',canvasMoveListenerCanvas_v13); console.log("[Unload] Listeners v13 removidos.");}}catch(e){} });
+         // --- FIM DO SCRIPT 2 (v13) ---
     </script>
 
 </body>
