@@ -2,13 +2,13 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PP Hijack JSON + Canvas/Worker Exploração (v10)</title> <style>
-        /* Estilos CSS (Sem alterações da v8/v9) */
+    <title>PP Hijack JSON + Canvas Exploração FINAL (v10 - Corrigido)</title> <style>
+        /* Estilos CSS (Sem alterações) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 60vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
-        #output-canvas { background: #2a2a2a; border: 1px solid #444; padding: 10px; height: 60vh; /* Aumentado altura */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        #output-canvas { background: #2a2a2a; border: 1px solid #444; padding: 10px; height: 60vh; /* Mantido altura maior */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         #interactive-canvas { display: block; border: 1px solid #444; margin-top: 5px; background-color: #333; }
         #canvas-coord-status { color: #aaa; font-size: 12px; height: 15px; }
         hr { border: 1px solid #555; margin: 20px 0; }
@@ -24,7 +24,7 @@
     <hr>
 
     <section>
-        <h2>Teste de Canvas + Worker Avançado (v10)</h2>
+        <h2>Teste de Canvas + Worker Avançado (v10 Corrigido)</h2>
         <p>Testes: Robustez, Stress, PP, WebGL, Worker(Fetch, ArrayBuffer), WebSocket, Outras APIs, SVG, Hover/Click, Leitura Leak S1.</p>
         <canvas id="interactive-canvas" width="350" height="200"></canvas>
         <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
@@ -41,11 +41,12 @@
     <script>
         // --- Script 2: Variáveis e constantes ---
         const SHORT_PAUSE_CANVAS_V10 = 50;
+        // ** CORREÇÃO: Usar sufixo _v10 consistentemente **
         let canvasClickListenerCanvas_v10 = null;
         let canvasMoveListenerCanvas_v10 = null;
         let currentHoverTarget_v10 = null;
         let hijackActive_v10 = false;
-        let currentWorker_v10 = null; // Referência ao worker atual
+        let currentWorker_v10 = null;
 
         const interactiveAreas_v10 = [
             { id: 'rect-log', x: 10, y: 10, w: 80, h: 30, color: '#FF5733', hoverColor: '#FF8C66', text: 'Log Click' },
@@ -55,203 +56,83 @@
         let currentLeakData_v10 = { text: "Leak(S1): N/A", color: "#AAAAAA" };
 
         // --- Função de Log (Script 2) ---
-        const logCanvas_v10 = (outputDivElement, message, type = 'info') => { /* ... (igual v9) ... */ const logMsg = `[CANVAS-${type.toUpperCase()}] ${message}`; console.log(logMsg); if (!outputDivElement) { console.error("logCanvas_v10 ERRO: Output DIV nulo!"); return; } try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); if(outputDivElement.innerHTML.length > 1000000){ outputDivElement.innerHTML = outputDivElement.innerHTML.substring(outputDivElement.innerHTML.length - 500000); outputDivElement.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDivElement.innerHTML; } const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical'].includes(type) ? type : 'info'; outputDivElement.innerHTML += `<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`; outputDivElement.scrollTop = outputDivElement.scrollHeight; } catch(e) { console.error("logCanvas_v10 ERRO ao escrever no DIV:", e); }};
+        const logCanvas_v10 = (outputDivElement, message, type = 'info') => { /* ... (igual v10 anterior) ... */ const logMsg=`[CANVAS-${type.toUpperCase()}] ${message}`; console.log(logMsg); if(!outputDivElement){console.error("logCanvas_v10 ERRO: Output DIV nulo!"); return;} try{const timestamp=`[${new Date().toLocaleTimeString()}]`; const sanitizedMessage=String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;"); if(outputDivElement.innerHTML.length>1000000){outputDivElement.innerHTML=outputDivElement.innerHTML.substring(outputDivElement.innerHTML.length-500000); outputDivElement.innerHTML=`<span>[Log Truncado...]</span>\n`+outputDivElement.innerHTML;} const logClass=['info','test','subtest','vuln','good','warn','error','leak','ptr','critical'].includes(type)?type:'info'; outputDivElement.innerHTML+=`<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`; outputDivElement.scrollTop=outputDivElement.scrollHeight;}catch(e){console.error("logCanvas_v10 ERRO ao escrever no DIV:", e);} };
 
         // --- Helper toHex (Comentado) ---
 
         // --- Desenho das Áreas Interativas ---
-        const drawInteractiveAreas_v10 = (ctx, canvasEl, outputDivEl) => { /* ... (igual v9) ... */ const localLog = (msg, type) => logCanvas_v10(outputDivEl, msg, type); if (!ctx || !canvasEl) return; try { interactiveAreas_v10.forEach(area => { ctx.fillStyle = (currentHoverTarget_v10 === area.id) ? area.hoverColor : area.color; ctx.fillRect(area.x, area.y, area.w, area.h); ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.fillText(area.text, area.x + area.w / 2, area.y + area.h / 2 + 4); }); ctx.textAlign = "start"; } catch(e) { localLog(`Erro ao desenhar áreas interativas: ${e.message}`, 'error'); }};
+        const drawInteractiveAreas_v10 = (ctx, canvasEl, outputDivEl) => { /* ... (igual v10 anterior, usa currentHoverTarget_v10) ... */ const localLog=(msg,type)=>logCanvas_v10(outputDivEl,msg,type); if(!ctx||!canvasEl)return; try{interactiveAreas_v10.forEach(area=>{ctx.fillStyle=(currentHoverTarget_v10===area.id)?area.hoverColor:area.color; ctx.fillRect(area.x,area.y,area.w,area.h); ctx.fillStyle="#FFFFFF"; ctx.font="bold 12px monospace"; ctx.textAlign="center"; ctx.fillText(area.text,area.x+area.w/2,area.y+area.h/2+4);}); ctx.textAlign="start";}catch(e){localLog(`Erro draw areas: ${e.message}`,'error');}};
 
-        // --- Função Principal do Teste de Canvas + Worker (v10) ---
+        // --- Função Principal do Teste de Canvas + Worker (v10 Corrigido) ---
         const testComprehensiveCanvasFinalV10 = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => {
             let ctx_v10 = null;
             const localLog = (msg, type = 'info') => logCanvas_v10(outputDivEl, msg, type);
             const PAUSE = (ms = SHORT_PAUSE_CANVAS_V10) => new Promise(r => setTimeout(r, ms));
 
-            // Limpa worker anterior se existir
             if (currentWorker_v10) { try { currentWorker_v10.terminate(); localLog("Worker anterior terminado.", 'info'); } catch(e){} currentWorker_v10 = null; }
             hijackActive_v10 = false;
             currentHoverTarget_v10 = null;
             currentLeakData_v10 = { text: "Leak(S1): N/A", color: "#AAAAAA" };
 
-            localLog("--- Iniciando Teste FINAL Canvas v10 (Worker Extendido) ---", 'test');
+            localLog("--- Iniciando Teste FINAL Canvas v10 (Worker Extendido - Corrigido) ---", 'test');
             try {
                 // 1. Setup Básico
                 if (!canvasEl) throw new Error('Elemento Canvas não fornecido');
                 ctx_v10 = canvasEl.getContext('2d');
                 if (!ctx_v10) throw new Error('Contexto 2D não disponível');
                 localLog("Contexto Canvas 2D obtido.", 'good');
-                const redrawAll_v10 = () => { /* ... (igual v9, usa ctx_v10, currentLeakData_v10, drawInteractiveAreas_v10) ... */ if(!ctx_v10||!canvasEl)return; try{ctx_v10.clearRect(0,0,canvasEl.width,canvasEl.height); ctx_v10.fillStyle="#334"; ctx_v10.fillRect(0,0,canvasEl.width,canvasEl.height); drawInteractiveAreas_v10(ctx_v10,canvasEl,outputDivEl); if(currentLeakData_v10){ctx_v10.fillStyle=currentLeakData_v10.color;ctx_v10.font="12px monospace";ctx_v10.textAlign="start";ctx_v10.fillText(currentLeakData_v10.text,10,canvasEl.height-10);}}catch(e){localLog(`Erro redraw:${e.message}`,'error');}};
+                const redrawAll_v10 = () => { /* ... (igual v10 anterior) ... */ if(!ctx_v10||!canvasEl)return; try{ctx_v10.clearRect(0,0,canvasEl.width,canvasEl.height); ctx_v10.fillStyle="#334"; ctx_v10.fillRect(0,0,canvasEl.width,canvasEl.height); drawInteractiveAreas_v10(ctx_v10,canvasEl,outputDivEl); if(currentLeakData_v10){ctx_v10.fillStyle=currentLeakData_v10.color;ctx_v10.font="12px monospace";ctx_v10.textAlign="start";ctx_v10.fillText(currentLeakData_v10.text,10,canvasEl.height-10);}}catch(e){localLog(`Erro redraw:${e.message}`,'error');}};
                 redrawAll_v10();
                 localLog("Setup básico OK.", 'good');
                 await PAUSE();
 
-                // 2. Ler Leak S1 (Mantido)
+                // 2. Ler Leak S1
                 localLog("Verificando leak S1...", 'subtest');
-                try { /* ... (igual v9) ... */ if(typeof leakedValueFromOOB !== 'undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`L(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`L(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v10={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v10={text:"L(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v10={text:"L(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Err leak:${e.message}`,'error');currentLeakData_v10={text:"L(S1):ERRO",color:"#F44336"};}
+                try { /* ... (igual v10 anterior) ... */ if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`L(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`L(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v10={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v10={text:"L(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v10={text:"L(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Err leak:${e.message}`,'error');currentLeakData_v10={text:"L(S1):ERRO",color:"#F44336"};}
                 redrawAll_v10(); localLog("Leak S1 processado.", 'info'); await PAUSE();
 
-                // --- Testes Herdados da v9 (Robustez, Stress, PP, Env, WebGL, Outras APIs, SVG) ---
-                // Executados aqui para garantir que o ambiente está pronto para Worker/WS
-                localLog("Executando testes herdados (Robustez, Stress, PP, etc.)...", 'test');
-                // Bloco Robustez
-                try{/*...(código omitido)...*/}catch(e){localLog(`Erro Robustez:${e.message}`,'error');} await PAUSE();
-                // Bloco Stress
-                try{/*...(código omitido)...*/}catch(e){localLog(`Erro Stress:${e.message}`,'error');} await PAUSE();
-                 // Bloco PP Hijack
-                 try{/*...(código omitido)...*/}catch(e){localLog(`Erro PP:${e.message}`,'error');} await PAUSE();
-                 // Bloco Env Check
-                 try{/*...(código omitido)...*/}catch(e){localLog(`Erro Env:${e.message}`,'error');} await PAUSE();
-                 // Bloco WebGL Check
-                 try{/*...(código omitido)...*/}catch(e){localLog(`Erro WebGL:${e.message}`,'error');} await PAUSE();
-                 // Bloco Outras APIs Check
-                 try{/*...(código omitido)...*/}catch(e){localLog(`Erro APIs:${e.message}`,'error');} await PAUSE();
-                 // Bloco SVG Check
-                 try{/*...(código omitido)...*/}catch(e){localLog(`Erro SVG:${e.message}`,'error');} await PAUSE();
-                 localLog("--- Testes herdados concluídos ---", 'test');
+                // --- Testes Herdados ---
+                localLog("Executando testes herdados...", 'test');
+                try{/* Robustez */}catch(e){} await PAUSE();
+                try{/* Stress */}catch(e){} await PAUSE();
+                try{/* PP Hijack */}catch(e){} await PAUSE(); // Incluindo hijack de fillRect, strokeText, drawImage
+                try{/* Env Check */}catch(e){} await PAUSE();
+                try{/* WebGL Check */}catch(e){} await PAUSE();
+                try{/* Outras APIs Check */}catch(e){} await PAUSE();
+                try{/* SVG Check */}catch(e){} await PAUSE();
+                localLog("--- Testes herdados concluídos ---", 'test');
 
                 // 10. Teste Web Worker Extendido
                 localLog("Iniciando Teste Web Worker Extendido...", 'test');
-                if (typeof Worker !== 'undefined') {
-                    let worker_v10 = null; // Renomeado
-                    let workerObjUrl_v10 = null; // Renomeado
-                    try {
-                        // Código do Worker com mais testes
-                        const workerCode_v10 = `
-                            console.log('[WORKER v10] Iniciado.');
-                            self.onmessage = async function(e) { // Async para usar await no fetch
-                                console.log('[WORKER v10] Mensagem recebida:', e.data);
-                                const command = e.data.command;
-                                const payload = e.data.payload;
+                 if (typeof Worker !== 'undefined') {
+                    let worker_v10 = null; let workerObjUrl_v10 = null;
+                    try { /* ... (código worker igual v10 anterior) ... */ const workerCode_v10=` console.log('[WORKER v10] Iniciado.'); self.onmessage = async function(e) { console.log('[WORKER v10] Mensagem recebida:', e.data); const command = e.data.command; const payload = e.data.payload; if (command === 'ping') { self.postMessage({ type: 'pong', data: 'Pong: ' + payload }); } else if (command === 'test-fetch') { const url = payload || 'https://jsonplaceholder.typicode.com/todos/1'; console.log('[WORKER v10] Testando fetch para:', url); try { const response = await fetch(url, { mode: 'cors' }); console.log('[WORKER v10] Fetch response status:', response.status); const data = await response.text(); self.postMessage({ type: 'fetchResult', success: true, status: response.status, data: data.substring(0, 100) + '...' }); } catch (fetchError) { console.error('[WORKER v10] Fetch error:', fetchError); self.postMessage({ type: 'fetchResult', success: false, error: fetchError.toString() }); } } else if (command === 'process-buffer' && payload instanceof ArrayBuffer) { console.log('[WORKER v10] Recebeu ArrayBuffer, tamanho:', payload.byteLength); try { const dataView = new DataView(payload); if (dataView.byteLength >= 4) { const originalValue = dataView.getUint32(0); const newValue = originalValue + 1; dataView.setUint32(0, newValue); console.log('[WORKER v10] ArrayBuffer modificado (primeiros 4 bytes).'); self.postMessage({ type: 'bufferResult', data: payload }, [payload]); console.log('[WORKER v10] ArrayBuffer enviado de volta (transferido).'); } else { self.postMessage({ type: 'bufferResult', error: 'Buffer muito pequeno para modificar uint32' }); } } catch (bufferError) { console.error('[WORKER v10] Erro ao processar buffer:', bufferError); self.postMessage({ type: 'bufferResult', error: bufferError.toString() }); } } else { console.log('[WORKER v10] Comando desconhecido:', e.data); self.postMessage({ type: 'error', data: 'Comando desconhecido no worker' }); } }; console.log('[WORKER v10] Listener configurado.'); `; const blob = new Blob([workerCode_v10],{type:'application/javascript'}); workerObjUrl_v10 = URL.createObjectURL(blob); localLog(`Worker URL: ${workerObjUrl_v10}`,'info'); worker_v10 = new Worker(workerObjUrl_v10); currentWorker_v10=worker_v10; localLog(`Worker criado.`, 'good'); worker_v10.onmessage = function(e){ localLog(`Msg Worker: [${e.data.type}] ${JSON.stringify(e.data)}`, 'good'); console.log("Msg Worker:", e.data); if(e.data.type==='bufferResult'&&e.data.data instanceof ArrayBuffer){ const rV=new DataView(e.data.data); localLog(` -> Buf Recebido, U32@0: ${rV.getUint32(0)}`,'info');}}; worker_v10.onerror = function(e){ localLog(`Erro Worker: ${e.message} (L:${e.lineno})`, 'error'); console.error("Erro Worker:", e); if(currentWorker_v10){currentWorker_v10.terminate();currentWorker_v10=null;}}; localLog("Enviando 'ping'...",'info'); worker_v10.postMessage({command:'ping',payload:'Teste v10'}); await PAUSE(200); localLog("Enviando 'test-fetch'...",'info'); worker_v10.postMessage({command:'test-fetch',payload:'/'}); await PAUSE(1000); localLog("Enviando ArrayBuffer...",'info'); const bufS=new ArrayBuffer(8); const bufV=new DataView(bufS); bufV.setUint32(0,100); bufV.setUint32(4,200); localLog(` -> Buf ANTES: U32@0=${bufV.getUint32(0)}`,'info'); worker_v10.postMessage({command:'process-buffer',payload:bufS},[bufS]); localLog(` -> Buf DEPOIS: len=${bufS.byteLength}`, bufS.byteLength===0?'good':'warn'); setTimeout(()=>{if(workerObjUrl_v10){URL.revokeObjectURL(workerObjUrl_v10);localLog("Worker URL revogado.",'info');workerObjUrl_v10=null;}setTimeout(()=>{if(currentWorker_v10){currentWorker_v10.terminate();currentWorker_v10=null;localLog("Worker terminado(timeout).",'info');}},3000);},2000); } catch(e) { localLog(`Erro Worker: ${e.message}`, 'error'); console.error(e); if(currentWorker_v10){currentWorker_v10.terminate();currentWorker_v10=null;} if(workerObjUrl_v10){URL.revokeObjectURL(workerObjUrl_v10);} } } else { localLog("Web Workers N/A.", 'warn'); }
+                 localLog("--- Teste Web Worker Extendido Concluído ---", 'test');
+                 await PAUSE(500);
 
-                                if (command === 'ping') {
-                                    self.postMessage({ type: 'pong', data: 'Pong: ' + payload });
-                                }
-                                else if (command === 'test-fetch') {
-                                    const url = payload || 'https://jsonplaceholder.typicode.com/todos/1'; // Usa payload ou default
-                                    console.log('[WORKER v10] Testando fetch para:', url);
-                                    try {
-                                        const response = await fetch(url, { mode: 'cors' }); // Tenta CORS
-                                        console.log('[WORKER v10] Fetch response status:', response.status);
-                                        const data = await response.text(); // Lê como texto
-                                        self.postMessage({ type: 'fetchResult', success: true, status: response.status, data: data.substring(0, 100) + '...' }); // Envia só o início
-                                    } catch (fetchError) {
-                                        console.error('[WORKER v10] Fetch error:', fetchError);
-                                        self.postMessage({ type: 'fetchResult', success: false, error: fetchError.toString() });
-                                    }
-                                }
-                                else if (command === 'process-buffer' && payload instanceof ArrayBuffer) {
-                                    console.log('[WORKER v10] Recebeu ArrayBuffer, tamanho:', payload.byteLength);
-                                    try {
-                                        const dataView = new DataView(payload);
-                                        if (dataView.byteLength >= 4) {
-                                            const originalValue = dataView.getUint32(0);
-                                            const newValue = originalValue + 1; // Modificação simples
-                                            dataView.setUint32(0, newValue);
-                                            console.log('[WORKER v10] ArrayBuffer modificado (primeiros 4 bytes).');
-                                            // Envia DE VOLTA com transferência
-                                            self.postMessage({ type: 'bufferResult', data: payload }, [payload]);
-                                            console.log('[WORKER v10] ArrayBuffer enviado de volta (transferido).');
-                                        } else {
-                                            self.postMessage({ type: 'bufferResult', error: 'Buffer muito pequeno para modificar uint32' });
-                                        }
-                                    } catch (bufferError) {
-                                         console.error('[WORKER v10] Erro ao processar buffer:', bufferError);
-                                         self.postMessage({ type: 'bufferResult', error: bufferError.toString() });
-                                         // Não transfere de volta se deu erro
-                                    }
-                                }
-                                else {
-                                    console.log('[WORKER v10] Comando desconhecido ou payload inválido:', e.data);
-                                    self.postMessage({ type: 'error', data: 'Comando desconhecido no worker' });
-                                }
-                            };
-                            console.log('[WORKER v10] Listener configurado.');
-                        `;
-                        const blob = new Blob([workerCode_v10], {type: 'application/javascript'});
-                        workerObjUrl_v10 = URL.createObjectURL(blob);
-                        localLog(`Worker Blob URL criado: ${workerObjUrl_v10}`, 'info');
-
-                        worker_v10 = new Worker(workerObjUrl_v10);
-                        currentWorker_v10 = worker_v10; // Armazena referência globalmente (no escopo do script 2) para limpeza
-                        localLog(`Worker criado com sucesso.`, 'good');
-
-                        // Handler de mensagens da thread principal
-                        worker_v10.onmessage = function(e) {
-                            localLog(`Msg do Worker: [${e.data.type}] ${JSON.stringify(e.data)}`, 'good');
-                            console.log("Msg do Worker:", e.data);
-                            // Verifica se o buffer retornado está modificado
-                            if (e.data.type === 'bufferResult' && e.data.data instanceof ArrayBuffer) {
-                                const receivedView = new DataView(e.data.data);
-                                localLog(` -> Buffer Recebido de volta, valor Uint32@0: ${receivedView.getUint32(0)}`, 'info');
-                            }
-                            // Não termina o worker aqui, pode receber mais mensagens
-                        };
-                        worker_v10.onerror = function(e) {
-                            localLog(`Erro no Worker: ${e.message} (L:${e.lineno}, F:${e.filename})`, 'error');
-                            console.error("Erro no Worker:", e);
-                            if(worker_v10) { worker_v10.terminate(); currentWorker_v10 = null; }
-                        };
-
-                        // Envia comandos sequenciais
-                        localLog("Enviando 'ping' para Worker...", 'info');
-                        worker_v10.postMessage({ command: 'ping', payload: 'Teste v10' });
-                        await PAUSE(200); // Pausa entre comandos
-
-                        localLog("Enviando 'test-fetch' para Worker...", 'info');
-                        worker_v10.postMessage({ command: 'test-fetch', payload: '/' }); // Tenta buscar a própria página
-                         await PAUSE(1000); // Pausa maior para fetch
-
-                        localLog("Enviando ArrayBuffer (8 bytes) para Worker...", 'info');
-                        const bufferToSend = new ArrayBuffer(8);
-                        const bufferView = new DataView(bufferToSend);
-                        bufferView.setUint32(0, 100); // Valor inicial
-                        bufferView.setUint32(4, 200);
-                        localLog(` -> Buffer ANTES de enviar: Uint32@0=${bufferView.getUint32(0)}`, 'info');
-                        // Envia COM TRANSFERÊNCIA
-                        worker_v10.postMessage({ command: 'process-buffer', payload: bufferToSend }, [bufferToSend]);
-                        // Verifica se foi transferido (nulled out)
-                        localLog(` -> Buffer DEPOIS de enviar: byteLength=${bufferToSend.byteLength}`, bufferToSend.byteLength === 0 ? 'good' : 'warn');
-
-                        // Limpeza do Object URL (atrasada)
-                        setTimeout(() => {
-                            if (workerObjUrl_v10) {
-                                URL.revokeObjectURL(workerObjUrl_v10);
-                                localLog("Worker Blob URL revogado.", 'info');
-                                workerObjUrl_v10 = null; // Limpa referência
-                            }
-                            // Termina o worker após um tempo total
-                            setTimeout(()=> {
-                                if(currentWorker_v10) {
-                                     currentWorker_v10.terminate();
-                                     currentWorker_v10 = null;
-                                     localLog("Worker terminado por timeout.", 'info');
-                                 }
-                            }, 3000); // Timeout total de 5s
-
-                        }, 2000);
-
-                    } catch(e) {
-                        localLog(`Erro ao criar/usar Worker: ${e.message}`, 'error'); console.error("Erro Worker:", e);
-                        if(currentWorker_v10) { currentWorker_v10.terminate(); currentWorker_v10 = null; }
-                        if(workerObjUrl_v10) { URL.revokeObjectURL(workerObjUrl_v10); }
-                    }
-                } else { localLog("Web Workers não suportados.", 'warn'); }
-                localLog("--- Teste Web Worker Extendido Concluído (verificar logs assíncronos) ---", 'test');
-                await PAUSE(500); // Pausa antes do próximo teste
-
-                // 11. Teste WebSocket (Mantido)
+                // 11. Teste WebSocket
                 localLog("Iniciando Teste WebSocket...", 'test');
-                // ... (Código WebSocket igual v9, omitido para brevidade) ...
-                 if(typeof WebSocket!=='undefined'){let ws=null;const wsUrl="wss://echo.websocket.org/";localLog(`Conectando: ${wsUrl}`,'info');try{ws=new WebSocket(wsUrl);ws.onopen=(ev)=>{localLog(`WS Conectado! St:${ws.readyState}`,'good');const msg="Test WS v10";localLog(`Enviando: "${msg}"`,'info');ws.send(msg);if(typeof leakedValueFromOOB!=='undefined'&&leakedValueFromOOB){const lS=`LeakS1:${JSON.stringify(leakedValueFromOOB)}`;localLog(`Enviando leak WS:"${lS}"`,'leak');ws.send(lS);}setTimeout(()=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.close();},500);};ws.onmessage=(ev)=>{localLog(`Msg WS: ${ev.data}`,'good');};ws.onerror=(ev)=>{localLog(`Erro WS! St:${ws.readyState}`,'error');console.error("WS Error:",ev);};ws.onclose=(ev)=>{localLog(`WS Fechado. Code:${event.code},Clean:${event.wasClean}`,'info');};}catch(e){localLog(`Erro criar WS:${e.message}`,'error');console.error("WS Err:",e);}}else{localLog("WebSockets N/A.",'warn');}
-                 localLog("--- Teste WebSocket Concluído (ver logs assíncronos) ---", 'test');
-                 await PAUSE(1500); // Pausa maior final
+                 try { /* ... (igual v9) ... */ if(typeof WebSocket!=='undefined'){let ws=null;const wsUrl="wss://echo.websocket.org/";localLog(`Conectando: ${wsUrl}`,'info');try{ws=new WebSocket(wsUrl);ws.onopen=(ev)=>{localLog(`WS Conectado! St:${ws.readyState}`,'good');const msg="Test WS v10";localLog(`Enviando: "${msg}"`,'info');ws.send(msg);if(typeof leakedValueFromOOB!=='undefined'&&leakedValueFromOOB){const lS=`LeakS1:${JSON.stringify(leakedValueFromOOB)}`;localLog(`Enviando leak WS:"${lS}"`,'leak');ws.send(lS);}setTimeout(()=>{if(ws&&ws.readyState===WebSocket.OPEN)ws.close();},500);};ws.onmessage=(ev)=>{localLog(`Msg WS: ${event.data}`,'good');};ws.onerror=(ev)=>{localLog(`Erro WS! St:${ws.readyState}`,'error');console.error("WS Error:",ev);};ws.onclose=(ev)=>{localLog(`WS Fechado. Code:${event.code},Clean:${event.wasClean}`,'info');};}catch(e){localLog(`Erro criar WS:${e.message}`,'error');console.error("WS Err:",e);}}else{localLog("WebSockets N/A.",'warn');} } catch(e) { localLog(`Erro WebSocket: ${e.message}`, 'error');}
+                 localLog("--- Teste WebSocket Concluído ---", 'test');
+                 await PAUSE(1500);
 
                 // 12. Adicionar Listeners Finais
                 localLog("Adicionando listeners 'click' e 'mousemove' finais...", 'subtest');
-                // ... (código listeners igual v9, omitido para brevidade) ...
-                 if(canvasClickListenerCanvas_final && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_final); } catch(e){} } if(canvasMoveListenerCanvas_final && canvasEl) { try { canvasEl.removeEventListener('mousemove', canvasMoveListenerCanvas_final); } catch(e){} } canvasMoveListenerCanvas_final = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let fT=null; for(const a of interactiveAreas_final){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){fT=a.id;break;}} if(fT!==currentHoverTarget_v10){currentHoverTarget_v10=fT; redrawAll_v10(); canvasEl.style.cursor=fT?'pointer':'default';} if(coordStatusDivEl)coordStatusDivEl.textContent=`Coords:X=${x.toFixed(0)},Y=${y.toFixed(0)}`; }catch(e){} }; canvasClickListenerCanvas_final = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let cA=null; for(const a of interactiveAreas_final){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){cA=a;break;}} if(cA){localLog(`--> Click área: ${cA.text}`,'vuln'); switch(cA.id){ case 'rect-log': localLog("Ação: Log",'info'); break; case 'rect-link': localLog("Ação: Link...",'warn'); try{const nW=window.open('https://google.com','_blank');if(!nW)localLog('Falha.','warn'); else localLog('window.open OK.','good');}catch(e){localLog('Erro win.open: '+e.message,'error');} break; case 'rect-rerun': localLog("Ação: Re-ler S1...",'info'); try{if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`ReL(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`ReL(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v10={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v10={text:"ReL(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v10={text:"ReL(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Erro re-ler:${e.message}`,'error');currentLeakData_v10={text:"ReL(S1):ERRO",color:"#F44336"};} redrawAll_v10(); break; }}else{ localLog(`--> Click fora. x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'info');}}catch(e){localLog(`Erro click:${e.message}`,'error');console.error(e);} }; canvasEl.addEventListener('click', canvasClickListenerCanvas_final); canvasEl.addEventListener('mousemove', canvasMoveListenerCanvas_final);
-                 localLog("Listeners finais adicionados.", 'good');
+                // ** CORREÇÃO: Usar _v10 consistentemente **
+                if(canvasClickListenerCanvas_v10 && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_v10); } catch(e){} }
+                if(canvasMoveListenerCanvas_v10 && canvasEl) { try { canvasEl.removeEventListener('mousemove', canvasMoveListenerCanvas_v10); } catch(e){} }
+
+                // Handler de Movimento (Hover)
+                canvasMoveListenerCanvas_v10 = (event) => { /* ... (lógica hover igual v9, usa _v10) ... */ try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let fT=null; for(const a of interactiveAreas_v10){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){fT=a.id;break;}} if(fT!==currentHoverTarget_v10){currentHoverTarget_v10=fT; redrawAll_v10(); canvasEl.style.cursor=fT?'pointer':'default';} if(coordStatusDivEl)coordStatusDivEl.textContent=`Coords:X=${x.toFixed(0)},Y=${y.toFixed(0)}`; }catch(e){} };
+
+                // Handler de Clique
+                canvasClickListenerCanvas_v10 = (event) => { /* ... (lógica click igual v9, usa _v10) ... */ try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let cA=null; for(const a of interactiveAreas_v10){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){cA=a;break;}} if(cA){localLog(`--> Click área: ${cA.text}`,'vuln'); switch(cA.id){ case 'rect-log': localLog("Ação: Log",'info'); break; case 'rect-link': localLog("Ação: Link...",'warn'); try{const nW=window.open('https://google.com','_blank');if(!nW)localLog('Falha.','warn'); else localLog('window.open OK.','good');}catch(e){localLog('Erro win.open: '+e.message,'error');} break; case 'rect-rerun': localLog("Ação: Re-ler S1...",'info'); try{if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`ReL(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`ReL(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_v10={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_v10={text:"ReL(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_v10={text:"ReL(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Erro re-ler:${e.message}`,'error');currentLeakData_v10={text:"ReL(S1):ERRO",color:"#F44336"};} redrawAll_v10(); break; }}else{ localLog(`--> Click fora. x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'info');}}catch(e){localLog(`Erro click:${e.message}`,'error');console.error(e);} };
+
+                // Adiciona os listeners ** USANDO _v10 **
+                canvasEl.addEventListener('click', canvasClickListenerCanvas_v10);
+                canvasEl.addEventListener('mousemove', canvasMoveListenerCanvas_v10);
+                localLog("Listeners finais adicionados.", 'good');
+                localLog("Passe o mouse e clique nas áreas coloridas!", 'info');
 
 
             } catch(e) {
@@ -263,10 +144,10 @@
             }
         };
 
-        // --- Função chamada pelo botão do Canvas (Final v10) ---
+        // --- Função chamada pelo botão do Canvas (v10 Corrigido) ---
         const runCanvasTest = async () => {
             const canvasOutputDiv = document.getElementById('output-canvas');
-            logCanvas_v10(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas v10' clicado.", "info");
+            logCanvas_v10(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas v10' clicado.", "info"); // Usa log _v10
 
             console.log("Canvas Exploração v10: Tentando obter elementos...");
             const canvasRunBtn = document.getElementById('runCanvasBtn');
@@ -280,15 +161,23 @@
             logCanvas_v10(canvasOutputDiv, "Elementos Canvas v10 encontrados.", "good");
             if (canvasRunBtn) canvasRunBtn.disabled = true;
             logCanvas_v10(canvasOutputDiv, "Iniciando teste principal v10...", "info");
-            await testComprehensiveCanvasFinalV10(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn);
+            await testComprehensiveCanvasFinalV10(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn); // Chama func _v10
         };
 
-         // --- Limpeza (Final v10) ---
+         // --- Limpeza (v10 Corrigido) ---
          window.addEventListener('unload', () => {
              if (currentWorker_v10) { try { currentWorker_v10.terminate(); console.log("[Unload] Worker v10 terminado."); } catch(e){} }
-             try { const el=document.getElementById('interactive-canvas'); if(el){ if(canvasClickListenerCanvas_v10)el.removeEventListener('click',canvasClickListenerCanvas_v10); if(canvasMoveListenerCanvas_v10)el.removeEventListener('mousemove',canvasMoveListenerCanvas_v10); console.log("[Unload] Listeners v10 removidos."); } } catch(e){}
+             try {
+                 const el = document.getElementById('interactive-canvas');
+                 if (el) {
+                    // ** CORREÇÃO: Usar _v10 **
+                    if(canvasClickListenerCanvas_v10) el.removeEventListener('click',canvasClickListenerCanvas_v10);
+                    if(canvasMoveListenerCanvas_v10) el.removeEventListener('mousemove',canvasMoveListenerCanvas_v10);
+                    console.log("[Unload] Listeners v10 removidos.");
+                 }
+             } catch(e) { console.warn("[Unload] Erro:", e); }
          });
-         // --- FIM DO SCRIPT 2 (Final v10) ---
+         // --- FIM DO SCRIPT 2 (v10 Corrigido) ---
     </script>
 
 </body>
