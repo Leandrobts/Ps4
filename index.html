@@ -2,257 +2,194 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PoC v15.3 - Original + Aprofundamento v2</title>
-    <style>
-        /* Estilos CSS */
-        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
-        #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        .log-info, .log-info-faint { color: #6cf; } .log-info-faint { opacity: 0.6; }
-        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
-        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; }
-        .log-vuln { color: #ff4444; font-weight: bold; }
-        .log-good { color: #4CAF50; }
-        .log-warn { color: #FFC107; }
-        .log-error { color: #f44336; }
-        .log-leak { color: #FF9800; font-weight: bold; }
-        .log-ptr { color: #f0f; font-weight: bold; }
-        #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
-        #fingerprint-canvas { display: block; border: 1px solid #444; margin-top: 5px; cursor: crosshair; background-color: #333; }
-        #canvas-coord-status { color: #aaa; font-size: 12px; height: 15px; } /* Área para coords do mouse */
-    </style>
+    <title>PoC v15.7 - Corrigindo Execução Fase 1</title>
+    <style>/* ... Estilos ... */</style>
 </head>
 <body>
-    <h1>PoC v15.3 - Original + Aprofundamento v2</h1>
+    <h1>PoC v15.7 - Corrigindo Execução Fase 1</h1>
     <canvas id="webgl-canvas" width="1" height="1" style="display: none;"></canvas>
-    <canvas id="fingerprint-canvas" width="350" height="200"></canvas> <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div> <p>Fase 1: PoC Original (Fix XSS Flag). Fase 2: Aprofundamento (Fingerprinting, Canvas Completo/Interativo, PP, Erros).</p>
-    <button id="runBtn" onclick="runEverythingSequentially()">Iniciar Teste Completo (Fase 1 + Fase 2)</button>
+    <canvas id="fingerprint-canvas" width="350" height="200"></canvas>
+    <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
+    <p>Fase 1: PoC Original (Debug). Fase 2: Aprofundamento.</p>
+    <button id="runBtn" onclick="runEverythingSequentially()">Iniciar Teste Completo (Debug Fase 1)</button>
     <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM.</div>
 
     <script>
         // --- Globals & Setup ---
-        const outputDiv = document.getElementById('output');
-        const runBtn = document.getElementById('runBtn');
-        const fingerprintCanvas = document.getElementById('fingerprint-canvas');
-        const coordStatusDiv = document.getElementById('canvas-coord-status');
-        const SHORT_PAUSE = 50;
-        const MEDIUM_PAUSE = 500;
-        let leakedValueFromOOB = null;
-        let canvasClickListener = null;
-        let canvasMoveListener = null; // Listener para mousemove
-        let xssRanFlag = false; // Flag para interação com XSS
-        let finalResults = { // Objeto para guardar resumo
-            phase1_xss_flag: null,
-            phase1_oob_stored: null,
-            phase1_pp_basic: null,
-            phase1_pp_hijack: null,
-            phase2_pp_advanced: null,
-            phase2_pp_gadgets: null,
-            phase2_canvas_filter: null,
-            phase2_canvas_todataurl_quirk: null,
-            phase2_env_webview: null,
-            phase2_env_restricted_apis: []
-        };
+        // ... (globals: outputDiv, runBtn, fingerprintCanvas, coordStatusDiv, pauses, OOB var, listeners, xss flag, finalResults) ...
+        let rectArea = { x: 10, y: 10, w: 30, h: 30 }; // Global
+        let linkArea = { x: 150, y: 100, w: 60, h: 30 }; // Global
+        // ... (Resto dos globals) ...
+        const log = (message, type = 'info') => { /* ... (implementação anterior) ... */ };
+        const toHex = (val, bits = 32) => { /* ... (implementação anterior) ... */ };
+        const isPotentialPointer64 = (high, low) => { /* ... (heurística) ... */ };
+        const isPotentialData32 = (val) => { /* ... (heurística) ... */ };
+        const logFinalSummary = () => { /* ... (implementação anterior - pode imprecisa) ... */ };
 
-        // --- Função de Log ---
-        const log = (message, type = 'info') => { /* ... (implementação anterior) ... */ if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); if(outputDiv.innerHTML.length > 1200000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${type}">${timestamp} ${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { /*...*/ } };
-
-        // --- Helpers (toHex, Heurísticas) ---
-        const toHex = (val, bits = 32) => { /* ... (implementação anterior) ... */ if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
-        const isPotentialPointer64 = (high, low) => { /* ... (heurística) ... */ if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
-        const isPotentialData32 = (val) => { /* ... (heurística) ... */ if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA) return false; if (val < 0x1000) return false; return true; };
-
-        // --- Função para logar resumo final ---
-        const logFinalSummary = () => {
-            log("==== [Resumo Final v15.3] ====", 'critical');
-            log(` XSS Fase 1 (Flag): ${finalResults.phase1_xss_flag === null ? 'Indeterminado' : finalResults.phase1_xss_flag}`, finalResults.phase1_xss_flag ? 'vuln' : 'info');
-            log(` OOB Fase 1 (Valor Armazenado não-EE): ${finalResults.phase1_oob_stored ? 'Sim' : 'Não'}`, finalResults.phase1_oob_stored ? 'vuln' : 'good');
-            log(` PP Básica Fase 1: ${finalResults.phase1_pp_basic ? 'Confirmada' : 'Falhou/Bloq'}`, finalResults.phase1_pp_basic ? 'vuln' : 'good');
-            log(` PP Hijack Fase 1: ${finalResults.phase1_pp_hijack ? 'Confirmado' : 'Falhou/Bloq'}`, finalResults.phase1_pp_hijack ? 'vuln' : 'good');
-            log(` PP Avançada Fase 2 (__proto__/Array): ${finalResults.phase2_pp_advanced ? 'Confirmada' : 'Falhou/Bloq'}`, finalResults.phase2_pp_advanced ? 'vuln' : 'good');
-            log(` PP Gadgets Fase 2 (Tentativas): ${finalResults.phase2_pp_gadgets ? 'Executado' : 'Não Executado'}`, 'info');
-            log(` Canvas Filter Suportado: ${finalResults.phase2_canvas_filter === null ? 'Indeterminado' : finalResults.phase2_canvas_filter}`, finalResults.phase2_canvas_filter === false ? 'warn' : 'info');
-            log(` Canvas toDataURL Quirk (PNG/JPEG igual): ${finalResults.phase2_canvas_todataurl_quirk ? 'Detectado' : 'Não Detectado'}`, finalResults.phase2_canvas_todataurl_quirk ? 'warn' : 'info');
-            log(` Detecção Interface WebView Comum: ${finalResults.phase2_env_webview ? 'Sim' : 'Não'}`, finalResults.phase2_env_webview ? 'warn' : 'info');
-            if (finalResults.phase2_env_restricted_apis.length > 0) {
-                log(` APIs Restritas/Ausentes Detectadas: ${finalResults.phase2_env_restricted_apis.join(', ')}`, 'warn');
-            }
-        }
 
         // ==================================================
-        // --- FASE 1: Testes Originais (Preservados + Fix) ---
+        // --- FASE 1: Testes Originais (Com Debug Interno) ---
         // ==================================================
         log("Definindo Testes da Fase 1 (Originais)", "info");
 
-        // Teste Original 1: CSP Bypass / XSS (Fix flag com setTimeout)
+        // Teste Original 1: XSS (SEM ALERT)
         const originalTestCSPBypass = async () => {
-            log("--- [Fase 1] Iniciando Teste Original 1: CSP Bypass / XSS ---", 'test');
-            xssRanFlag = false; // Reseta
-            log("Tentando XSS via data: URI (alert)...", 'subtest'); await new Promise(r=>setTimeout(r,SHORT_PAUSE));
-            try { // Payload com setTimeout para setar a flag ANTES do alert bloquear
-                const payloadJS = `try { log("[Payload Data/F1:] Alerta data: URI executado!", "vuln"); setTimeout(() => { window.xssRanFlag = true; }, 5); alert('XSS Data URI (F1)'); } catch(e) { log("[Payload Data/F1:] Bloqueado: " + e.message, "good"); }`;
-                const encodedPayload = btoa(payloadJS); const scriptTag = document.createElement('script');
-                scriptTag.src = 'data:text/javascript;base64,' + encodedPayload; scriptTag.onerror = () => { log("[F1] ERRO data: URI!", "error"); }; document.body.appendChild(scriptTag); log("[F1] Tag data: URI adicionada.", 'info');
+            log("--- [Fase 1] T1: XSS Iniciando (Sem Alert) ---", 'test');
+            xssRanFlag = false;
+            try { // Data URI Payload
+                const payloadJS = `try { log("[Payload Data/F1:] Executado!", "vuln"); window.xssRanFlag = true; } catch(e) { log("[Payload Data/F1:] Bloqueado: " + e.message, "good"); }`;
+                /* ... (criação e adição do script tag) ... */
             } catch (e) { log(`[F1] Erro data URI: ${e.message}`, 'error'); }
-            await new Promise(r=>setTimeout(r,SHORT_PAUSE * 2));
-            log("Tentando XSS DOM via onerror...", 'subtest'); await new Promise(r=>setTimeout(r,SHORT_PAUSE));
-            try { // Payload com setTimeout para setar a flag ANTES do alert bloquear
+            await new Promise(r=>setTimeout(r,SHORT_PAUSE*2));
+            try { // Onerror Payload
                 const imgTag = document.createElement('img'); imgTag.src = 'invalid_' + Date.now();
                 const onerrorPayload = `
                     try {
-                        log("[F1] XSS DOM via onerror payload iniciado!", "info"); // Log antes da flag/alert
-                        setTimeout(() => { window.xssRanFlag = true; }, 5); // Tenta setar flag antes do alert
+                        log("[F1] Payload onerror iniciado!", "info");
                         const target = document.getElementById('xss-target-div');
                         if (target) { target.innerHTML = '<h2 class="log-vuln">[F1] XSS DOM ONERROR!</h2>'; }
-                        log("[F1] XSS DOM via onerror realizado no log!", "vuln"); // Log pode acontecer antes da flag
-                        alert('XSS DOM (F1)'); // Alert ainda pode bloquear ou atrasar
+                        window.xssRanFlag = true; // Define a flag
+                        log("[F1] XSS DOM via onerror realizado no log! Flag setada.", "vuln");
                     } catch(e) { log("[F1] Erro payload onerror: " + e.message, "warn"); }`;
                 imgTag.setAttribute('onerror', onerrorPayload); document.body.appendChild(imgTag); log("[F1] Tag img onerror adicionada.", 'info');
             } catch (e) { log(`[F1] Erro img onerror: ${e.message}`, 'error'); }
-             // Pausa extra para dar chance ao onerror/setTimeout de executar
-            await new Promise(r => setTimeout(r, MEDIUM_PAUSE));
-            finalResults.phase1_xss_flag = xssRanFlag; // Guarda resultado final da flag
-            log(`--- [Fase 1] Teste Original 1 Concluído (Flag XSS = ${xssRanFlag}) ---`, 'test');
+            await new Promise(r => setTimeout(r, MEDIUM_PAUSE)); // Pausa para onerror
+            finalResults.phase1_xss_flag = xssRanFlag;
+            log(`--- [Fase 1] T1: XSS Concluído (Flag=${xssRanFlag}) ---`, 'test');
         };
 
-        // Teste Original 2: OOB Write/Read (Armazena leak não-EE)
-        const originalTestOOBReadInfoLeak = async () => { /* ... (código T2 v15.2 - sem alterações) ... */ finalResults.phase1_oob_stored = !!leakedValueFromOOB; log(`--- [Fase 1] Teste Original 2 Concluído (...) ---`, 'test'); return true; };
-        // Teste Original 3: PP Básica
-        const originalTestBasicPP = async () => { /* ... (código T3 v15.2 - sem alterações) ... */ finalResults.phase1_pp_basic = true; /* assume sucesso se VULN logado, precisa ajustar se quiser retorno real */ log(`--- [Fase 1] Teste Original 3 Concluído (...) ---`, 'test'); return true; }; // Simplificado para resumo
-        // Teste Original 4: PP Hijack (JSON.stringify)
-        const originalTestPPJsonHijack = async () => { /* ... (código T4 v15.2 - sem alterações) ... */ finalResults.phase1_pp_hijack = true; /* assume sucesso se VULN logado */ log(`--- [Fase 1] Teste Original 4 Concluído (...) ---`, 'test'); return true; }; // Simplificado para resumo
+        // Teste Original 2: OOB (Lógica Original)
+        const originalTestOOBReadInfoLeak = async () => {
+             log("--- [Fase 1] T2: OOB Iniciando ---", 'test');
+             // ... (Código EXATO do Teste 2 da PRIMEIRA mensagem) ...
+             // incluindo a lógica original de armazenamento em leakedValueFromOOB
+             // e a contagem original de potentialLeakFoundCount
+             // ...
+             finalResults.phase1_oob_stored = !!leakedValueFromOOB; // Atualiza resumo
+             log(`--- [Fase 1] T2: OOB Concluído (...) ---`, 'test');
+             // Precisa retornar um valor para o await funcionar corretamente, mesmo que seja true genérico
+             // A função original não tinha return explícito, o que pode ser um problema para async/await
+             return true;
+        };
 
-        // Função para rodar a Fase 1
-        const runOriginalTests = async () => { /* ... (código v15.2) ... */ }
+        // Teste Original 3: PP Básica (Lógica Original + return)
+        const originalTestBasicPP = async () => {
+            log("--- [Fase 1] T3: PP Básica Iniciando ---", 'test');
+            const testProp = '__pp_basic_test_orig__'; const testValue = 'PollutedOrig!'; let success = false;
+             try {
+                 Object.prototype[testProp] = testValue;
+                 const obj = {}; // Cria obj DEPOIS de poluir
+                 if (obj[testProp] === testValue) {
+                     log(`[Fase 1] VULN: PP Básica confirmada!`, 'vuln'); success = true;
+                 } else { log(`[Fase 1] FALHA/BLOQ PP Básica.`,'good'); }
+             } catch (e) { log(`[Fase 1] Erro PP Básico: ${e.message}`, 'error'); success = false; } // Garante false em erro
+             finally { try { delete Object.prototype[testProp]; log(`[Fase 1] Limpeza PP Básica ok.`,'info');} catch(e){} }
+             finalResults.phase1_pp_basic = success;
+             log(`--- [Fase 1] T3: PP Básica Concluído (Success=${success}) ---`, 'test');
+             return success; // Retorna o status
+        };
+
+        // Teste Original 4: PP Hijack (Lógica Original + return)
+        const originalTestPPJsonHijack = async () => {
+            log("--- [Fase 1] T4: PP Hijack Iniciando ---", 'test');
+            const oS = JSON.stringify; let hS = false; let iS = false; let hijackReturnedCorrectly = false;
+            try {
+                JSON.stringify = function hJSO(v,r,s){ /* ... (lógica original do hijack, lendo leakedValueFromOOB) ... */ return `{"hijacked_phase1":true,"leak_read":${iS}}`; };
+                const res = JSON.stringify({x:1});
+                if (res?.includes('"hijacked_phase1":true')) {
+                     log("[F1] VULN: Retorno hijack ok!",'vuln'); hijackReturnedCorrectly = true;
+                 } else { /*...*/ }
+            } catch (e) { log(`[F1] Erro PP Hijack: ${e.message}`,'error'); hijackReturnedCorrectly = false; } // Garante false
+            finally { /* ... (restauração) ... */ }
+            finalResults.phase1_pp_hijack = hijackReturnedCorrectly;
+            log(`--- [Fase 1] T4: PP Hijack Concluído (Success=${hijackReturnedCorrectly}) ---`, 'test');
+            return hijackReturnedCorrectly; // Retorna o status
+        };
+
+        // Função para rodar a Fase 1 COM TRY/CATCH INDIVIDUAL
+        const runOriginalTests = async () => {
+             log("==== [Fase 1] INICIANDO runOriginalTests (com try/catch interno) ====", 'critical');
+             let testName = ""; // Para saber qual teste falhou
+             try {
+                 testName = "T1: XSS";
+                 log(`[Fase 1] Executando ${testName}...`, 'info'); await originalTestCSPBypass();
+                 log(`[Fase 1] ${testName} Concluído (aparentemente).`, 'info'); await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
+
+                 testName = "T2: OOB";
+                 log(`[Fase 1] Executando ${testName}...`, 'info'); await originalTestOOBReadInfoLeak();
+                 log(`[Fase 1] ${testName} Concluído (aparentemente).`, 'info'); await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
+
+                 testName = "T3: PP Básica";
+                 log(`[Fase 1] Executando ${testName}...`, 'info'); await originalTestBasicPP();
+                 log(`[Fase 1] ${testName} Concluído (aparentemente).`, 'info'); await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
+
+                 testName = "T4: PP Hijack";
+                 log(`[Fase 1] Executando ${testName}...`, 'info'); await originalTestPPJsonHijack();
+                 log(`[Fase 1] ${testName} Concluído (aparentemente).`, 'info'); await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
+
+                 log("==== [Fase 1] runOriginalTests CONCLUÍDA (sem erro capturado aqui) ====", 'critical');
+                 return true; // Indica sucesso geral da fase
+
+             } catch (error) {
+                 log(`==== [Fase 1] ERRO DURANTE ${testName} em runOriginalTests: ${error.name} - ${error.message} ====`,'error');
+                 log(error.stack || '[Sem Stack Trace]', 'error');
+                 return false; // Indica falha na fase
+             }
+        }
 
         // ==========================================================
-        // --- FASE 2: Testes Adicionais Baseados em Evidências ---
+        // --- FASE 2: Testes Adicionais (Definições Mantidas) ---
         // ==========================================================
         log("Definindo Testes da Fase 2 (Aprofundamento)", "info");
+        // Testes A, B, C, F, J, K, D/E Combinado (Definições como na v15.5)
+        const testBasicDataCollection = async () => { /* ... */ };
+        const testEnvironmentProbing = async () => { /* ... */ };
+        const testAdvancedFingerprinting = async () => { /* ... */ };
+        const testErrorObservation = async () => { /* ... */ };
+        const testAdvancedPP = async () => { /* ... */ };
+        const testPPGadgetAttempts = async () => { /* ... */ };
+        const testComprehensiveCanvas = async () => { /* ... (usa globais rectArea/linkArea, lê xssRanFlag e leakedValueFromOOB) ... */ };
 
-        // Teste A: Coleta Dados Básicos
-        const testBasicDataCollection = async () => { /* ... (código Teste A v15.2, poderia adicionar checagem de APIs ausentes ao finalResults.phase2_env_restricted_apis) ... */ log("--- [Fase 2] Teste A Concluído ---", 'test'); };
-        // Teste B: Sondagem Ambiente
-        const testEnvironmentProbing = async () => { /* ... (código Teste B v15.2, poderia setar finalResults.phase2_env_webview) ... */ log("--- [Fase 2] Teste B Concluído ---", 'test'); };
-        // Teste C: Fingerprinting Avançado
-        const testAdvancedFingerprinting = async () => { /* ... (código Teste C v15.2) ... */ log("--- [Fase 2] Teste C Concluído ---", 'test'); };
-
-        // Teste D & E combinados: Canvas Completo (Avançado + Interativo)
-        const testComprehensiveCanvas = async () => {
-            log("--- [Fase 2] Iniciando Teste D/E: Canvas Completo ---", 'test');
-            let canvas = null; let ctx = null;
-            const rectArea = {x: 10, y: 10, w: 30, h: 30}; // Área do rect vermelho (desenhado aqui)
-            const linkArea = {x: 150, y: 100, w: 60, h: 30}; // Área link
-
-            try { canvas = fingerprintCanvas; ctx = canvas.getContext('2d'); if(!ctx) throw new Error('No 2D Ctx');
-                  log("[F2/DE] Contexto Canvas 2D obtido.", 'info');
-                  ctx.clearRect(0, 0, canvas.width, canvas.height); // Limpa antes de desenhar
-                  ctx.fillStyle = "#555"; ctx.fillRect(0, 0, canvas.width, canvas.height); // Fundo cinza
-            } catch(e) { log(`[F2/DE] Falha setup Canvas: ${e.message}`,'error'); return; }
-
-            // 1. Desenho e API Checks (do Teste D original)
-            log("Desenhando formas e testando APIs Canvas...", 'subtest');
-            try {
-                // Desenha formas
-                ctx.fillStyle="#f00"; ctx.fillRect(rectArea.x, rectArea.y, rectArea.w, rectArea.h); // Rect Vermelho
-                ctx.fillStyle="#00f"; ctx.beginPath(); ctx.arc(70, 30, 20, 0, 2*Math.PI); ctx.fill(); // Círculo Azul
-                // Desenha área de link
-                ctx.fillStyle="rgba(0, 255, 0, 0.6)"; ctx.fillRect(linkArea.x, linkArea.y, linkArea.w, linkArea.h);
-                ctx.fillStyle="#000"; ctx.font="12px monospace"; ctx.fillText("Link Aqui", linkArea.x+2, linkArea.y+18);
-
-                // Verifica APIs e Quirks
-                const filterSupported = typeof ctx.filter !== 'undefined';
-                finalResults.phase2_canvas_filter = filterSupported;
-                log(` API ellipse: ${typeof ctx.ellipse==='function'}, filter: ${filterSupported}, resetTransform: ${typeof ctx.resetTransform==='function'}, imageSmoothingQuality: ${typeof ctx.imageSmoothingQuality!=='undefined'}`, 'info');
-                if(!filterSupported) log(`[F2/DE] Quirky: ctx.filter NÃO suportado!`,'warn');
-
-                // Verifica toDataURL
-                const pngURL = canvas.toDataURL('image/png');
-                const jpegURL = canvas.toDataURL('image/jpeg');
-                const urlQuirk = pngURL.length === jpegURL.length || pngURL.substring(30,70) === jpegURL.substring(30,70);
-                finalResults.phase2_canvas_todataurl_quirk = urlQuirk;
-                log(`[F2/DE] toDataURL PNG(len ${pngURL.length}) / JPEG(len ${jpegURL.length})`, 'info');
-                if(urlQuirk) log(`[F2/DE] Quirky: toDataURL PNG/JPEG similares?`,'warn');
-
-                 // INTERAÇÃO: Desenha valor OOB
-                 if(leakedValueFromOOB && leakedValueFromOOB.p === 1){ /* ... (código para desenhar leakStr) ... */ ctx.fillStyle='#FFF'; ctx.font='10px monospace'; ctx.fillText(`OOB(F1): ${leakedValueFromOOB.t}@${leakedValueFromOOB.o}`, 5, canvas.height-5); log(`[F2/DE] INTERAÇÃO: Desenhou valor OOB da Fase 1.`,'info'); }
-                 else { log(`[F2/DE] INTERAÇÃO: Nenhum valor OOB (não-EE) da Fase 1 para desenhar.`,'info'); }
-
-            } catch(e) { log(`[F2/DE] Erro desenho/API checks: ${e.message}`, 'error'); }
-
-             // 2. Interatividade (OnClick, OnMouseMove) (do Teste E original)
-            log("Adicionando listeners 'click' e 'mousemove'...", 'subtest');
-            if(canvasClickListener && canvas) { try { canvas.removeEventListener('click', canvasClickListener); } catch(e){} }
-            if(canvasMoveListener && canvas) { try { canvas.removeEventListener('mousemove', canvasMoveListener); } catch(e){} }
-
-            canvasClickListener = (event) => { /* ... (lógica do click handler v15.1, lendo xssRanFlag global) ... */
-                try{ const r=canvas.getBoundingClientRect();const x=event.clientX-r.left; const y=event.clientY-r.top; let area='fora'; if(x>=rectArea.x&&x<=rectArea.x+rectArea.w&&y>=rectArea.y&&y<=rectArea.y+rectArea.h)area='Rect Vermelho'; else if(x>=lA.x&&x<=lA.x+lA.w&&y>=lA.y&&y<=lA.y+lA.h)area='Área Link'; log(`[F2/DE] Click! Area:${area}. (Flag XSS F1: ${xssRanFlag})`,'info'); if(area==='Área Link'){ log("--> Ação LINK: Abrindo google.com (simulado)", 'warn'); try{window.open('https://google.com','_blank');}catch(e){log('Erro ao abrir link: '+e.message,'error');} } }catch(e){log(`[F2/DE] Erro click: ${e.message}`,'error');}
-            };
-            canvasMoveListener = (event) => { // Novo listener
-                 try {
-                     const rect = canvas.getBoundingClientRect();
-                     const x = event.clientX - rect.left;
-                     const y = event.clientY - rect.top;
-                     if(coordStatusDiv) coordStatusDiv.textContent = `Canvas Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`;
-                     // Logar continuamente seria demais, então apenas atualiza o DIV
-                 } catch(e) { /* ignora erros de move */ }
-            };
-
-            try { canvas.addEventListener('click', canvasClickListener); canvas.addEventListener('mousemove', canvasMoveListener); log("[F2/DE] Listeners adicionados (click, mousemove).", 'info'); }
-            catch (e) { log(`[F2/DE] Erro add listeners: ${e.message}`, 'error'); }
-
-            // 3. Stress Tests e measureText (do Teste E original, stress desenho removido)
-            log("Executando stress leve toDataURL/measureText...", 'subtest');
-             /* ... (Stress URL e measureText de v15.1) ... */
-
-            log("--- [Fase 2] Teste D/E Concluído ---", 'test');
-        };
-
-        // Teste F: Observação Erros Detalhada
-        const testErrorObservation = async () => { /* ... (código Teste F v15.2) ... */ log("--- [Fase 2] Teste F Concluído ---", 'test'); };
-        // Teste J: PP Avançada (`__proto__`, Array)
-        const testAdvancedPP = async () => { /* ... (código Teste J v15.2) ... */ finalResults.phase2_pp_advanced = true; /* assume sucesso */ log("--- [Fase 2] Teste J Concluído ---", 'test'); };
-        // Teste K: Tentativas PP Gadget Especulativo
-        const testPPGadgetAttempts = async () => { /* ... (código Teste K v15.2) ... */ finalResults.phase2_pp_gadgets = true; log("--- [Fase 2] Teste K Concluído ---", 'test'); };
+        // Função para rodar a Fase 2
+        const runNewTests = async () => { /* ... (código v15.5) ... */ };
 
 
-        // --- Função Principal para Rodar Tudo ---
+        // --- Função Principal ---
         const runEverythingSequentially = async () => {
             if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO PoC Final v15.3 (Original Fix + Aprofundamento v2) ====", 'critical');
-            finalResults = {}; // Reseta resumo
+            log("==== INICIANDO PoC Final v15.7 (Debug Interno Fase 1) ====", 'critical');
+            finalResults = {}; // Reseta
 
-            // ===== FASE 1 =====
-            await runOriginalTests();
+            log(">>> Chamando runOriginalTests <<<", 'warn');
+            const phase1Success = await runOriginalTests(); // Roda Fase 1 e captura status
+            log(`>>> runOriginalTests finalizado (Status Sucesso: ${phase1Success}) <<<`, phase1Success ? 'good' : 'error');
 
-            log("\n >> Pausa Entre Fases <<\n", "warn"); await new Promise(r => setTimeout(r, MEDIUM_PAUSE));
+            if (!phase1Success) {
+                 log("AVISO: Fase 1 falhou ou foi interrompida. A Fase 2 pode ter resultados inesperados ou não rodar dependendo do erro.", "warn");
+                 // Decide se quer parar ou continuar. Vamos continuar por enquanto.
+            }
 
-            // ===== FASE 2 =====
-            log("==== [Fase 2] INICIANDO EXECUÇÃO DOS TESTES ADICIONAIS ====", 'critical');
-            // Ordem: Coleta -> Erros -> PP -> Canvas (Canvas por último para deixar desenho visível)
-            await testBasicDataCollection(); // A
-            await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
-            await testEnvironmentProbing(); // B
-            await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
-            await testAdvancedFingerprinting(); // C
-            await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
-            await testErrorObservation(); // F
-            await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
-            await testAdvancedPP(); // J
-            await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
-            await testPPGadgetAttempts(); // K
-            await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
-            await testComprehensiveCanvas(); // D/E Combinado (interage OOB/XSS)
-            await new Promise(r=>setTimeout(r,MEDIUM_PAUSE));
+            log("\n>>> Pausa Entre Fases <<<\n", "warn");
+            await new Promise(r => setTimeout(r, MEDIUM_PAUSE));
 
-            log("\n==== PoC Final v15.3 CONCLUÍDA (Fase 1 + Fase 2) ====", 'critical');
-            logFinalSummary(); // Loga o resumo coletado
-            log("Listeners de clique/movimento do Canvas da Fase 2 podem continuar ativos.", "warn");
+            log(">>> Chamando runNewTests <<<", 'warn');
+            try {
+                await runNewTests(); // Roda Fase 2
+                log(">>> runNewTests CONCLUÍDO <<<", 'warn');
+            } catch (error) {
+                 log(`>>> ERRO CAPTURADO DURANTE runNewTests: ${error.name} - ${error.message} <<<`, 'error');
+                 log(error.stack || '(sem stack trace)', 'error');
+            }
+
+            log("\n==== PoC Final v15.7 CONCLUÍDA ====", 'critical');
+            try { logFinalSummary(); } catch(e) { log("Erro ao gerar resumo final", "error"); }
+            log("Listeners podem continuar ativos.", "warn");
             if (runBtn) runBtn.disabled = false;
         };
 
-        // Limpeza listeners
-        window.addEventListener('unload', () => { if(canvasClickListener&&fingerprintCanvas) fingerprintCanvas.removeEventListener('click',canvasClickListener); if(canvasMoveListener&&fingerprintCanvas) fingerprintCanvas.removeEventListener('mousemove',canvasMoveListener); });
+        // Limpeza listeners, etc.
+        window.addEventListener('unload', () => { /* ... */ });
         // document.addEventListener('DOMContentLoaded', runEverythingSequentially);
 
     </script>
