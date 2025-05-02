@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PP Hijack JSON + Canvas Interativo (v5)</title> <style>
+    <title>PP Hijack JSON + Canvas Exploração (v6)</title> <style>
         /* Estilos CSS Originais (Script 1) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 60vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
@@ -19,7 +19,7 @@
         #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 40px; }
 
         /* === Estilos ADICIONADOS para o Script 2 (Canvas) === */
-        #output-canvas { background: #2a2a2a; border: 1px solid #444; padding: 10px; height: 40vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        #output-canvas { background: #2a2a2a; border: 1px solid #444; padding: 10px; height: 50vh; /* Aumentado altura */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         #interactive-canvas { display: block; border: 1px solid #444; margin-top: 5px; cursor: crosshair; background-color: #333; }
         #canvas-coord-status { color: #aaa; font-size: 12px; height: 15px; }
         hr { border: 1px solid #555; margin: 20px 0; }
@@ -35,7 +35,7 @@
     <hr>
 
     <section>
-        <h2>Teste de Canvas v21.1 (Isolado - Debug + Interação)</h2> <p>Teste isolado de Canvas 2D. Tenta ler e exibir valor vazado pelo Script 1.</p>
+        <h2>Teste de Canvas v21.1 (Exploração Adicional)</h2> <p>Testes adicionais: Robustez, Stress (pixels), PP Canvas, WebGL.</p>
         <canvas id="interactive-canvas" width="350" height="200"></canvas>
         <div id="canvas-coord-status">Passe o mouse sobre o canvas ↑</div>
         <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste de Canvas</button>
@@ -191,20 +191,18 @@
     </script>
 
     <script>
-        // --- Script 2: Variáveis de estado e constantes ---
-        const SHORT_PAUSE_CANVAS_INTERACT = 50; // Renomeado
-        let canvasClickListenerCanvas_interact = null; // Renomeado
-        let canvasMoveListenerCanvas_interact = null;  // Renomeado
-        const rectAreaCanvas_interact = { x: 10, y: 10, w: 50, h: 50 }; // Renomeado
-        // Removida linkAreaCanvas_interact pois simplificamos o debug e adicionamos leitura do leak
-        // const linkAreaCanvas_interact = { x: 150, y: 100, w: 80, h: 30 };
+        // --- Script 2: Variáveis e constantes ---
+        const SHORT_PAUSE_CANVAS_EXPLORE = 50; // Renomeado
+        let canvasClickListenerCanvas_explore = null; // Renomeado
+        let canvasMoveListenerCanvas_explore = null;  // Renomeado (não usado nesta versão, mas mantido para limpeza)
+        const rectAreaCanvas_explore = { x: 10, y: 10, w: 50, h: 50 }; // Renomeado
 
-        // --- Função de Log (Script 2 - Interativo) ---
-        const logCanvas_interact = (outputDivElement, message, type = 'info') => {
+        // --- Função de Log (Script 2) ---
+        const logCanvas_explore = (outputDivElement, message, type = 'info') => {
             const logMsg = `[CANVAS-${type.toUpperCase()}] ${message}`;
             console.log(logMsg);
             if (!outputDivElement) {
-                console.error("logCanvas_interact ERRO: Elemento de output DIV não fornecido!");
+                console.error("logCanvas_explore ERRO: Elemento de output DIV não fornecido!");
                 return;
             }
             try {
@@ -218,155 +216,262 @@
                 outputDivElement.innerHTML += `<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`;
                 outputDivElement.scrollTop = outputDivElement.scrollHeight;
             } catch(e) {
-                console.error("logCanvas_interact ERRO ao escrever no DIV:", e);
+                console.error("logCanvas_explore ERRO ao escrever no DIV:", e);
             }
         };
 
         // --- Helper toHex (Script 2 - Comentado) ---
-        // Usará a função toHex definida pelo Script 1 (que é global)
-        /*
-        const toHex = (val, bits = 32) => {
-            // ...
-        };
-        */
+        // Usa toHex do Script 1
+        /* const toHex = ... */
 
-        // --- Função Principal do Teste de Canvas (Interativo) ---
-        const testComprehensiveCanvasIsolated_interact = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => {
-            let ctx_interact = null;
-            const localLog = (msg, type = 'info') => logCanvas_interact(outputDivEl, msg, type);
+        // --- Função Principal do Teste de Canvas (Exploração) ---
+        const testComprehensiveCanvasExplore = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => {
+            let ctx_explore = null;
+            const localLog = (msg, type = 'info') => logCanvas_explore(outputDivEl, msg, type);
+            const PAUSE = () => new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS_EXPLORE)); // Helper de pausa
 
-            localLog("--- Iniciando Teste Isolado de Canvas (Interativo) ---", 'test');
+            localLog("--- Iniciando Teste de Exploração Canvas ---", 'test');
             try {
-                // 1. Setup Básico (Obter contexto, limpar, fundo)
+                // 1. Setup Básico
                 if (!canvasEl) throw new Error('Elemento Canvas não fornecido');
-                localLog(`Elemento Canvas fornecido: ${canvasEl.id}`, 'info');
-                ctx_interact = canvasEl.getContext('2d');
-                if (!ctx_interact) throw new Error('Contexto 2D não disponível');
-                localLog("Contexto Canvas 2D obtido com sucesso.", 'good');
-                ctx_interact.clearRect(0, 0, canvasEl.width, canvasEl.height);
-                ctx_interact.fillStyle = "#334";
-                ctx_interact.fillRect(0, 0, canvasEl.width, canvasEl.height);
-                localLog("Setup básico do Canvas (contexto, clear, fill) OK.", 'good');
+                ctx_explore = canvasEl.getContext('2d');
+                if (!ctx_explore) throw new Error('Contexto 2D não disponível');
+                localLog("Contexto Canvas 2D obtido.", 'good');
+                ctx_explore.clearRect(0, 0, canvasEl.width, canvasEl.height);
+                ctx_explore.fillStyle = "#334";
+                ctx_explore.fillRect(0, 0, canvasEl.width, canvasEl.height);
+                localLog("Setup básico do Canvas OK.", 'good');
+                await PAUSE();
 
-                // 2. Desenho Básico
-                localLog("Tentando desenhar retângulo laranja...", 'subtest');
-                ctx_interact.fillStyle="#FF5733";
-                ctx_interact.fillRect(rectAreaCanvas_interact.x, rectAreaCanvas_interact.y, rectAreaCanvas_interact.w, rectAreaCanvas_interact.h);
-                localLog("Retângulo laranja desenhado.", 'good');
-                await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS_INTERACT)); // Pequena pausa
+                // 2. Desenho Básico (para ter algo no canvas)
+                ctx_explore.fillStyle="#FF5733";
+                ctx_explore.fillRect(rectAreaCanvas_explore.x, rectAreaCanvas_explore.y, rectAreaCanvas_explore.w, rectAreaCanvas_explore.h);
+                localLog("Retângulo laranja (base) desenhado.", 'info');
+                await PAUSE();
 
-                // 3. <<< INTERAÇÃO: Ler valor do Script 1 >>>
+                // 3. Interação: Ler valor do Script 1 (Mantido)
                 localLog("Verificando valor vazado do Script 1 (leakedValueFromOOB)...", 'subtest');
-                let leakDataForDrawing = { text: "Leak (S1): NULO", color: "#FFC107" }; // Default
+                let leakDataForDrawing = { text: "Leak (S1): NULO", color: "#FFC107" };
                 try {
-                    // Acessa a variável GLOBAL definida e potencialmente populada pelo Script 1
-                    if (typeof leakedValueFromOOB !== 'undefined') { // Verifica se a variável existe
-                         const leak = leakedValueFromOOB; // Pega o valor
+                    if (typeof leakedValueFromOOB !== 'undefined') {
+                         const leak = leakedValueFromOOB;
                          if (leak) {
-                             // Formata usando a função toHex GLOBAL (do Script 1)
                              const leakStr = leak.type === 'U64'
-                                 ? `Leak (S1): U64 H=${toHex(leak.high)} L=${toHex(leak.low)} @${leak.offset}`
-                                 : `Leak (S1): U32 ${toHex(leak.low)} @${leak.offset}`;
-                             localLog(`-> Valor encontrado: ${leakStr}`, 'leak'); // Loga no output do canvas
-                             leakDataForDrawing = { text: leakStr, color: "#FF9800" }; // Prepara para desenhar
-                         } else {
-                             localLog(`-> Valor estava NULO. Execute o Script 1 (Testes PP/OOB/XSS) primeiro e verifique se Teste 2 teve sucesso.`, 'warn');
-                             // Mantém leakDataForDrawing como NULO/Amarelo
-                         }
-                    } else {
-                        localLog(`-> Variável global 'leakedValueFromOOB' NÃO ENCONTRADA. Script 1 rodou?`, 'error');
-                        leakDataForDrawing = { text: "Leak (S1): Var N/A", color: "#F44336" }; // Vermelho erro
-                    }
-                } catch (accessError) {
-                    localLog(`Erro ao tentar acessar/ler leakedValueFromOOB: ${accessError.message}`, 'error');
-                    console.error("Erro acessando leak:", accessError);
-                    leakDataForDrawing = { text: "Leak (S1): ERRO", color: "#F44336" };
-                }
-
-                // 4. Desenhar o resultado da interação no Canvas
-                localLog("Tentando desenhar info do Leak no Canvas...", 'subtest');
+                                 ? `Leak(S1): U64 H=${toHex(leak.high)} L=${toHex(leak.low)} @${leak.offset}`
+                                 : `Leak(S1): U32 ${toHex(leak.low)} @${leak.offset}`;
+                             localLog(`-> Valor encontrado: ${leakStr}`, 'leak');
+                             leakDataForDrawing = { text: leakStr, color: "#FF9800" };
+                         } else { localLog(`-> Valor estava NULO.`, 'warn'); }
+                    } else { localLog(`-> Var global 'leakedValueFromOOB' N/A.`, 'error'); leakDataForDrawing = { text: "Leak(S1): Var N/A", color: "#F44336" }; }
+                } catch (e) { localLog(`Erro ao acessar leak: ${e.message}`, 'error'); leakDataForDrawing = { text: "Leak(S1): ERRO", color: "#F44336" }; }
+                // Desenhar no Canvas
                 try {
-                    ctx_interact.fillStyle = leakDataForDrawing.color;
-                    ctx_interact.font = "12px monospace";
-                    ctx_interact.textAlign = "start";
-                    // Desenha na parte inferior do canvas
-                    ctx_interact.fillText(leakDataForDrawing.text, 10, canvasEl.height - 10);
-                    localLog("Info do Leak desenhada no canvas.", 'info');
-                } catch (drawError) {
-                    localLog(`Erro ao desenhar info do leak no canvas: ${drawError.message}`, 'error');
-                    console.error("Erro desenhando leak no canvas:", drawError);
-                }
-                 await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS_INTERACT));
+                    ctx_explore.fillStyle = leakDataForDrawing.color; ctx_explore.font = "12px monospace";
+                    ctx_explore.textAlign = "start"; ctx_explore.fillText(leakDataForDrawing.text, 10, canvasEl.height - 10);
+                    localLog("Info do Leak desenhada.", 'info');
+                } catch (e) { localLog(`Erro ao desenhar leak: ${e.message}`, 'error');}
+                await PAUSE();
 
-                // 5. Adicionar Listener de Clique Simples (como na versão debug)
-                localLog("Tentando adicionar listener 'click'...", 'subtest');
-                if(canvasClickListenerCanvas_interact && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_interact); } catch(e){} }
-                canvasClickListenerCanvas_interact = (event) => {
+                // 4. Testes de Robustez
+                localLog("Iniciando Testes de Robustez...", 'test');
+                // 4.1 Valores Extremos
+                localLog("Testando valores extremos (grandes/negativos)...", 'subtest');
+                try {
+                    ctx_explore.fillStyle = "rgba(255,0,0,0.5)"; // Vermelho semi-transparente
+                    ctx_explore.fillRect(1e9, 10, 10, 10); // X grande
+                    ctx_explore.fillRect(10, -1e9, 10, 10); // Y negativo grande
+                    ctx_explore.fillRect(5, 5, 1e8, 1e8); // Tamanho grande
+                    localLog("fillRect com valores extremos não crashou.", 'good');
+                } catch(e) { localLog(`Erro em fillRect com valores extremos: ${e.message}`, 'error'); }
+                await PAUSE();
+                // 4.2 Valores Inválidos
+                localLog("Testando valores inválidos (NaN, Infinity)...", 'subtest');
+                try {
+                    const originalLW = ctx_explore.lineWidth; // Salva original
+                    ctx_explore.lineWidth = Infinity;
+                    localLog(`lineWidth = Infinity aplicado (valor atual: ${ctx_explore.lineWidth})`, 'info');
+                    ctx_explore.beginPath();
+                    ctx_explore.moveTo(200, 10);
+                    ctx_explore.lineTo(250, 10);
+                    ctx_explore.stroke(); // Tenta desenhar com linha infinita
+                    ctx_explore.lineWidth = originalLW; // Restaura
+
+                    ctx_explore.fillStyle = "yellow";
+                    ctx_explore.beginPath();
+                    ctx_explore.arc(NaN, 150, 10, 0, Math.PI * 2); // Tenta desenhar com NaN
+                    ctx_explore.fill();
+                    localLog("Testes com NaN/Infinity não crasharam (verificar output visual/console).", 'warn');
+                } catch(e) { localLog(`Erro com valores inválidos: ${e.message}`, 'error'); }
+                localLog("--- Testes de Robustez Concluídos ---", 'test');
+                await PAUSE();
+
+                // 5. Teste de Stress (getImageData/putImageData)
+                localLog("Iniciando Teste de Stress (Pixel R/W)...", 'test');
+                const stressArea = { x: 0, y: 0, w: 20, h: 20 }; // Area pequena
+                const stressIterations = 100; // Iterações (aumentar com cuidado)
+                let stressSuccess = true;
+                let errorMsg = "";
+                const startTime = performance.now();
+                try {
+                    for (let i = 0; i < stressIterations; i++) {
+                        const imageData = ctx_explore.getImageData(stressArea.x, stressArea.y, stressArea.w, stressArea.h);
+                        if (!imageData || !imageData.data) { throw new Error("Falha ao obter ImageData"); }
+                        const data = imageData.data;
+                        // Manipulação simples: inverter cores
+                        for (let j = 0; j < data.length; j += 4) {
+                            data[j] = 255 - data[j];         // Red
+                            data[j + 1] = 255 - data[j + 1]; // Green
+                            data[j + 2] = 255 - data[j + 2]; // Blue
+                            // Alpha (data[j + 3]) permanece o mesmo
+                        }
+                        ctx_explore.putImageData(imageData, stressArea.x, stressArea.y);
+                    }
+                } catch (e) {
+                    stressSuccess = false;
+                    errorMsg = e.message;
+                    localLog(`Erro durante teste de stress R/W: ${e.message}`, 'error');
+                    console.error("Erro Stress R/W:", e);
+                }
+                const endTime = performance.now();
+                const duration = (endTime - startTime).toFixed(1);
+                if (stressSuccess) {
+                    localLog(`Teste de Stress R/W concluído (${stressIterations} iterações) em ${duration} ms.`, 'good');
+                } else {
+                    localLog(`Teste de Stress R/W FALHOU após ${duration} ms. Erro: ${errorMsg}`, 'error');
+                }
+                localLog("--- Teste de Stress Concluído ---", 'test');
+                await PAUSE();
+
+                // 6. Teste de Poluição de Protótipo (Canvas)
+                localLog("Iniciando Teste de PP no Canvas Context...", 'test');
+                try {
+                     const ppKey = "__canvas_pp_test__";
+                     let ppDetected = false;
+                     // Verifica se já não existe (limpeza de teste anterior?)
+                     if (typeof ctx_explore[ppKey] !== 'undefined') {
+                          localLog(`AVISO: Propriedade ${ppKey} já existe no contexto antes do teste!`, 'warn');
+                          // delete ctx_explore[ppKey]; // Tenta limpar se existir
+                     }
+                     // Polui
+                     CanvasRenderingContext2D.prototype[ppKey] = "Canvas Polluted!";
+                     // Verifica no contexto atual
+                     if (ctx_explore[ppKey] === "Canvas Polluted!") {
+                         localLog("VULN: CanvasRenderingContext2D.prototype parece ser poluível (contexto atual afetado)!", 'vuln');
+                         ppDetected = true;
+                     } else {
+                         // Tenta com um contexto novo (alguns ambientes podem congelar objetos existentes)
+                         const tempCanvas = document.createElement('canvas');
+                         const tempCtx = tempCanvas.getContext('2d');
+                         if (tempCtx && tempCtx[ppKey] === "Canvas Polluted!") {
+                             localLog("VULN: CanvasRenderingContext2D.prototype parece ser poluível (novo contexto afetado)!", 'vuln');
+                             ppDetected = true;
+                         } else {
+                             localLog("CanvasRenderingContext2D.prototype não parece poluível.", 'good');
+                         }
+                     }
+                     delete CanvasRenderingContext2D.prototype[ppKey]; // Limpeza
+                     // Verifica limpeza no contexto atual
+                     if (typeof ctx_explore[ppKey] !== 'undefined') {
+                        localLog(`AVISO: Falha ao limpar PP ${ppKey} do contexto atual.`, 'warn');
+                     }
+
+                } catch(e) { localLog(`Erro ao testar PP no Canvas: ${e.message}`, 'error'); console.error("Erro PP Canvas:", e);}
+                localLog("--- Teste de PP Canvas Concluído ---", 'test');
+                await PAUSE();
+
+                // 7. Verificação de Contexto WebGL
+                localLog("Iniciando Verificação WebGL...", 'test');
+                let gl = null;
+                let webglVersion = "N/A";
+                try {
+                    gl = canvasEl.getContext('webgl') || canvasEl.getContext('experimental-webgl');
+                    if (gl) {
+                        webglVersion = gl.getParameter(gl.VERSION);
+                        localLog(`Contexto WebGL obtido! Versão: ${webglVersion}`, 'vuln'); // vuln para destacar
+                         // Poderíamos tentar WebGL2 também
+                         try {
+                            let gl2 = canvasEl.getContext('webgl2') || canvasEl.getContext('experimental-webgl2');
+                            if(gl2) {
+                                localLog(`Contexto WebGL2 TAMBÉM obtido! Versão: ${gl2.getParameter(gl2.VERSION)}`, 'vuln');
+                            } else {
+                                localLog('Contexto WebGL2 NÃO disponível.', 'info');
+                            }
+                         } catch(e2) { localLog(`Erro ao tentar obter WebGL2: ${e2.message}`, 'warn');}
+                    } else {
+                        localLog('Contexto WebGL (1 ou experimental) NÃO disponível.', 'good');
+                    }
+                } catch(e) {
+                    localLog(`Erro ao obter contexto WebGL: ${e.message}`, 'error');
+                    console.error("Erro WebGL:", e);
+                }
+                localLog("--- Verificação WebGL Concluída ---", 'test');
+                await PAUSE();
+
+                // 8. Adicionar Listener de Clique (Mantido)
+                localLog("Adicionando listener 'click' final...", 'subtest');
+                if(canvasClickListenerCanvas_explore && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_explore); } catch(e){} }
+                canvasClickListenerCanvas_explore = (event) => {
                     try{
                         const rect = canvasEl.getBoundingClientRect();
                         const x = event.clientX - rect.left;
                         const y = event.clientY - rect.top;
                         localLog(`--> Click DETECTADO no Canvas! Coords: x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'vuln');
-                        // Poderia adicionar mais interações aqui no futuro (ex: clicar para re-ler o leak)
                     }catch(e){ localLog(`Erro click handler (Canvas): ${e.message}`,'error'); console.error("Erro no click handler:", e);}
                 };
-                canvasEl.addEventListener('click', canvasClickListenerCanvas_interact);
+                canvasEl.addEventListener('click', canvasClickListenerCanvas_explore);
                 localLog("Listener 'click' adicionado.", 'good');
 
             } catch(e) {
-                 // Captura erros gerais que possam ter ocorrido na função principal
-                 localLog(`Erro INESPERADO durante teste do Canvas: ${e.message}`, 'error');
+                 localLog(`Erro GERAL INESPERADO durante teste do Canvas: ${e.message}`, 'error');
                  console.error("Erro geral no teste do Canvas:", e);
             } finally {
-                 // Reabilita o botão no final, mesmo se houver erro (exceto erro crítico de setup)
-                 logCanvas_interact(outputDivEl, "--- Teste de Canvas Isolado Concluído (Interativo) ---", 'test');
+                 localLog("--- Teste de Exploração Canvas CONCLUÍDO ---", 'test');
                  if (runBtnEl) runBtnEl.disabled = false;
             }
         };
 
-        // --- Função chamada pelo botão do Canvas (Interativo) ---
+        // --- Função chamada pelo botão do Canvas (Exploração) ---
         const runCanvasTest = async () => {
             const canvasOutputDiv = document.getElementById('output-canvas');
-            logCanvas_interact(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas' clicado.", "info"); // Usa a função de log renomeada
+            logCanvas_explore(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas' clicado.", "info");
 
-            console.log("Canvas Interativo: Tentando obter elementos...");
+            console.log("Canvas Exploração: Tentando obter elementos...");
             const canvasRunBtn = document.getElementById('runCanvasBtn');
-            console.log(`Canvas Interativo: runCanvasBtn:`, canvasRunBtn);
+            console.log(`Canvas Exploração: runCanvasBtn:`, canvasRunBtn);
             const canvasElement = document.getElementById('interactive-canvas');
-            console.log(`Canvas Interativo: interactive-canvas:`, canvasElement);
+            console.log(`Canvas Exploração: interactive-canvas:`, canvasElement);
             const coordStatusDivCanvas = document.getElementById('canvas-coord-status');
-            console.log(`Canvas Interativo: canvas-coord-status:`, coordStatusDivCanvas);
+            console.log(`Canvas Exploração: canvas-coord-status:`, coordStatusDivCanvas);
 
             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
                 const errorMsg = "ERRO FATAL: Um ou mais elementos HTML essenciais para o Canvas não foram encontrados!";
-                logCanvas_interact(canvasOutputDiv, errorMsg, "error");
+                logCanvas_explore(canvasOutputDiv, errorMsg, "error");
                 console.error(errorMsg);
                 return;
             }
-            logCanvas_interact(canvasOutputDiv, "Elementos Canvas encontrados.", "good");
+            logCanvas_explore(canvasOutputDiv, "Elementos Canvas encontrados.", "good");
 
             if (canvasRunBtn) canvasRunBtn.disabled = true;
 
-            logCanvas_interact(canvasOutputDiv, "Iniciando teste principal do canvas (interativo)...", "info");
+            logCanvas_explore(canvasOutputDiv, "Iniciando teste principal de exploração do canvas...", "info");
             // Chama a função principal renomeada
-            await testComprehensiveCanvasIsolated_interact(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn);
+            await testComprehensiveCanvasExplore(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn);
         };
 
-         // --- Limpeza (Interativo) ---
+         // --- Limpeza (Exploração) ---
          window.addEventListener('unload', () => {
              try {
                  const el = document.getElementById('interactive-canvas');
                  if (el) {
-                    // Usa nomes de listener renomeados
-                    if(canvasClickListenerCanvas_interact) el.removeEventListener('click',canvasClickListenerCanvas_interact);
-                    // if(canvasMoveListenerCanvas_interact) el.removeEventListener('mousemove',canvasMoveListenerCanvas_interact); // Move listener não foi adicionado nesta versão
-                    console.log("[Canvas Unload - Interativo] Listeners removidos (tentativa).");
+                    if(canvasClickListenerCanvas_explore) el.removeEventListener('click',canvasClickListenerCanvas_explore);
+                    if(canvasMoveListenerCanvas_explore) el.removeEventListener('mousemove',canvasMoveListenerCanvas_explore); // Tenta remover mesmo que não usado
+                    console.log("[Canvas Unload - Exploração] Listeners removidos (tentativa).");
                  }
              } catch(e) {
-                 console.warn("[Canvas Unload - Interativo] Erro ao remover listeners:", e);
+                 console.warn("[Canvas Unload - Exploração] Erro ao remover listeners:", e);
              }
          });
-         // --- FIM DO SCRIPT 2 (Interativo) ---
+         // --- FIM DO SCRIPT 2 (Exploração) ---
     </script>
 
 </body>
