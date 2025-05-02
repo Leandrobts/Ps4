@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>PP Hijack JSON + Canvas Isolado (v3 - Corrigido)</title>
+    <title>PP Hijack JSON + Canvas Isolado (v4 - Debug)</title>
     <style>
         /* Estilos CSS Originais (Script 1) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -177,16 +177,16 @@
             if (runBtn) runBtn.disabled = true;
             log("==== INICIANDO PoC Final v9 (PP Hijack JSON) ====", 'test');
             await testCSPBypass(); // Teste 1
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); // Esta linha estava cortada
+            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
             await testOOBReadInfoLeakEnhancedStore(); // Teste 2
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
             await testBasicPP(); // Teste 3
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
             await testPPJsonHijack(); // Teste 4
             await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            log("\n==== PoC Final v9 CONCLUÍDA ====", 'test'); // Adicionada quebra de linha para clareza
-            if (runBtn) runBtn.disabled = false; // Reabilita o botão
-        }; // Fechamento da função que faltava
+            log("\n==== PoC Final v9 CONCLUÍDA ====", 'test');
+            if (runBtn) runBtn.disabled = false;
+        };
 
         // document.addEventListener('DOMContentLoaded', runAllTests);
         // --- FIM DO SCRIPT 1 ORIGINAL ---
@@ -194,21 +194,19 @@
 
     <script>
         // --- Script 2: Variáveis de estado e constantes ---
-        const SHORT_PAUSE_CANVAS = 50;
-        // const MEDIUM_PAUSE_CANVAS = 300; // Não usado no original
-        let canvasClickListenerCanvas = null; // Referências para listeners (manter globalmente no escopo do script 2 para poder remover)
-        let canvasMoveListenerCanvas = null;
-        const rectAreaCanvas = { x: 10, y: 10, w: 50, h: 50 }; // Constantes de área
-        const linkAreaCanvas = { x: 150, y: 100, w: 80, h: 30 };
+        const SHORT_PAUSE_CANVAS_DEBUG = 50; // Renomeado para evitar conflito se SHORT_PAUSE fosse global
+        let canvasClickListenerCanvas_debug = null; // Renomeado para evitar conflito
+        let canvasMoveListenerCanvas_debug = null;  // Renomeado para evitar conflito
+        const rectAreaCanvas_debug = { x: 10, y: 10, w: 50, h: 50 }; // Renomeado
+        const linkAreaCanvas_debug = { x: 150, y: 100, w: 80, h: 30 }; // Renomeado
 
-        // --- Função de Log (Script 2) ---
-        // Nota: Esta função depende que 'canvasOutputDiv' seja passado como argumento ou encontrado de alguma forma
-        // Modificando para aceitar o div como parâmetro para melhor isolamento
-        const logCanvas = (outputDivElement, message, type = 'info') => {
-            console.log(`[CANVAS-${type.toUpperCase()}] ${message}`); // Log no console sempre
-            if (!outputDivElement) { // Verifica o elemento passado
-                console.error("logCanvas ERRO: Elemento de output DIV não fornecido ou não encontrado!");
-                return;
+        // --- Função de Log (Script 2 - Debug) ---
+        const logCanvas_debug = (outputDivElement, message, type = 'info') => {
+            const logMsg = `[CANVAS-${type.toUpperCase()}] ${message}`;
+            console.log(logMsg); // Log no console sempre
+            if (!outputDivElement) {
+                console.error("logCanvas_debug ERRO: Elemento de output DIV não fornecido!");
+                return; // Não tenta escrever no div se ele não existe
             }
             try {
                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
@@ -221,163 +219,158 @@
                 outputDivElement.innerHTML += `<span class="log-${logClass}">${timestamp} ${sanitizedMessage}\n</span>`;
                 outputDivElement.scrollTop = outputDivElement.scrollHeight;
             } catch(e) {
-                console.error("logCanvas ERRO ao escrever no DIV:", e);
+                console.error("logCanvas_debug ERRO ao escrever no DIV:", e);
             }
         };
 
-        // --- Helper toHex (Script 2) ---
-        // Esta definição sobrescreverá a do Script 1. Funcionalmente idêntica.
-        const toHex = (val, bits = 32) => { try { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } catch { return 'Error'; } };
+        // --- Helper toHex (Script 2 - Comentado para evitar conflito) ---
+        /*
+        const toHex = (val, bits = 32) => {
+            // ... (código original)
+        };
+        */
 
-        // --- Função Principal do Teste de Canvas (Modificada para aceitar elementos) ---
-        const testComprehensiveCanvasIsolated = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => {
-            let ctx = null; // Contexto local da função de teste
-            const localLog = (msg, type) => logCanvas(outputDivEl, msg, type); // Helper para logar no div correto
+        // --- Função Principal do Teste de Canvas (Debug) ---
+        const testComprehensiveCanvasIsolated_debug = async (canvasEl, outputDivEl, coordStatusDivEl, runBtnEl) => {
+            let ctx_debug = null; // Variável local para contexto
+            // Cria um helper de log local que já tem o outputDivEl
+            const localLog = (msg, type = 'info') => logCanvas_debug(outputDivEl, msg, type);
 
-            localLog("--- Iniciando Teste Isolado de Canvas ---", 'test');
+            localLog("--- Iniciando Teste Isolado de Canvas (Debug) ---", 'test');
             try {
-                if (!canvasEl) throw new Error('Elemento Canvas não fornecido');
-                ctx = canvasEl.getContext('2d');
-                if (!ctx) throw new Error('Contexto 2D não disponível');
-                localLog("Contexto Canvas 2D obtido.", 'info');
+                if (!canvasEl) throw new Error('Elemento Canvas não fornecido a testComprehensiveCanvasIsolated_debug');
+                localLog(`Elemento Canvas fornecido: ${canvasEl.id}`, 'info');
 
-                ctx.clearRect(0, 0, canvasEl.width, canvasEl.height);
-                ctx.fillStyle = "#334";
-                ctx.fillRect(0, 0, canvasEl.width, canvasEl.height);
-                localLog("Canvas limpo e fundo desenhado.", 'info');
+                ctx_debug = canvasEl.getContext('2d');
+                if (!ctx_debug) throw new Error('Contexto 2D não disponível');
+                localLog("Contexto Canvas 2D obtido com sucesso.", 'good');
+
+                ctx_debug.clearRect(0, 0, canvasEl.width, canvasEl.height);
+                localLog("Canvas clearRect executado.", 'info');
+                ctx_debug.fillStyle = "#334";
+                ctx_debug.fillRect(0, 0, canvasEl.width, canvasEl.height);
+                localLog("Canvas fillRect (fundo) executado.", 'info');
 
             } catch(e) {
                 localLog(`Falha CRÍTICA no setup do Canvas: ${e.message}`, 'error');
+                console.error("Erro no setup do Canvas:", e); // Log detalhado no console
                 localLog("--- Teste de Canvas Isolado ABORTADO (Setup) ---", 'test');
                 if (runBtnEl) runBtnEl.disabled = false;
-                return;
+                return; // Aborta se o setup falhar
             }
 
-            // 1. Desenho
-            localLog("Desenhando formas...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS));
-            try {
-                ctx.fillStyle="#FF5733"; ctx.fillRect(rectAreaCanvas.x, rectAreaCanvas.y, rectAreaCanvas.w, rectAreaCanvas.h);
-                ctx.fillStyle="#33FF57"; ctx.beginPath(); ctx.arc(120, 50, 30, 0, 2*Math.PI); ctx.fill();
-                ctx.fillStyle="rgba(50, 150, 255, 0.7)"; ctx.fillRect(linkAreaCanvas.x, linkAreaCanvas.y, linkAreaCanvas.w, linkAreaCanvas.h);
-                ctx.fillStyle="#FFFFFF"; ctx.font="bold 14px monospace"; ctx.textAlign="center";
-                ctx.fillText("Abrir Link", linkAreaCanvas.x + linkAreaCanvas.w / 2, linkAreaCanvas.y + linkAreaCanvas.h / 2 + 5);
-                ctx.textAlign="start";
-                localLog("Formas desenhadas.", 'good');
-            } catch(e) { localLog(`Erro durante desenho: ${e.message}`, 'error'); }
+            // --- Se chegou aqui, o setup básico funcionou ---
+            localLog("Setup básico do Canvas (contexto, clear, fill) OK.", 'good');
 
-            // 2. Teste de APIs e Quirks
-            localLog("Verificando APIs e Quirks...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS));
+            // 1. Desenho (Simplificado para Debug)
+            localLog("Tentando desenhar retângulo laranja...", 'subtest');
             try {
-                const filterSupported = typeof ctx.filter !== 'undefined';
-                localLog(` API Filter Suportado: ${filterSupported}`, filterSupported ? 'info' : 'warn');
+                ctx_debug.fillStyle="#FF5733";
+                ctx_debug.fillRect(rectAreaCanvas_debug.x, rectAreaCanvas_debug.y, rectAreaCanvas_debug.w, rectAreaCanvas_debug.h);
+                localLog("Retângulo laranja desenhado.", 'good');
+            } catch(e) {
+                localLog(`Erro durante desenho: ${e.message}`, 'error');
+                console.error("Erro no desenho:", e);
+                // Não aborta, tenta continuar se possível
+            }
+
+            // 2. Teste de APIs (Simplificado para Debug)
+            localLog("Verificando API toDataURL...", 'subtest');
+            try {
                 const pngURL = canvasEl.toDataURL('image/png');
-                const jpegURL = canvasEl.toDataURL('image/jpeg');
-                const urlQuirk = pngURL.length === jpegURL.length || pngURL.substring(30,70) === jpegURL.substring(30,70);
-                localLog(` toDataURL PNG(len ${pngURL.length}) / JPEG(len ${jpegURL.length}). Quirk: ${urlQuirk}`, urlQuirk ? 'warn' : 'info');
-                localLog(` API ellipse: ${typeof ctx.ellipse==='function'}`, 'info');
-                localLog(` API measureText: ${typeof ctx.measureText==='function'}`, 'info');
-                if (typeof ctx.measureText==='function') { localLog(`  measureText('Test😊'): width ${ctx.measureText('Test😊').width.toFixed(1)}`, 'info');}
-            } catch(e) { localLog(` Erro API Check: ${e.message}`, 'error'); }
-
-            // 3. Interatividade
-            localLog("Adicionando listeners 'click' e 'mousemove'...", 'subtest');
-            await new Promise(r => setTimeout(r, SHORT_PAUSE_CANVAS));
-
-            // Remove listeners antigos (usa as referências globais do script 2)
-            if(canvasClickListenerCanvas && canvasEl) { try { canvasEl.removeEventListener('click', canvasClickListenerCanvas); } catch(e){} }
-            if(canvasMoveListenerCanvas && canvasEl) { try { canvasEl.removeEventListener('mousemove', canvasMoveListenerCanvas); } catch(e){} }
-
-            // Define os handlers (precisam acessar 'localLog' e os elementos passados)
-            canvasClickListenerCanvas = (event) => {
-                 try{
-                    const rect = canvasEl.getBoundingClientRect(); // Usa canvasEl passado
-                    const x = event.clientX - rect.left;
-                    const y = event.clientY - rect.top;
-                    let area='fora';
-                    if(x>=rectAreaCanvas.x && x<=rectAreaCanvas.x+rectAreaCanvas.w && y>=rectAreaCanvas.y && y<=rectAreaCanvas.y+rectAreaCanvas.h)area='Rect Laranja';
-                    else if(x>=linkAreaCanvas.x && x<=linkAreaCanvas.x+linkAreaCanvas.w && y>=linkAreaCanvas.y && y<=linkAreaCanvas.y+linkAreaCanvas.h)area='Área Link';
-                    localLog(`--> Click! Area: ${area}. Coords: x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'warn');
-                    if(area==='Área Link'){
-                        localLog("--> Ação LINK: Tentando abrir google.com...",'vuln');
-                        try{
-                            const newWindow = window.open('https://google.com','_blank');
-                             if (!newWindow) { localLog('Falha ao abrir link (window.open retornou null/falsy - bloqueado?).','warn');}
-                             else { localLog('Comando window.open executado (verificar se nova guia abriu).','good'); }
-                        }catch(e){localLog('Erro ao abrir link (bloqueado via try-catch?): '+e.message,'error');}
-                    }
-                }catch(e){ localLog(`Erro click handler (Canvas): ${e.message}`,'error');}
-            };
-
-            canvasMoveListenerCanvas = (event) => {
-                try{
-                    const rect = canvasEl.getBoundingClientRect(); // Usa canvasEl passado
-                    const x = event.clientX - rect.left;
-                    const y = event.clientY - rect.top;
-                    if(coordStatusDivEl) coordStatusDivEl.textContent = `Canvas Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`; // Usa coordStatusDivEl passado
-                }catch(e){ /* Ignora erros de move */ }
-            };
-
-            // Adiciona os listeners
-            try {
-                canvasEl.addEventListener('click', canvasClickListenerCanvas);
-                canvasEl.addEventListener('mousemove', canvasMoveListenerCanvas);
-                localLog("Listeners adicionados. TESTE CLICANDO E MOVENDO O MOUSE NO CANVAS!", 'good');
-            } catch (e) {
-                localLog(`Erro ao adicionar listeners: ${e.message}`, 'error');
+                localLog(` toDataURL('image/png') funcionou (len ${pngURL.length})`, 'good');
+            } catch(e) {
+                localLog(` Erro API Check (toDataURL): ${e.message}`, 'error');
+                console.error("Erro no toDataURL:", e);
             }
 
-            localLog("--- Teste de Canvas Isolado Concluído (parte automatizada) ---", 'test');
+            // 3. Interatividade (Simplificado para Debug)
+            localLog("Tentando adicionar listener 'click'...", 'subtest');
+
+            // Remove listener antigo (se existir)
+            if(canvasClickListenerCanvas_debug && canvasEl) {
+                try { canvasEl.removeEventListener('click', canvasClickListenerCanvas_debug); } catch(e){}
+            }
+
+            // Define o handler de clique (simplificado)
+            canvasClickListenerCanvas_debug = (event) => {
+                 try{
+                    const rect = canvasEl.getBoundingClientRect();
+                    const x = event.clientX - rect.left;
+                    const y = event.clientY - rect.top;
+                    localLog(`--> Click DETECTADO no Canvas! Coords: x=${x.toFixed(0)}, y=${y.toFixed(0)}`,'vuln'); // Usa 'vuln' para destacar
+                }catch(e){ localLog(`Erro click handler (Canvas): ${e.message}`,'error'); console.error("Erro no click handler:", e);}
+            };
+
+            // Adiciona o listener
+            try {
+                canvasEl.addEventListener('click', canvasClickListenerCanvas_debug);
+                localLog("Listener 'click' adicionado. TESTE CLICANDO NO CANVAS!", 'good');
+            } catch (e) {
+                localLog(`Erro ao adicionar listener 'click': ${e.message}`, 'error');
+                console.error("Erro ao adicionar listener:", e);
+            }
+
+            localLog("--- Teste de Canvas Isolado Concluído (Debug) ---", 'test');
             if (runBtnEl) runBtnEl.disabled = false; // Reabilita botão no final
         };
 
-        // --- Função chamada pelo botão do Canvas (Modificada) ---
+        // --- Função chamada pelo botão do Canvas (Debug) ---
         const runCanvasTest = async () => {
-            // *** Obter elementos AQUI, quando o botão é clicado ***
+            // Tenta pegar o div de output primeiro para poder logar nele
             const canvasOutputDiv = document.getElementById('output-canvas');
+            // Log inicial (usa a função global logCanvas_debug)
+            logCanvas_debug(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas' clicado.", "info");
+
+            // *** Obter elementos AQUI, com logs individuais ***
+            console.log("Canvas Debug: Tentando obter elementos..."); // Log console
+
             const canvasRunBtn = document.getElementById('runCanvasBtn');
+            logCanvas_debug(canvasOutputDiv, `runCanvasBtn encontrado? ${!!canvasRunBtn}`, canvasRunBtn ? 'good' : 'error');
+            console.log(`Canvas Debug: runCanvasBtn:`, canvasRunBtn);
+
             const canvasElement = document.getElementById('interactive-canvas');
+            logCanvas_debug(canvasOutputDiv, `interactive-canvas encontrado? ${!!canvasElement}`, canvasElement ? 'good' : 'error');
+            console.log(`Canvas Debug: interactive-canvas:`, canvasElement);
+
             const coordStatusDivCanvas = document.getElementById('canvas-coord-status');
+            logCanvas_debug(canvasOutputDiv, `canvas-coord-status encontrado? ${!!coordStatusDivCanvas}`, coordStatusDivCanvas ? 'good' : 'error');
+            console.log(`Canvas Debug: canvas-coord-status:`, coordStatusDivCanvas);
 
-            // Log inicial (usa a função global logCanvas, passando o div encontrado)
-            logCanvas(canvasOutputDiv, "Botão 'Iniciar Teste de Canvas' clicado.", "info");
-
-            // Verifica se os elementos foram encontrados *agora*
+            // Verifica se TODOS os elementos essenciais foram encontrados
             if (!canvasOutputDiv || !canvasRunBtn || !canvasElement || !coordStatusDivCanvas) {
-                const errorMsg = "ERRO FATAL: Elementos HTML essenciais para o Canvas não encontrados AO CLICAR NO BOTÃO.";
-                logCanvas(canvasOutputDiv, errorMsg, "error"); // Tenta logar no div se ele existir
-                console.error(errorMsg, {canvasOutputDiv, canvasRunBtn, canvasElement, coordStatusDivCanvas});
-                // Não desabilita/reabilita o botão aqui se ele não foi encontrado
-                return;
+                const errorMsg = "ERRO FATAL: Um ou mais elementos HTML essenciais para o Canvas não foram encontrados! Verifique os logs acima e a consola.";
+                logCanvas_debug(canvasOutputDiv, errorMsg, "error"); // Tenta logar no div se ele existir
+                console.error(errorMsg);
+                // Não desabilita/reabilita o botão se ele não foi encontrado
+                return; // Aborta
             }
 
-            // Desabilita o botão encontrado
+            // Desabilita o botão se foi encontrado
             if (canvasRunBtn) canvasRunBtn.disabled = true;
 
             // Chama a função de teste principal, passando os elementos encontrados
-            await testComprehensiveCanvasIsolated(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn);
+            logCanvas_debug(canvasOutputDiv, "Elementos encontrados, iniciando teste principal do canvas...", "info");
+            await testComprehensiveCanvasIsolated_debug(canvasElement, canvasOutputDiv, coordStatusDivCanvas, canvasRunBtn);
         };
 
-         // --- Inicialização e Limpeza (Script 2 - Removido getElementById daqui) ---
-         // O bloco try-catch que pegava elementos foi removido daqui.
+         // --- Inicialização e Limpeza (Script 2 - Debug) ---
+         // Nenhuma busca de elemento aqui.
 
-         // Limpeza listeners ao sair (Mantido)
+         // Limpeza listeners ao sair (Mantido, usa nomes _debug)
          window.addEventListener('unload', () => {
-             // Precisa encontrar o canvasElement de novo ou assumir que a referência global (se ainda existir) é válida
-             // Para simplificar, vamos tentar pegar de novo, mas isso pode falhar se o DOM já estiver sendo desmontado
              try {
                  const el = document.getElementById('interactive-canvas');
                  if (el) {
-                    if(canvasClickListenerCanvas) el.removeEventListener('click',canvasClickListenerCanvas);
-                    if(canvasMoveListenerCanvas) el.removeEventListener('mousemove',canvasMoveListenerCanvas);
-                    console.log("[Canvas Unload] Listeners removidos.");
+                    if(canvasClickListenerCanvas_debug) el.removeEventListener('click',canvasClickListenerCanvas_debug);
+                    if(canvasMoveListenerCanvas_debug) el.removeEventListener('mousemove',canvasMoveListenerCanvas_debug); // Tenta remover mesmo que não tenhamos adicionado na versão debug
+                    console.log("[Canvas Unload] Listeners removidos (tentativa).");
                  }
              } catch(e) {
                  console.warn("[Canvas Unload] Erro ao remover listeners:", e);
              }
          });
-         // --- FIM DO SCRIPT 2 ---
+         // --- FIM DO SCRIPT 2 (Debug) ---
     </script>
 
 </body>
