@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.6)</title>
+    <title>Suite de Testes Focada em Exploit (v19.7)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -43,27 +43,28 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.6)</h1>
-    <p>Foco: OOB Write (Corrupção Adjacente), PP Avançada/Gadgets.</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.6)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.7)</h1>
+    <p>Foco: PP Avançada/Gadgets, Tentativa de Exploração de Gadget PP (map).</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.7)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.6) ---
+        // --- Script Focado em Exploit (v19.7) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
         let findings = []; // Array único para todos os findings
+        let ppGadgetsBroken = {}; // v19.7: Armazena quais gadgets quebraram
 
         const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
         // Função log (v19.4)
         const log = (message, type = 'info', funcName = '') => {
             let keepLog = IMPORTANT_LOG_TYPES.includes(type);
-             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado')) { keepLog = true; } } // Added more 'good' cases
+             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado') || lowerMsg.includes('restaurado') || lowerMsg.includes('não quebrado') || lowerMsg.includes('executada com sucesso')) { keepLog = true; } } // Added more 'good' cases
             if (!keepLog) return;
             if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if (['vuln', 'critical', 'escalation', 'ptr', 'leak'].includes(type)) { findings.push({ type, funcName, message: sanitizedMessage, time: timestamp }); } if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
         };
@@ -71,228 +72,143 @@
         // Funções Helper (v19.0)
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
         const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
-        // Removidas funções de leak OOB Read, pois não funcionaram e não são o foco aqui
 
-        // --- Testes Prioritários (v19.6) ---
+        // --- Testes Prioritários (v19.7) ---
 
-        // 1. v19.6: Novo Teste - OOB Write para Corrupção Adjacente
-        const testAdjacentCorruption = async () => {
-            const FNAME = 'testAdjacentCorruption';
-            log("--- Iniciando Teste 1: OOB Write para Corrupção Adjacente ---", 'test', FNAME);
-            const controlBufferSize = 64;
-            const allocationSize = controlBufferSize + 256; // Buffer de controle
-            const baseOffsetInBuffer = 128;
-            const oobWriteValue32 = 0xDEADBEEF; // Valor 32-bit a escrever
-            const oobWriteValue64_High = 0x41424344; // ABCD
-            const oobWriteValue64_Low = 0x45464748;  // EFGH
-            let controlBuffer = null;
-            let dv = null;
-            let oobWriteSuccessCount = 0;
-            let adjacentHit = false;
-
-            // Offsets OOB (relativos ao fim do buffer de controle) para tentar escrever
-            // Inclui offsets pequenos (logo após) e maiores
-            const oobOffsetsToWrite = [-8, -4, 0, 4, 8, 16, 32, 64, 128];
-
-            for (let attempt = 0; attempt < 5; attempt++) { // Tentar algumas vezes com alocações diferentes
-                log(`Tentativa ${attempt + 1}/5...`, 'subtest', FNAME);
-                let targetArrayBuffer = null;
-                let targetFloatArray = null;
-                let targetObject = null;
-
-                try {
-                    // --- Alocar Buffer de Controle e Alvos Adjacentes ---
-                    controlBuffer = new ArrayBuffer(allocationSize);
-                    dv = new DataView(controlBuffer);
-                    for(let i=0; i<controlBuffer.byteLength; i++) dv.setUint8(i, 0xCC); // Padrão CC
-
-                    // Alocar alvos imediatamente após
-                    targetArrayBuffer = new ArrayBuffer(128); // Alvo 1: Outro ArrayBuffer
-                    targetFloatArray = new Float64Array(16);  // Alvo 2: Float64Array
-                    targetObject = { name: "target", value: 0xBBBBBBBB }; // Alvo 3: Objeto simples
-
-                    // Preencher alvos com padrões conhecidos
-                    try { new Uint8Array(targetArrayBuffer).fill(0xAA); } catch(e){}
-                    try { targetFloatArray.fill(1.2345 + attempt); } catch(e){}
-
-                    await PAUSE(SHORT_PAUSE); // Pausa após alocações
-
-                    // --- Tentar Escrita OOB em Vários Offsets ---
-                    log(`Tentando escrita OOB em ${oobOffsetsToWrite.length} offsets...`, 'info', `${FNAME}-Attempt${attempt+1}`);
-                    let currentAttemptHit = false;
-
-                    for (const offset of oobOffsetsToWrite) {
-                        const targetWriteAddr32 = baseOffsetInBuffer + controlBufferSize + offset;
-                        const targetWriteAddr64 = targetWriteAddr32; // Assumir alinhamento para 64 bits
-                        const relOffsetStr = `ctrlEnd+${offset}`;
-                        let write32OK = false;
-                        let write64OK = false;
-
-                        // Tentar escrita 32-bit
-                        try {
-                            if(targetWriteAddr32 >= 0 && targetWriteAddr32 + 4 <= controlBuffer.byteLength){
-                                dv.setUint32(targetWriteAddr32, oobWriteValue32, true);
-                                oobWriteSuccessCount++;
-                                write32OK = true;
-                                // Restaurar imediatamente para isolar o teste de 64 bits
-                                try { dv.setUint32(targetWriteAddr32, 0xCCCCCCCC, true); } catch(e){}
-                            }
-                        } catch(e) { log(` -> Escrita OOB U32 FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`); }
-
-                        // Tentar escrita 64-bit
-                        try {
-                            if(targetWriteAddr64 >= 0 && targetWriteAddr64 + 8 <= controlBuffer.byteLength){
-                                dv.setUint32(targetWriteAddr64 + 4, oobWriteValue64_High, true); // High
-                                dv.setUint32(targetWriteAddr64, oobWriteValue64_Low, true);     // Low
-                                oobWriteSuccessCount++;
-                                write64OK = true;
-                                // Restaurar imediatamente
-                                try { dv.setUint32(targetWriteAddr64 + 4, 0xCCCCCCCC, true); } catch(e){}
-                                try { dv.setUint32(targetWriteAddr64, 0xCCCCCCCC, true); } catch(e){}
-                            }
-                        } catch(e) { log(` -> Escrita OOB U64 FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`); }
-
-                        if (write32OK || write64OK) {
-                           // Se a escrita OOB funcionou, agora checamos os alvos adjacentes
-                           // É mais provável que a escrita tenha ocorrido *durante* o dv.setUint32/64
-                           // Então, re-escrevemos e verificamos imediatamente
-
-                           // Re-escrever 32-bit e verificar
-                           if(targetWriteAddr32 >= 0 && targetWriteAddr32 + 4 <= controlBuffer.byteLength){
-                               try {
-                                   dv.setUint32(targetWriteAddr32, oobWriteValue32, true);
-                                   // Verificar Alvo 1 (ArrayBuffer)
-                                   if (targetArrayBuffer.byteLength !== 128) { log(`---> VULN: targetArrayBuffer.byteLength CORROMPIDO para ${targetArrayBuffer.byteLength} por escrita OOB @ ${relOffsetStr}!`, 'critical', FNAME); currentAttemptHit = true; }
-                                   // Verificar Alvo 3 (Objeto)
-                                   if (targetObject.value === oobWriteValue32) { log(`---> VULN: targetObject.value CORROMPIDO para ${toHex(oobWriteValue32)} por escrita OOB @ ${relOffsetStr}!`, 'critical', FNAME); currentAttemptHit = true; }
-                                   // Restaurar
-                                   try { dv.setUint32(targetWriteAddr32, 0xCCCCCCCC, true); } catch(e){}
-                               } catch(e){}
-                           }
-
-                           // Re-escrever 64-bit e verificar
-                           if(targetWriteAddr64 >= 0 && targetWriteAddr64 + 8 <= controlBuffer.byteLength){
-                               try {
-                                   dv.setUint32(targetWriteAddr64 + 4, oobWriteValue64_High, true);
-                                   dv.setUint32(targetWriteAddr64, oobWriteValue64_Low, true);
-                                   // Verificar Alvo 2 (Float64Array) - Checar se o primeiro elemento foi sobrescrito
-                                   if (targetFloatArray[0] !== (1.2345 + attempt)) { log(`---> VULN: targetFloatArray[0] CORROMPIDO (era ${1.2345+attempt}, virou ${targetFloatArray[0]}) por escrita OOB @ ${relOffsetStr}!`, 'critical', FNAME); currentAttemptHit = true; }
-                                   // Restaurar
-                                   try { dv.setUint32(targetWriteAddr64 + 4, 0xCCCCCCCC, true); } catch(e){}
-                                   try { dv.setUint32(targetWriteAddr64, 0xCCCCCCCC, true); } catch(e){}
-                               } catch(e){}
-                           }
-                        }
-                        if (currentAttemptHit) {
-                            adjacentHit = true; // Marcar que houve sucesso em alguma tentativa
-                            log(`   -> Corrupção adjacente detectada na tentativa ${attempt + 1} com offset ${offset}!`, 'vuln', FNAME);
-                             break; // Parar de testar offsets nesta tentativa se já achou corrupção
-                        }
-                        await PAUSE(5); // Pausa entre offsets
-                    } // Fim loop offsets
-
-                } catch (e) {
-                    log(`Erro na tentativa ${attempt + 1}: ${e.message}`, 'error', FNAME);
-                } finally {
-                    // Limpar referências para ajudar GC
-                    controlBuffer = null; dv = null;
-                    targetArrayBuffer = null; targetFloatArray = null; targetObject = null;
-                }
-                if (adjacentHit) break; // Parar tentativas se já houve sucesso
-                await PAUSE(SHORT_PAUSE); // Pausa entre tentativas
-            } // Fim loop tentativas
-
-            if (adjacentHit) {
-                log(`SUCESSO: Escrita OOB conseguiu corromper dados/metadados de objeto adjacente!`, 'vuln', FNAME);
-                log(` ---> *** ALERTA: Primitivo Relevante (OOB Write com Efeito Observável no Heap) ***`, 'escalation', FNAME);
-            } else {
-                if (oobWriteSuccessCount > 0) {
-                     log(`Escrita OOB realizada ${oobWriteSuccessCount} vezes, mas nenhuma corrupção adjacente detectada.`, 'warn', FNAME);
-                } else {
-                     log(`Escrita OOB falhou/bloqueada. Nenhuma corrupção adjacente detectada.`, 'good', FNAME);
-                }
-            }
-
-            log(`--- Teste 1 Concluído (Corrupção Adjacente: ${adjacentHit ? 'Sim' : 'Não'}) ---`, 'test', FNAME);
-            return adjacentHit;
-        };
-
-
-        // Teste 2: PP Avançada / Gadgets (Inalterado v19.0 - Renumerado)
+        // Teste 1: PP Avançada / Gadgets (Modificado para armazenar estado)
         const testAdvancedPP = async () => {
             const FNAME = 'testAdvancedPP';
-            log("--- Iniciando Teste 2: PP Avançado (Gadgets++) ---", 'test', FNAME);
+            log("--- Iniciando Teste 1: PP Avançado (Gadgets++) ---", 'test', FNAME);
+            ppGadgetsBroken = {}; // Limpar estado anterior
             const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].filter(()=>{}); return null;} catch(e){ return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].forEach(()=>{}); return null;} catch(e){ return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[1,2].join(); return null;} catch(e){ return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
             const testValue = "PP_Adv_Polluted_" + Date.now();
             let successCount = 0; let gadgetCount = 0; let gadgetMessages = [];
-            for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
-            log(`--- Teste 2 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
+            for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++;
+                                ppGadgetsBroken[`${targetProtoName}.${prop}`] = true; // v19.7: Marcar gadget como quebrado
+                                if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
+            log(`--- Teste 1 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
             if (gadgetCount > 0) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}`, 'critical', FNAME); }
             await PAUSE();
         };
 
-        // Teste 3: PP Hijack (mantido para verificar interação, mesmo sem leak útil)
-        const testPPJsonHijackInteraction = async () => {
-            const FNAME = 'testPPJsonHijackInteraction';
-            log("--- Iniciando Teste 3: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME);
-            const orig = JSON.stringify; let okH = false; let okL = false; let okR = false;
-            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type === 'U64' ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : l.type === 'F64_SPRAY' ? `F64_SPRAY H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : l.type === 'U32_WASM?' ? `U32_WASM? ${toHex(l.low)} @${l.offset}` : l.type === 'U64_WASM?' ? `U64_WASM? H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : `U32 ${toHex(l.low)} @${l.offset}`; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK (Tecnicamente).`, 'info', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 3: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
-            log(`--- Teste 3 Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME);
-            return okR && okL;
+        // Teste 2: v19.7: Tentativa de Exploração de Gadget PP (Array.map)
+        const testPPGadgetExploitAttempt = async () => {
+            const FNAME = 'testPPGadgetExploitAttempt';
+            log("--- Iniciando Teste 2: Tentativa de Exploração de Gadget PP (Array.map) ---", 'test', FNAME);
+
+            // Verificar se o gadget 'map' foi detectado como quebrado no teste anterior
+            if (!ppGadgetsBroken['Array.map']) {
+                log("Gadget Array.map não foi detectado como quebrado no Teste 1. Pulando exploração.", 'good', FNAME);
+                log("--- Teste 2 Concluído (Pulado) ---", 'test', FNAME);
+                return;
+            }
+
+            const originalMap = Array.prototype.map; // Salvar original
+            let hijackSuccessful = false;
+            let controlVariable = "Original"; // Variável para tentar modificar
+
+            try {
+                // Definir nossa função maliciosa/de teste
+                const hijackedMapFunction = function(callback, thisArg) {
+                    log("===> FUNÇÃO Array.map SEQUESTRADA EXECUTADA! <===", 'vuln', FNAME);
+                    hijackSuccessful = true;
+
+                    try {
+                        log(` -> Argumentos recebidos: callback=${typeof callback}, thisArg=${typeof thisArg}`, 'info', FNAME);
+                        log(` -> Valor de 'this' dentro do hijack: ${Object.prototype.toString.call(this)}`, 'info', FNAME);
+
+                        // Tentar modificar uma variável externa para provar controle
+                        controlVariable = "Modificado pelo Hijack!";
+                        log(` -> Variável de controle modificada.`, 'good', FNAME);
+
+                        // Tentar retornar algo (embora o chamador possa esperar um array)
+                        return "Hijacked Result";
+                    } catch (e) {
+                        log(` -> Erro dentro da função sequestrada: ${e.message}`, 'error', FNAME);
+                    }
+                    // Não chamar o originalMap aqui, o objetivo é sequestrar
+                };
+
+                // Poluir o protótipo com nossa função
+                log("Poluindo Array.prototype.map com função controlada...", 'info', FNAME);
+                Array.prototype.map = hijackedMapFunction;
+
+                // Ativar o gadget chamando map explicitamente
+                log("Chamando [1, 2].map(x => x)...", 'info', FNAME);
+                let result;
+                try {
+                    result = [1, 2].map(x => x); // Chamada que ativará o hijack
+                    log(` -> Chamada para map retornou: ${result}`, 'info', FNAME);
+                    if (result === "Hijacked Result") {
+                         log(` -> Retorno esperado da função sequestrada recebido!`, 'vuln', FNAME);
+                    }
+                } catch (e) {
+                    // Se a nossa função causar um erro inesperado
+                    log(` -> Erro ao chamar map sequestrado: ${e.message}`, 'error', FNAME);
+                }
+
+                // Verificar se a variável de controle foi modificada
+                await PAUSE(SHORT_PAUSE); // Dar tempo para a modificação ocorrer
+                if (controlVariable === "Modificado pelo Hijack!") {
+                    log(`VULN: Variável de controle foi modificada pela função sequestrada!`, 'vuln', FNAME);
+                    log(` ---> *** ALERTA: Controle de fluxo obtido via PP Gadget (Array.map)! ***`, 'escalation', FNAME);
+                } else {
+                    log(`AVISO: Variável de controle não foi modificada como esperado.`, 'warn', FNAME);
+                }
+
+            } catch (e) {
+                log(`Erro fatal durante Teste 2: ${e.message}`, 'error', FNAME);
+                console.error(e);
+            } finally {
+                // Restaurar SEMPRE
+                if (Array.prototype.map !== originalMap) {
+                    Array.prototype.map = originalMap;
+                    log("Array.prototype.map restaurado.", 'good', 'Cleanup');
+                } else {
+                     log("Array.prototype.map já estava restaurado ou não foi alterado.", 'info', 'Cleanup');
+                }
+            }
+            log(`--- Teste 2 Concluído (Hijack Executado: ${hijackSuccessful}) ---`, 'test', FNAME);
         };
 
 
-        // --- Função Principal de Execução (v19.6) ---
+        // Teste 3: PP Hijack (mantido apenas para demonstração, sem foco em leak)
+        const testPPJsonHijackInteraction = async () => {
+            const FNAME = 'testPPJsonHijackInteraction';
+            log("--- Iniciando Teste 3: PP Hijack (JSON.stringify) ---", 'test', FNAME);
+            const orig = JSON.stringify; let okH = false; let okR = false;
+            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { log(` -> Tentativa de ler leak OOB (deve ser nulo nesta versão). Valor: ${leakedValueFromOOB}`, 'info', FNAME); } catch(ie) {} const hijackReturnValue = '{"hijacked": true}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 3: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
+            log(`--- Teste 3 Concluído (Hijack: ${okH}, Retorno: ${okR}) ---`, 'test', FNAME);
+            return okR;
+        };
+
+
+        // --- Função Principal de Execução (v19.7) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
             if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
             if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.6) ====", 'test', FNAME);
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.7) ====", 'test', FNAME);
 
-            await testAdjacentCorruption(); // Teste 1: OOB Write Adjacente
+            await testAdvancedPP(); // Teste 1: Confirmar gadgets PP
             await PAUSE(MEDIUM_PAUSE);
 
-            await testAdvancedPP(); // Teste 2: PP Avançada
+            await testPPGadgetExploitAttempt(); // Teste 2: Tentar explorar gadget map
             await PAUSE(MEDIUM_PAUSE);
 
-            await testPPJsonHijackInteraction(); // Teste 3: Interação Hijack
+            await testPPJsonHijackInteraction(); // Teste 3: Confirmar hijack simples
             await PAUSE(MEDIUM_PAUSE);
-
-            // Removidos testes de leak/metadata/arbitrary R/W que não funcionaram
 
             log("\n==== GERANDO SUMÁRIO FINAL ====", 'test', FNAME);
             if (summaryDiv) {
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
                 if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.6) ====", 'test', FNAME);
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.7) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
 
 </body>
 </html>
-```
-
-**Resumo das Mudanças (v19.6):**
-
-1.  **Novo Teste: `testAdjacentCorruption` (Teste 1):**
-    * Tenta alocar um buffer de controle seguido por um `ArrayBuffer`, um `Float64Array` e um objeto simples.
-    * Realiza escritas OOB (32 e 64 bits) a partir do buffer de controle em vários offsets.
-    * Após cada escrita OOB *potencial*, verifica se os dados ou metadados dos objetos adjacentes foram alterados (ex: `targetArrayBuffer.byteLength`, `targetObject.value`, `targetFloatArray[0]`).
-    * Loga `VULN`/`CRITICAL` se detectar corrupção.
-    * Repete o processo algumas vezes para variar o layout da memória.
-2.  **Testes Removidos:** `testOOBReadInfoLeak`, `testWasmMemoryLeak`, `testOOBWriteMetadata`, `testArbitraryRW` foram removidos, pois não estavam produzindo resultados úteis e complicavam o script.
-3.  **Testes Mantidos:** `testAdvancedPP` (Teste 2) e `testPPJsonHijackInteraction` (Teste 3) foram mantidos. O teste de hijack agora não terá um leak útil para ler, mas ainda confirma a capacidade de sequestro.
-4.  **Ordem e Numeração:** Atualizada para a nova sequência de 3 testes.
-5.  **Versionamento:** Atualizado para v19.6.
-
-Execute esta versão. O foco é totalmente no **Teste 1 (`testAdjacentCorruption`)**. Procure por logs como:
-
-* `VULN: targetArrayBuffer.byteLength CORROMPIDO...`
-* `VULN: targetObject.value CORROMPIDO...`
-* `VULN: targetFloatArray[0] CORROMPIDO...`
-* `SUCESSO: Escrita OOB conseguiu corromper dados/metadados de objeto adjacente!`
-
-Se algum desses aparecer, significa que a escrita OOB simples, mesmo sem um info leak prévio, conseguiu ter um efeito observável e potencialmente controlável no he
