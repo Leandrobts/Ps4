@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.7)</title>
+    <title>Suite de Testes Focada em Exploit (v19.8)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -43,28 +43,29 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.7)</h1>
-    <p>Foco: PP Avançada/Gadgets, Tentativa de Exploração de Gadget PP (map).</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.7)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.8)</h1>
+    <p>Foco: PP Avançada/Gadgets, Tentativa de Info Leak via Hijack de Function.call.</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.8)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.7) ---
+        // --- Script Focado em Exploit (v19.8) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
         let findings = []; // Array único para todos os findings
-        let ppGadgetsBroken = {}; // v19.7: Armazena quais gadgets quebraram
+        let ppGadgetsBroken = {}; // Armazena quais gadgets quebraram
+        let potentialLeakFromHijack = null; // v19.8: Armazena potencial leak do hijack
 
         const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
-        // Função log (v19.4)
+        // Função log (v19.7)
         const log = (message, type = 'info', funcName = '') => {
             let keepLog = IMPORTANT_LOG_TYPES.includes(type);
-             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado') || lowerMsg.includes('restaurado') || lowerMsg.includes('não quebrado') || lowerMsg.includes('executada com sucesso')) { keepLog = true; } } // Added more 'good' cases
+             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado') || lowerMsg.includes('restaurado') || lowerMsg.includes('não quebrado') || lowerMsg.includes('executada com sucesso') || lowerMsg.includes('nenhum leak encontrado') || lowerMsg.includes('não foi possível analisar')) { keepLog = true; } } // Added more 'good' cases
             if (!keepLog) return;
             if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if (['vuln', 'critical', 'escalation', 'ptr', 'leak'].includes(type)) { findings.push({ type, funcName, message: sanitizedMessage, time: timestamp }); } if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
         };
@@ -73,106 +74,144 @@
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
         const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
 
-        // --- Testes Prioritários (v19.7) ---
+        // --- Testes Prioritários (v19.8) ---
 
-        // Teste 1: PP Avançada / Gadgets (Modificado para armazenar estado)
+        // Teste 1: PP Avançada / Gadgets (v19.7 - Armazena estado)
         const testAdvancedPP = async () => {
             const FNAME = 'testAdvancedPP';
             log("--- Iniciando Teste 1: PP Avançado (Gadgets++) ---", 'test', FNAME);
             ppGadgetsBroken = {}; // Limpar estado anterior
-            const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].filter(()=>{}); return null;} catch(e){ return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].forEach(()=>{}); return null;} catch(e){ return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[1,2].join(); return null;} catch(e){ return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
+            const propsToPollute = [ /* ... Lista completa de propsToPollute ... */ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].filter(()=>{}); return null;} catch(e){ return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].forEach(()=>{}); return null;} catch(e){ return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[1,2].join(); return null;} catch(e){ return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
             const testValue = "PP_Adv_Polluted_" + Date.now();
             let successCount = 0; let gadgetCount = 0; let gadgetMessages = [];
-            for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++;
-                                ppGadgetsBroken[`${targetProtoName}.${prop}`] = true; // v19.7: Marcar gadget como quebrado
-                                if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
+            for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; ppGadgetsBroken[`${targetProtoName}.${prop}`] = true; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
             log(`--- Teste 1 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
             if (gadgetCount > 0) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}`, 'critical', FNAME); }
             await PAUSE();
         };
 
-        // Teste 2: v19.7: Tentativa de Exploração de Gadget PP (Array.map)
-        const testPPGadgetExploitAttempt = async () => {
-            const FNAME = 'testPPGadgetExploitAttempt';
-            log("--- Iniciando Teste 2: Tentativa de Exploração de Gadget PP (Array.map) ---", 'test', FNAME);
+        // Teste 2: v19.8: Tentativa de Info Leak via Hijack de Function.call
+        const testPPGadgetLeakAttempt = async () => {
+            const FNAME = 'testPPGadgetLeakAttempt';
+            log("--- Iniciando Teste 2: Tentativa de Info Leak via Hijack (Function.call) ---", 'test', FNAME);
+            potentialLeakFromHijack = null; // Resetar leak
 
-            // Verificar se o gadget 'map' foi detectado como quebrado no teste anterior
-            if (!ppGadgetsBroken['Array.map']) {
-                log("Gadget Array.map não foi detectado como quebrado no Teste 1. Pulando exploração.", 'good', FNAME);
+            // Verificar se o gadget 'call' foi detectado como quebrado no teste anterior
+            if (!ppGadgetsBroken['Function.call']) {
+                log("Gadget Function.call não foi detectado como quebrado no Teste 1. Pulando exploração.", 'good', FNAME);
                 log("--- Teste 2 Concluído (Pulado) ---", 'test', FNAME);
                 return;
             }
 
-            const originalMap = Array.prototype.map; // Salvar original
-            let hijackSuccessful = false;
-            let controlVariable = "Original"; // Variável para tentar modificar
+            const originalCall = Function.prototype.call; // Salvar original
+            let hijackExecutedCount = 0;
+            let leakFound = false;
 
             try {
-                // Definir nossa função maliciosa/de teste
-                const hijackedMapFunction = function(callback, thisArg) {
-                    log("===> FUNÇÃO Array.map SEQUESTRADA EXECUTADA! <===", 'vuln', FNAME);
-                    hijackSuccessful = true;
+                // Definir nossa função maliciosa/de análise
+                const hijackedCallFunction = function(thisArg, ...args) {
+                    hijackExecutedCount++;
+                    // Logar apenas as primeiras N chamadas para não poluir demais
+                    if (hijackExecutedCount <= 10) {
+                        log(`===> Function.call SEQUESTRADO! Chamada #${hijackExecutedCount} <===`, 'vuln', FNAME);
+                        try {
+                            // Logar 'this' (a função original sendo chamada)
+                            let thisStr = '[Não foi possível analisar this]';
+                            try { thisStr = this.toString().substring(0, 100) + (this.toString().length > 100 ? '...' : ''); } catch(e){}
+                            log(` -> 'this' (Função Original): ${thisStr}`, 'info', FNAME);
 
-                    try {
-                        log(` -> Argumentos recebidos: callback=${typeof callback}, thisArg=${typeof thisArg}`, 'info', FNAME);
-                        log(` -> Valor de 'this' dentro do hijack: ${Object.prototype.toString.call(this)}`, 'info', FNAME);
+                            // Logar 'thisArg' (o objeto no qual a função será chamada)
+                            let thisArgStr = '[Não foi possível analisar thisArg]';
+                            try { thisArgStr = Object.prototype.toString.call(thisArg); } catch(e){}
+                            log(` -> 'thisArg': ${thisArgStr}`, 'info', FNAME);
 
-                        // Tentar modificar uma variável externa para provar controle
-                        controlVariable = "Modificado pelo Hijack!";
-                        log(` -> Variável de controle modificada.`, 'good', FNAME);
+                            // Logar outros argumentos
+                            if (args && args.length > 0) {
+                                log(` -> Outros Args (${args.length}): [${args.map(a => typeof a).join(', ')}]`, 'info', FNAME);
+                            }
 
-                        // Tentar retornar algo (embora o chamador possa esperar um array)
-                        return "Hijacked Result";
-                    } catch (e) {
-                        log(` -> Erro dentro da função sequestrada: ${e.message}`, 'error', FNAME);
+                            // --- Tentar encontrar leaks ---
+                            // Simplista: Verificar se alguma propriedade parece um ponteiro 64 bits
+                            // (Isso é muito heurístico e propenso a falsos positivos/negativos)
+                            const checkObjectForLeak = (obj, prefix = '') => {
+                                if (leakFound || !obj || typeof obj !== 'object') return;
+                                for (const key in obj) {
+                                    // Evitar recursão infinita e propriedades herdadas problemáticas
+                                    if (key === '__proto__' || key === 'constructor' || !Object.prototype.hasOwnProperty.call(obj, key)) continue;
+                                    try {
+                                        const value = obj[key];
+                                        if (typeof value === 'number' && value > 0x100000) { // Procurar números grandes (potenciais partes de ponteiros)
+                                            log(`  -> ${prefix}${key}: Potential numeric leak? ${toHex(value)}`, 'leak', FNAME);
+                                            potentialLeakFromHijack = value; // Armazena o último encontrado
+                                            leakFound = true;
+                                        }
+                                        // Poderia adicionar verificações mais complexas aqui (ex: checar se é um ArrayBuffer, etc.)
+                                    } catch(e) { /* Ignorar erros ao acessar propriedades */ }
+                                }
+                            };
+
+                            if (!leakFound) checkObjectForLeak(this, "'this'.");
+                            if (!leakFound) checkObjectForLeak(thisArg, "'thisArg'.");
+
+                        } catch (e) {
+                            log(` -> Erro dentro da função sequestrada 'call': ${e.message}`, 'error', FNAME);
+                        }
                     }
-                    // Não chamar o originalMap aqui, o objetivo é sequestrar
+                    // Chamar a função original para não quebrar (muito) a aplicação
+                    // CUIDADO: Isso pode causar recursão infinita se a própria implementação de 'call' usar 'call'
+                    // Em um exploit real, isso seria feito com mais cuidado ou substituído completamente.
+                    try {
+                         return originalCall.apply(this, [thisArg, ...args]);
+                    } catch(e) {
+                         if (hijackExecutedCount <= 10) log(` -> Erro ao chamar originalCall.apply: ${e.message}`, 'warn', FNAME);
+                         // Tentar retornar algo neutro se a chamada original falhar
+                         return undefined;
+                    }
                 };
 
                 // Poluir o protótipo com nossa função
-                log("Poluindo Array.prototype.map com função controlada...", 'info', FNAME);
-                Array.prototype.map = hijackedMapFunction;
+                log("Poluindo Function.prototype.call com função controlada...", 'info', FNAME);
+                Function.prototype.call = hijackedCallFunction;
 
-                // Ativar o gadget chamando map explicitamente
-                log("Chamando [1, 2].map(x => x)...", 'info', FNAME);
-                let result;
+                // Ativar o gadget chamando call explicitamente em uma função simples
+                log("Chamando (()=>{}).call(null)...", 'info', FNAME);
                 try {
-                    result = [1, 2].map(x => x); // Chamada que ativará o hijack
-                    log(` -> Chamada para map retornou: ${result}`, 'info', FNAME);
-                    if (result === "Hijacked Result") {
-                         log(` -> Retorno esperado da função sequestrada recebido!`, 'vuln', FNAME);
-                    }
+                    const dummyFunc = () => {};
+                    dummyFunc.call(null); // Chamada que ativará o hijack
+                    log(` -> Chamada explícita para call concluída.`, 'good', FNAME);
                 } catch (e) {
-                    // Se a nossa função causar um erro inesperado
-                    log(` -> Erro ao chamar map sequestrado: ${e.message}`, 'error', FNAME);
+                    log(` -> Erro ao chamar call sequestrado explicitamente: ${e.message}`, 'error', FNAME);
                 }
 
-                // Verificar se a variável de controle foi modificada
-                await PAUSE(SHORT_PAUSE); // Dar tempo para a modificação ocorrer
-                if (controlVariable === "Modificado pelo Hijack!") {
-                    log(`VULN: Variável de controle foi modificada pela função sequestrada!`, 'vuln', FNAME);
-                    log(` ---> *** ALERTA: Controle de fluxo obtido via PP Gadget (Array.map)! ***`, 'escalation', FNAME);
-                } else {
-                    log(`AVISO: Variável de controle não foi modificada como esperado.`, 'warn', FNAME);
-                }
+                // Forçar algumas operações que podem usar .call internamente (Exemplos)
+                log("Forçando algumas operações internas (podem usar .call)...", 'info', FNAME);
+                try { [1,2,3].forEach(x => x+1); } catch(e){} // forEach pode usar call
+                try { document.createElement('div').appendChild(document.createElement('span')); } catch(e){} // DOM pode usar call
+
+                await PAUSE(MEDIUM_PAUSE); // Dar tempo para chamadas internas ocorrerem
 
             } catch (e) {
                 log(`Erro fatal durante Teste 2: ${e.message}`, 'error', FNAME);
                 console.error(e);
             } finally {
                 // Restaurar SEMPRE
-                if (Array.prototype.map !== originalMap) {
-                    Array.prototype.map = originalMap;
-                    log("Array.prototype.map restaurado.", 'good', 'Cleanup');
+                if (Function.prototype.call !== originalCall) {
+                    Function.prototype.call = originalCall;
+                    log("Function.prototype.call restaurado.", 'good', 'Cleanup');
                 } else {
-                     log("Array.prototype.map já estava restaurado ou não foi alterado.", 'info', 'Cleanup');
+                     log("Function.prototype.call já estava restaurado ou não foi alterado.", 'info', 'Cleanup');
                 }
             }
-            log(`--- Teste 2 Concluído (Hijack Executado: ${hijackSuccessful}) ---`, 'test', FNAME);
+            log(`--- Teste 2 Concluído (Hijack Executado ${hijackExecutedCount} vezes, Leak Encontrado: ${leakFound}) ---`, 'test', FNAME);
+            if (leakFound) {
+                 log(` ---> *** ALERTA: Potencial Leak encontrado via Hijack de Function.call! Valor: ${toHex(potentialLeakFromHijack)} ***`, 'escalation', FNAME);
+            } else {
+                 log(`Nenhum leak óbvio encontrado nas chamadas interceptadas de Function.call.`, 'good', FNAME);
+            }
         };
 
 
-        // Teste 3: PP Hijack (mantido apenas para demonstração, sem foco em leak)
+        // Teste 3: PP Hijack (mantido apenas para demonstração)
         const testPPJsonHijackInteraction = async () => {
             const FNAME = 'testPPJsonHijackInteraction';
             log("--- Iniciando Teste 3: PP Hijack (JSON.stringify) ---", 'test', FNAME);
@@ -183,18 +222,18 @@
         };
 
 
-        // --- Função Principal de Execução (v19.7) ---
+        // --- Função Principal de Execução (v19.8) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
             if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
             if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.7) ====", 'test', FNAME);
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.8) ====", 'test', FNAME);
 
             await testAdvancedPP(); // Teste 1: Confirmar gadgets PP
             await PAUSE(MEDIUM_PAUSE);
 
-            await testPPGadgetExploitAttempt(); // Teste 2: Tentar explorar gadget map
+            await testPPGadgetLeakAttempt(); // Teste 2: Tentar leak via hijack de call
             await PAUSE(MEDIUM_PAUSE);
 
             await testPPJsonHijackInteraction(); // Teste 3: Confirmar hijack simples
@@ -205,7 +244,7 @@
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
                 if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.7) ====", 'test', FNAME);
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.8) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
