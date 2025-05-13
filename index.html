@@ -2,7 +2,7 @@
 <html>
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes de Vulnerabilidades Direcionada (FW 12.02?)</title>
+    <title>Suite de Testes de Vulnerabilidades Completa (Direcionada FW 12.02?)</title>
     <style>
         /* Estilos CSS (mesmos do script anterior para consistência) */
         body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
@@ -14,12 +14,12 @@
         .log-success { color: lightgreen; font-weight: bold; } .log-asm { color: #c0c0c0; font-style: italic; }
         .src-Main {} .src-Setup {color: #aaa;} .src-Alloc {color: #bbb;} .src-GC {color: #c97;} .src-Leak {color: #daa;} .src-FakeObj {color: #ad7;}
         .src-TestLogic {color: #8bf;} .src-Primitives {color: #ddd;} .src-IntegerOverflow {color: #f9a;} .src-TypeConfusion {color: #af9;}
-        .src-JIT {color: #9fa;} .src-APIAbuse {color: #a9f;}
+        .src-JIT {color: #9fa;} .src-APIAbuse {color: #a9f;} .src-OOBRead {color: #fa0;}
     </style>
 </head>
 <body>
-    <h1>Suite de Testes de Vulnerabilidades Direcionada (FW 12.02?)</h1>
-    <p>Este script inclui a tentativa UAF e testes conceituais. Comentários adicionados indicam onde a análise dos seus arquivos de assembly (FW 12.02) e do PSFree deve ser aplicada.</p>
+    <h1>Suite de Testes de Vulnerabilidades Completa (Direcionada FW 12.02?)</h1>
+    <p>Inclui UAF, Integer Overflow, Type Confusion, JIT, API Abuse, e OOB Read (Info Leak) conceituais. Comentários indicam onde aplicar a análise dos seus arquivos de assembly (FW 12.02) e do PSFree.</p>
     <p><b>Atenção:</b> NENHUM destes são exploits funcionais. Servem como base para SUA pesquisa, DEBUG e MODIFICAÇÃO.</p>
 
     <div class="controls">
@@ -28,18 +28,20 @@
         <button id="runTypeConfusionBtn">3. Rodar Teste Type Confusion</button>
         <button id="runJITBtn">4. Rodar Teste JIT Bug</button>
         <button id="runAPIAbuseBtn">5. Rodar Teste API Abuse (WebGL)</button>
+        <button id="runOOBReadBtn">6. Rodar Teste OOB Read (Info Leak)</button>
         <button id="clearLogBtn">Limpar Log</button>
     </div>
     <div id="output">Logs aparecerão aqui...</div>
 
     <script>
-        // Elementos HTML e funções utilitárias (log, hex, sleep) - Idênticas à resposta anterior
+        // Elementos HTML e funções utilitárias (log, hex, sleep)
         const outputDiv = document.getElementById('output');
         const runUAFBtn = document.getElementById('runUAFBtn');
         const runIntegerOverflowBtn = document.getElementById('runIntegerOverflowBtn');
         const runTypeConfusionBtn = document.getElementById('runTypeConfusionBtn');
         const runJITBtn = document.getElementById('runJITBtn');
         const runAPIAbuseBtn = document.getElementById('runAPIAbuseBtn');
+        const runOOBReadBtn = document.getElementById('runOOBReadBtn');
         const clearLogBtn = document.getElementById('clearLogBtn');
 
         function log(message, type = 'info', source = 'System') {
@@ -77,19 +79,15 @@
             // ArrayBufferContents_m_data: 0x10, // Inferido de JSObjectGetArrayBufferBytesPtr -> [rax+10h]
             // ArrayBufferContents_isWebAssembly: 0x5C, // De JSObjectGetArrayBufferBytesPtr -> [rax+5Ch]
             // ArrayBufferContents_isLocked: 0x5D, // De JSObjectGetArrayBufferBytesPtr -> [rax+5Dh]
-            // ... e outros offsets cruciais do `offset.txt` do PSFree.
-            // Por exemplo: JSC::JSArrayBufferView->m_vector, JSC::JSObject->m_butterfly, etc.
             placeholder: 0x0 // REMOVER ESTE PLACEHOLDER
         };
-        log("AVISO: FW1202_OFFSETS precisam ser preenchidos com valores REAIS da FW 12.02!", 'critical', 'Setup');
-
+        if (Object.keys(FW1202_OFFSETS).length <= 1) { // Checa se apenas o placeholder existe
+             log("ALERTA CRÍTICO: FW1202_OFFSETS precisam ser preenchidos com valores REAIS da FW 12.02 para o Teste UAF funcionar!", 'critical', 'Setup');
+        }
 
         function uaf_setupPrimitives() {
             const FNAME = 'uaf_setupPrimitives'; log("Iniciando setupPrimitives (UAF)...", 'info', FNAME);
             try {
-                // TODO: Escolher um objeto alvo para UAF que interaja com funções como JSC::JSCell::deleteProperty
-                // de uma forma interessante, ou um objeto que, se corrompido, facilite o controle.
-                // O PSFree usava SerializedScriptValue. Analisar WebKit 12.02 para alvos.
                 uaf_leakerObj = new ArrayBuffer(UAF_OBJ_SIZE);
                 uaf_sprayArr = new Array(UAF_NUM_SPRAY_OBJS);
                 log(`Spray array [${UAF_NUM_SPRAY_OBJS}] e leaker (ArrayBuffer ${UAF_OBJ_SIZE} bytes) preparados.`, 'good', FNAME);
@@ -102,59 +100,32 @@
             try { let temp = []; for (let i = 0; i < 100; i++) { temp.push(new ArrayBuffer(1 * 1024 * 1024)); } temp = null; if (typeof WeakSet !== 'undefined') { let ws = new WeakSet(); for(let i=0; i<1000; ++i) ws.add({i});} log("GC (UAF) provavelmente acionada.", 'good', FNAME);
             } catch (e) { log(`Aviso: Erro durante GC (UAF): ${e.message}`, 'warn', FNAME); }
         }
-
-        // TODO: Esta função PRECISA ser implementada com lógica real de leitura de memória,
-        // usando uma primitiva de leitura obtida pelo UAF.
-        // A análise de `JSObjectGetArrayBufferBytesPtr` pode ser útil se o UAF envolver um ArrayBuffer:
-        // se você conseguir corromper os metadados de um AB para satisfazer as verificações
-        // dessa função, você poderia usá-la (ou uma função JS que a chame) para obter um ponteiro direto.
         function uaf_findLeakedPointer() {
-            const FNAME = 'uaf_findLeakedPointer';
-            log("Procurando ponteiro vazado (UAF)...", 'info', FNAME);
-            log("Implementação REAL de uaf_findLeakedPointer é NECESSÁRIA.", 'critical', FNAME);
-            log("Isto envolve iterar pela 'uaf_sprayArr' e usar uma PRIMITIVA DE LEITURA (obtida pelo UAF)", 'asm', FNAME);
-            log("para inspecionar a memória de cada objeto pulverizado, procurando por:", 'asm', FNAME);
-            log("  1. Ponteiros que pareçam válidos (ex: dentro de um range esperado, alinhados).", 'asm', FNAME);
-            log("  2. Metadados de objetos corrompidos de forma específica (ex: um JSCell com tipo alterado).", 'asm', FNAME);
-            log("  Offsets corretos (FW1202_OFFSETS) são essenciais aqui.", 'asm', FNAME);
+            const FNAME = 'uaf_findLeakedPointer'; log("Procurando ponteiro vazado (UAF)...", 'info', FNAME);
+            log("Implementação REAL de uaf_findLeakedPointer é NECESSÁRIA (UAF).", 'critical', FNAME);
+            log("  Isto envolve iterar pela 'uaf_sprayArr' e usar uma PRIMITIVA DE LEITURA (obtida pelo UAF)", 'asm', FNAME);
+            log("  para inspecionar a memória, usando FW1202_OFFSETS corretos.", 'asm', FNAME);
             log("Nenhum ponteiro vazado encontrado (UAF - Lógica Real Necessária).", 'warn', FNAME); return null;
         }
-
-        // TODO: Esta função PRECISA ser implementada com lógica real de escrita de memória,
-        // usando uma primitiva de escrita obtida pelo UAF e o endereço vazado.
         function uaf_createFakeObjectOptimized_v2(address) {
-            const FNAME = 'uaf_createFakeObj';
-            log(`Tentando criar objeto falso (UAF) em ${hex(address)}...`, 'info', FNAME);
-            log("Implementação REAL de uaf_createFakeObjectOptimized_v2 é NECESSÁRIA.", 'critical', FNAME);
-            log("Isto envolve usar uma PRIMITIVA DE ESCRITA (obtida pelo UAF) para escrever bytes", 'asm', FNAME);
-            log(`no endereço ${hex(address)} que simulem uma estrutura de objeto JS válida (JSCell, Butterfly etc.).`, 'asm', FNAME);
-            log("Offsets e valores de estrutura corretos (FW1202_OFFSETS e análise de `JSCell.txt`) são essenciais.", 'asm', FNAME);
+            const FNAME = 'uaf_createFakeObj'; log(`Tentando criar objeto falso (UAF) em ${hex(address)}...`, 'info', FNAME);
+            log("Implementação REAL de uaf_createFakeObjectOptimized_v2 é NECESSÁRIA (UAF).", 'critical', FNAME);
+            log("  Isto envolve usar uma PRIMITIVA DE ESCRITA (obtida pelo UAF) e FW1202_OFFSETS.", 'asm', FNAME);
             log("Criação de objeto falso (UAF - Lógica Real Necessária).", 'warn', FNAME); return null;
         }
-
         async function uaf_attemptAddrofActual() {
-            const FNAME = 'UAF_attemptAddrof';
-            log("Iniciando tentativa de addrof (UAF)...", 'subtest', FNAME);
+            const FNAME = 'UAF_attemptAddrof'; log("Iniciando tentativa de addrof (UAF)...", 'subtest', FNAME);
             log("INFO: Esta função precisa ser adaptada com uma técnica UAF específica para FW 12.02.", 'warn', FNAME);
-            log("INFO: Inspirar-se no `psfree.txt` para a sequência de operações, mas o alvo e o método de trigger UAF precisarão ser diferentes.", 'warn', FNAME);
-
             let success = false; let leakedPtr = null;
             try {
                 log("Fase 1: Setup (UAF)...", 'info', FNAME); if (!uaf_setupPrimitives()) throw new Error("Falha setup (UAF)."); await sleep(100);
                 log("Fase 2: Spray de Heap (UAF)...", 'info', FNAME);
                 for (let i = 0; i < UAF_NUM_SPRAY_OBJS; i++) { try { uaf_sprayArr[i] = uaf_allocateBuffer(UAF_OBJ_SIZE); } catch (e) { log(`Erro spray ${i+1} (UAF), continuando...`, 'warn', FNAME); await sleep(30); } if (i>0 && i%50===0) { log(`Spray ${i}/${UAF_NUM_SPRAY_OBJS} (UAF)...`, 'info', FNAME); await sleep(50); } }
                 log(`Spray (UAF) de ${uaf_sprayArr.filter(Boolean).length} objetos concluído.`, 'good', FNAME); await sleep(100);
-
                 log("Fase 3: Trigger UAF...", 'info', FNAME);
                 log("TODO: Implementar lógica de trigger UAF específica para FW 12.02 aqui.", 'critical', FNAME);
-                log("  Isto pode envolver interações complexas com APIs WebKit específicas,", 'asm', FNAME);
-                log("  deleção de propriedades (ver `JSC::JSCell::deleteProperty` no assembly),", 'asm', FNAME);
-                log("  ou manipulação de iteradores (ver `JSC::iteratorForIterable`).", 'asm', FNAME);
-                let tempRef = uaf_leakerObj; uaf_leakerObj = null; // Simplificação extrema do UAF
-                log("Ref principal a 'uaf_leakerObj' removida (UAF).", 'info', FNAME); await sleep(50);
-                uaf_triggerGCOptimized(); await sleep(100);
-                log("Potencial UAF acionado (ação específica necessária).", 'warn', FNAME); tempRef = null;
-
+                log("  Analisar `JSC::JSCell::deleteProperty` e outras funções de `funcoes especificas.txt`.", 'asm', FNAME);
+                let tempRef = uaf_leakerObj; uaf_leakerObj = null; log("Ref principal a 'uaf_leakerObj' removida (UAF).", 'info', FNAME); await sleep(50); uaf_triggerGCOptimized(); await sleep(100); log("Potencial UAF acionado (ação específica necessária).", 'warn', FNAME); tempRef = null;
                 log("Fase 4: Procurando Vazamento (UAF)...", 'info', FNAME); leakedPtr = uaf_findLeakedPointer();
                 if (leakedPtr) { log(`SUCESSO (POTENCIAL UAF): Ponteiro: ${hex(leakedPtr)}`, 'leak', FNAME); success = true; log("Fase 5: Tentando Objeto Falso (UAF)...", 'info', FNAME); let fakeObj = uaf_createFakeObjectOptimized_v2(leakedPtr); if (fakeObj) { log("SUCESSO (POTENCIAL UAF): Obj Falso!", 'success', FNAME); } else { log("Falha obj falso (UAF).", 'warn', FNAME); }
                 } else { log("FALHA (UAF): Nenhum vazamento.", 'error', FNAME); success = false; }
@@ -162,140 +133,111 @@
             } finally { uaf_sprayArr = []; uaf_leakerObj = null; log(`Status Final (UAF): ${success ? 'SUCESSO (POTENCIAL)' : 'FALHA (ESPERADO SEM LÓGICA REAL)'}`, success ? 'success' : 'error', FNAME); }
         }
 
-
         // --- Teste 2: Integer Overflow/Underflow (Detalhado) ---
         async function testIntegerOverflow() {
-            const FNAME = 'IntegerOverflow';
-            log("Iniciando Teste de Integer Overflow (Detalhado)...", 'subtest', FNAME);
-            try {
+            const FNAME = 'IntegerOverflow'; log("Iniciando Teste de Integer Overflow (Detalhado)...", 'subtest', FNAME);
+            try { /* ... (Lógica do testIntegerOverflow da resposta anterior) ... */
                 log("Tentativa 1: Estouro positivo em tamanho de TypedArray.", 'info', FNAME);
-                let veryLargeSize = Math.pow(2,32); // Pode ser interpretado como 0 ou causar erro.
-                log(`Tentando criar Uint8Array com tamanho problemático: ${hex(veryLargeSize)}`, 'info', FNAME);
-                try {
-                    let ta = new Uint8Array(veryLargeSize);
-                    log(`Uint8Array alocado com tamanho ${ta.length}.`, 'warn', FNAME);
-                } catch (e) { log(`Erro ao alocar Uint8Array (esperado): ${e.message}.`, 'good', FNAME); }
+                let veryLargeSize = Math.pow(2,32); log(`Tentando criar Uint8Array com tamanho problemático: ${hex(veryLargeSize)}`, 'info', FNAME);
+                try { let ta = new Uint8Array(veryLargeSize); log(`Uint8Array alocado com tamanho ${ta.length}.`, 'warn', FNAME); } catch (e) { log(`Erro ao alocar Uint8Array (esperado): ${e.message}.`, 'good', FNAME); }
                 await sleep(50);
-
                 log("Tentativa 2: Estouro de inteiro em cálculo de offset para DataView.", 'info', FNAME);
-                let ab = new ArrayBuffer(1024); let dv = new DataView(ab);
-                let baseOffset = 0x7FFFFFF0; let addition = 0x20;
-                let calculatedOffset_js = baseOffset + addition; // JS numbers são 64-bit float
-                let calculatedOffset_int32 = (baseOffset + addition) | 0; // Força para int32, pode estourar
-                log(`Offset base: ${hex(baseOffset)}, Adição: ${hex(addition)}`, 'info', FNAME);
-                log(`Offset calculado (JS num): ${hex(calculatedOffset_js)}`, 'info', FNAME);
-                log(`Offset calculado (forçado int32): ${hex(calculatedOffset_int32)}`, 'info', FNAME);
-                log("  INFO: Analisar `JSObjectGetArrayBufferBytesPtr` e funções de acesso a ArrayBuffer", 'asm', FNAME);
-                log("        para ver como offsets/tamanhos são validados internamente na FW 12.02.", 'asm', FNAME);
-                try {
-                    log(`Tentando dv.getUint32(${hex(calculatedOffset_int32)}) (usando offset int32 estourado)...`, 'info', FNAME);
-                    let val = dv.getUint32(calculatedOffset_int32, true);
-                    log(`Valor lido (offset int32): ${hex(val)}. Pode ser OOB.`, 'warn', FNAME);
-                } catch (e) { log(`Erro ao acessar DataView (offset int32): ${e.message}.`, 'error', FNAME); }
-                await sleep(50);
-
+                let ab = new ArrayBuffer(1024); let dv = new DataView(ab); let baseOffset = 0x7FFFFFF0; let addition = 0x20;
+                let calculatedOffset_js = baseOffset + addition; let calculatedOffset_int32 = (baseOffset + addition) | 0;
+                log(`Offset base: ${hex(baseOffset)}, Adição: ${hex(addition)}`, 'info', FNAME); log(`Offset calculado (JS num): ${hex(calculatedOffset_js)}`, 'info', FNAME); log(`Offset calculado (forçado int32): ${hex(calculatedOffset_int32)}`, 'info', FNAME);
+                log("  INFO: Analisar `JSObjectGetArrayBufferBytesPtr` da FW 12.02.", 'asm', FNAME);
+                try { log(`Tentando dv.getUint32(${hex(calculatedOffset_int32)})`, 'info', FNAME); let val = dv.getUint32(calculatedOffset_int32, true); log(`Valor lido (offset int32): ${hex(val)}. Pode ser OOB.`, 'warn', FNAME); } catch (e) { log(`Erro ao acessar DataView (offset int32): ${e.message}.`, 'error', FNAME); }
             } catch (e) { log(`Erro no teste Integer Overflow: ${e.message}`, 'error', FNAME); }
             log("Teste Integer Overflow (Detalhado) Concluído.", 'subtest', FNAME);
         }
 
         // --- Teste 3: Type Confusion (Detalhado) ---
         async function testTypeConfusion() {
-            const FNAME = 'TypeConfusion';
-            log("Iniciando Teste de Type Confusion (Detalhado)...", 'subtest', FNAME);
+            const FNAME = 'TypeConfusion'; log("Iniciando Teste de Type Confusion (Detalhado)...", 'subtest', FNAME);
             log("ALERTA: Requer escrita arbitrária para ser efetivo.", 'critical', FNAME);
-            log("  INFO: Analisar `JSC::JSCell::deleteProperty` e `JSC::iteratorForIterable` (`funcoes especificas.txt`)", 'asm', FNAME);
-            log("        para entender como os tipos de objetos são verificados (`[rdi+5]`) e como as estruturas", 'asm', FNAME);
-            log("        de objetos (StructureID) são usadas para despachar operações.", 'asm', FNAME);
-            log("        O objetivo seria usar uma escrita para alterar o StructureID de um objeto.", 'asm', FNAME);
-            try {
+            log("  INFO: Analisar `JSC::JSCell::deleteProperty`, `JSC::iteratorForIterable` e `JSCell.txt` da FW 12.02.", 'asm', FNAME);
+            try { /* ... (Lógica do testTypeConfusion da resposta anterior) ... */
                 let obj1 = { id: 1, name: "ObjetoUm", value: 100, methodA: () => log("Método A de obj1 chamado", 'info', FNAME) };
-                let obj2_target_type = new Uint32Array(10); // Tipo alvo: Uint32Array
-
+                let obj2_target_type = new Uint32Array(10);
                 log(`obj1 (original): ${typeof obj1}, tem método 'methodA'? ${'methodA' in obj1}`, 'info', FNAME);
                 log(`obj2_target_type (alvo): ${typeof obj2_target_type}, tem 'buffer'? ${'buffer' in obj2_target_type}`, 'info', FNAME);
-
-                log("SIMULAÇÃO: Se pudéssemos sobrescrever o StructureID de obj1 para o de um Uint32Array...", 'vuln', FNAME);
-                // write_arbitrary(addrof(obj1) + FW1202_OFFSETS.JSCell_m_structureID, get_structure_id(Uint32Array));
-
-                try {
-                    log("Tentando acessar obj1.buffer (como se fosse Uint32Array)...", 'info', FNAME);
-                    // let buffer_prop = obj1.buffer; // Causaria erro se obj1 não é ArrayBufferView
-                    // log(`obj1.buffer (simulado): ${buffer_prop}`, 'leak', FNAME);
-                    if (obj1.buffer) { // Checagem que falharia normalmente
-                        log("Propriedade 'buffer' encontrada em obj1! Inesperado sem confusão real.", 'warn', FNAME);
-                    } else {
-                        log("Propriedade 'buffer' NÃO encontrada em obj1 (esperado sem confusão real).", 'info', FNAME);
-                    }
+                log("SIMULAÇÃO: 'Corrompendo' o tipo de obj1 (requer escrita arbitrária e offsets de StructureID).", 'vuln', FNAME);
+                try { log("Tentando acessar obj1.buffer (como se fosse Uint32Array)...", 'info', FNAME); if (obj1.buffer) { log("Propriedade 'buffer' encontrada em obj1! Inesperado sem confusão real.", 'warn', FNAME); } else { log("Propriedade 'buffer' NÃO encontrada em obj1 (esperado).", 'info', FNAME); }
                 } catch (e) { log(`Erro ao acessar obj1.buffer: ${e.message}`, 'error', FNAME); }
-
             } catch (e) { log(`Erro no teste Type Confusion: ${e.message}`, 'error', FNAME); }
             log("Teste Type Confusion (Detalhado) Concluído.", 'subtest', FNAME);
         }
 
         // --- Teste 4: JIT Optimization Bug (Detalhado) ---
         async function testJITBug() {
-            const FNAME = 'JIT';
-            log("Iniciando Teste de Bug de Otimização JIT (Detalhado)...", 'subtest', FNAME);
-            log("  INFO: Analisar como `JSC::iteratorForIterable` ou outras funções JITadas lidam com tipos", 'asm', FNAME);
-            log("        e otimizações pode revelar pontos fracos. O PSFree explora um UAF, não um bug de JIT diretamente,", 'asm', FNAME);
-            log("        mas bugs de JIT podem levar a confusão de tipo ou OOB.", 'asm', FNAME);
-            try {
-                function jitPolymorphicAccess(obj, count) {
-                    let sum = 0;
-                    for (let i = 0; i < count; i++) {
-                        // O JIT pode tentar otimizar 'obj.value' com inline caches.
-                        // Se 'obj' mudar de 'shape' ou tipo de forma inesperada pelo JIT, pode haver problemas.
-                        sum += obj.value;
-                    }
-                    return sum;
-                }
-
-                let objA = { value: 1 }; let objB = { value: 2, extra: true };
-                log("Aquecendo JIT com objA (shape 1)...", 'info', FNAME);
-                for(let i=0; i < 10000; i++) jitPolymorphicAccess(objA, 10);
-                log("Aquecendo JIT com objB (shape 2)...", 'info', FNAME);
-                for(let i=0; i < 10000; i++) jitPolymorphicAccess(objB, 10);
-                log("JIT 'aquecido' com múltiplas shapes.", 'good', FNAME);
-
-                try {
-                    // Tenta com um objeto que tem 'value' mas pode ter sido deallocated/corrompido
-                    // ou um getter que se comporta mal.
-                    let trickyObj = { get value() {
-                        // if (condition_for_bug) { /* cause side effect or return bad value */ }
-                        return 3;
-                    } };
-                    log("Executando com objeto com getter para 'value'...", 'info', FNAME);
-                    jitPolymorphicAccess(trickyObj, 10);
-                    log("Execução com getter concluída.", 'good', FNAME);
-                } catch(e) { log(`Erro com getter: ${e.message}`, 'error', FNAME); }
-
+            const FNAME = 'JIT'; log("Iniciando Teste de Bug de Otimização JIT (Detalhado)...", 'subtest', FNAME);
+            log("  INFO: Analisar funções JITadas ou helpers em `funcoes especificas.txt` se relevantes.", 'asm', FNAME);
+            try { /* ... (Lógica do testJITBug da resposta anterior) ... */
+                function jitStressFunction(iterations, initial_val) { let p = initial_val; let sum = 0; for (let i = 0; i < iterations; i++) { if (i % 3 === 0) p = { x: i, y: i + 1 }; else if (i % 3 === 1) p = [i, i + 1, i + 2]; else p = i * 10; if (p.x !== undefined) sum += p.x; else if (p.length !== undefined) sum += p[0]; else sum += p; } return sum; }
+                log("Aquecendo JIT com a função de stress...", 'info', FNAME); for (let i = 0; i < 200; i++) { jitStressFunction(500, 1); } log("JIT 'aquecido'.", 'good', FNAME); await sleep(50);
+                try { let result = jitStressFunction(500, null); log(`Resultado com 'null': ${result}.`, 'info', FNAME); result = jitStressFunction(500, { z: 100 }); log(`Resultado com objeto {z:100}: ${result}.`, 'info', FNAME); } catch(e) { log(`ERRO INESPERADO pós-JIT: ${e.message}.`, 'error', FNAME); }
             } catch (e) { log(`Erro no teste JIT: ${e.message}`, 'error', FNAME); }
             log("Teste JIT Bug (Detalhado) Concluído.", 'subtest', FNAME);
         }
 
         // --- Teste 5: API Abuse (WebGL Detalhado) ---
-        // (Lógica do teste WebGL da resposta anterior pode ser mantida aqui,
-        // pois já era razoavelmente detalhada para um teste conceitual de API)
-        // Para brevidade, não vou repetir todo o código WebGL aqui, mas ele estaria nesta seção.
-        // A análise dos arquivos de assembly (ex: libSceNKWebkit) poderia revelar APIs nativas
-        // específicas chamadas pelo WebGL que poderiam ser alvos de fuzzing mais direcionado.
         async function testAPIAbuse() {
-            const FNAME = 'APIAbuse';
-            log("Iniciando Teste de Abuso de API (WebGL Detalhado - Implementação Omitida por Brevidade, veja resposta anterior)...", 'subtest', FNAME);
-            log("  INFO: A análise do `libSceNKWebkit.sprx.txt` (se contiver código relacionado a drivers gráficos)", 'asm', FNAME);
-            log("        poderia indicar como os comandos WebGL são traduzidos para chamadas de driver,", 'asm', FNAME);
-            log("        sugerindo áreas para fuzzing de parâmetros.", 'asm', FNAME);
-            await sleep(100); // Simula execução
-            log("Teste de API Abuse (WebGL Detalhado) Concluído.", 'subtest', FNAME);
+            const FNAME = 'APIAbuse'; log("Iniciando Teste de Abuso de API (WebGL Detalhado)...", 'subtest', FNAME);
+            log("  INFO: A análise do `libSceNKWebkit.sprx.txt` (se contiver código de drivers gráficos) pode guiar este teste.", 'asm', FNAME);
+            let canvas, gl; try { /* ... (Lógica do testAPIAbuse da resposta anterior, com try/catch e limpeza) ... */
+                canvas = document.createElement('canvas'); gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
+                if (!gl) { log("WebGL não suportado.", 'warn', FNAME); return; } log(`Contexto WebGL obtido: ${gl.constructor.name}`, 'good', FNAME);
+                try { const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture); const width = 16384; const height = 16384; gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); log(`texImage2D(${width}x${height}, null pixels) chamado.`, 'warn', FNAME); } catch(e) { log(`Erro em texImage2D: ${e.message}.`, 'error', FNAME); }
+                await sleep(100);
+            } catch (e) { log(`Erro no teste API Abuse (WebGL): ${e.message}`, 'error', FNAME);
+            } finally { if (gl) { const loseCtx = gl.getExtension('WEBGL_lose_context'); if (loseCtx) loseCtx.loseContext(); } canvas = null; gl = null; }
+            log("Teste API Abuse (WebGL Detalhado) Concluído.", 'subtest', FNAME);
+        }
+
+        // --- Teste 6: OOB Read (Info Leak - Conceitual) ---
+        async function testOOBRead() {
+            const FNAME = 'OOBRead';
+            log("Iniciando Teste de OOB Read (Info Leak - Conceitual)...", 'subtest', FNAME);
+            log("INFO: Este teste tentaria ler fora dos limites de um array/TypedArray.", 'warn', FNAME);
+            log("  INFO: Funções como `JSObjectGetArrayBufferBytesPtr` ou lógicas de acesso a array em `funcoes especificas.txt`", 'asm', FNAME);
+            log("        devem ser analisadas para entender como os limites são checados na FW 12.02.", 'asm', FNAME);
+            try {
+                const OOB_ARRAY_SIZE = 10;
+                let oobArray = new Uint32Array(OOB_ARRAY_SIZE);
+                for (let i = 0; i < OOB_ARRAY_SIZE; i++) { oobArray[i] = 0x41414141 + i; }
+
+                let adjacentSpray = []; const NUM_ADJACENT_SPRAY = 50; const ADJACENT_OBJ_SIZE = 64;
+                log("Pulverizando objetos adjacentes para OOB Read...", 'info', FNAME);
+                for (let i = 0; i < NUM_ADJACENT_SPRAY; i++) {
+                    let sprayObj = new ArrayBuffer(ADJACENT_OBJ_SIZE);
+                    new Uint32Array(sprayObj)[0] = 0x42424242 + i; // Padrão
+                    adjacentSpray.push(sprayObj);
+                }
+                log("Pulverização adjacente concluída.", 'good', FNAME);
+
+                log("Placeholder: Lógica para acionar OOB Read e ler memória adjacente seria implementada aqui.", "critical", FNAME);
+                log("  Isto exigiria uma vulnerabilidade específica (bug de JIT, cálculo de índice incorreto, etc.)", 'asm', FNAME);
+                log("  para permitir que `oobArray[OOB_ARRAY_SIZE]` ou similar leia memória real.", 'asm', FNAME);
+                // Exemplo de como seria o acesso se a primitiva OOB existisse:
+                // let oob_value = hypothetical_oob_read_uint32(oobArray, OOB_ARRAY_SIZE); // Lê 4 bytes após o array
+                // if (oob_value !== undefined) log(`Valor OOB (simulado): ${hex(oob_value)}`, 'leak', FNAME);
+
+                log("Nenhum OOB Read real tentado (placeholder).", 'warn', FNAME);
+            } catch (e) { log(`Erro no teste de OOB Read: ${e.message}`, 'error', FNAME); }
+            log("Teste de OOB Read (Info Leak - Conceitual) Concluído.", 'subtest', FNAME);
         }
 
 
         // --- Gerenciador de Testes e Event Listeners ---
         const runTest = async (testFunction, btn) => {
             if (btn) btn.disabled = true;
-            const testName = testFunction.name || 'Teste Desconhecido';
+            const testName = testFunction ? (testFunction.name || 'Teste Desconhecido') : 'Teste Indefinido';
             log(`==== INICIANDO: ${testName} ====`, 'test', 'Main');
-            await testFunction();
+            if (testFunction) {
+                await testFunction();
+            } else {
+                log(`Erro: Função de teste ${testName} não definida.`, 'critical', 'Main');
+            }
             log(`==== CONCLUÍDO: ${testName} ====`, 'test', 'Main');
             if (btn) btn.disabled = false;
             alert(`${testName} concluído. Verifique os logs.`);
@@ -306,9 +248,14 @@
         if (runTypeConfusionBtn) runTypeConfusionBtn.addEventListener('click', () => runTest(testTypeConfusion, runTypeConfusionBtn));
         if (runJITBtn) runJITBtn.addEventListener('click', () => runTest(testJITBug, runJITBtn));
         if (runAPIAbuseBtn) runAPIAbuseBtn.addEventListener('click', () => runTest(testAPIAbuse, runAPIAbuseBtn));
-        if (clearLogBtn) clearLogBtn.addEventListener('click', () => { outputDiv.innerHTML = ''; log("Log limpo.", 'info', 'Main'); });
+        if (runOOBReadBtn) runOOBReadBtn.addEventListener('click', () => runTest(testOOBRead, runOOBReadBtn)); // Novo botão
 
-        log("Suite de Testes Direcionada Carregada. Offsets precisam ser verificados e preenchidos!", 'critical', 'Main');
+        if (clearLogBtn) clearLogBtn.addEventListener('click', () => {
+            outputDiv.innerHTML = '';
+            log("Log limpo.", 'info', 'Main');
+        });
+
+        log("Suite de Testes Completa Carregada. Offsets precisam ser verificados e preenchidos!", 'critical', 'Main');
         log("Use os arquivos de assembly e PSFree para refinar a lógica de cada teste.", 'info', 'Main');
 
     </script>
