@@ -2,175 +2,111 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Bypass de ASLR</title>
+    <title>Laboratório de Exploração Avançada (v2.5 - Busca Agressiva ELF)</title>
     <style>
-        body {
-            background: #1e1e1e;
-            color: #d4d4d4;
-            font-family: monospace;
-            margin: 20px;
-            padding: 20px;
-        }
-        .container {
-            margin-bottom: 30px;
-            padding: 15px;
-            background-color: #252526;
-            border: 1px solid #333;
-            border-radius: 5px;
-        }
-        h1, h2 {
-            color: #4ec9b0;
-        }
-        button {
-            background-color: #007acc;
-            color: white;
-            border: none;
-            padding: 10px 20px;
-            cursor: pointer;
-            border-radius: 3px;
-            margin: 5px 0;
-        }
-        button:hover {
-            background-color: #005a9e;
-        }
-        #logOutput {
-            background: #111;
-            border: 1px solid #444;
-            padding: 10px;
-            height: 300px;
-            overflow-y: auto;
-            white-space: pre-wrap;
-            font-size: 14px;
-        }
-        .log-info { color: #6cf; }
-        .log-error { color: #ff6188; }
-        .log-leak { color: #ffd700; }
-        .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
-        .log-critical { color: #ff4500; font-weight: bold; }
-        .log-good { color: #32cd32; font-weight: bold; }
+        body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 14px; }
+        .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
+        h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 5px; }
+        h3 { color: #9cdcfe; margin-top: 20px; }
+        h4 { color: #ce9178; margin-top: 15px; }
+        button { background-color: #007acc; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; margin: 5px 0; }
+        button:hover { background-color: #005a9e; }
+        textarea, input[type="text"] { background-color: #3c3c3c; color: #d4d4d4; border: 1px solid #555; padding: 5px; margin: 5px 0; width: 90%; font-family: monospace; }
+        #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; font-size: 13px; }
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; }
+        .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
+        .log-tool { color: #7FFF00; font-weight: bold; } .log-analysis { color: #d7ba7d; }
+        .notes { background-color: #2a2a2a; padding: 10px; border-left: 3px solid #FFC107; font-style: italic; color: #aaa; margin-top:5px; margin-bottom:10px;}
+        .code-comment { color: #6A9955; font-style: italic; display: block; margin-top: 2px; margin-bottom: 2px;}
     </style>
 </head>
 <body>
-    <h1>Laboratório de Bypass de ASLR</h1>
+    <h1>Laboratório de Exploração Avançada (v2.5 - Busca Agressiva ELF)</h1>
+    <div id="logOutput"></div>
+
+    <script>
+        const KB = 1024; const MB = KB * KB; const GB = KB * KB * KB;
+
+        // Primitivas e Funções
+        const log = (message, type = 'info', funcName = '') => {
+            const outputDiv = document.getElementById('logOutput');
+            if (!outputDiv) return;
+            const timestamp = `[${new Date().toLocaleTimeString()}]`;
+            const logMessage = document.createElement('div');
+            logMessage.className = `log-${type}`;
+            logMessage.textContent = `${timestamp} ${funcName ? `[${funcName}] ` : ''}${message}`;
+            outputDiv.appendChild(logMessage);
+            outputDiv.scrollTop = outputDiv.scrollHeight;
+        };
+
+        // Busca Agressiva pelo Cabeçalho ELF
+        async function aggressiveSearchELFHeader() {
+            const initialAddress = new AdvancedInt64('0x7fff0000'); // Endereço inicial ajustável
+            const searchIncrement = AdvancedInt64.fromInt(65536); // Incremento de 64KB
+            const maxAttempts = 500; // Máximo de iterações (32MB)
+            const targetPattern = '7f454c46'; // ELF Header (hexadecimal)
+            const searchSize = 65536; // Tamanho de cada busca em bytes
+            let currentAddress = initialAddress;
+
+            log('Iniciando busca agressiva pelo cabeçalho ELF...', 'critical');
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                log(`Tentando buscar padrão ELF em: ${currentAddress.toString(true)}, Tamanho: ${searchSize} bytes`, 'info');
+                
+                try {
+                    let result = await searchMemoryForValue(currentAddress.toString(true), searchSize.toString(), targetPattern);
+                    
+                    if (result) {
+                        log(`Padrão ELF encontrado em ${currentAddress.toString(true)}!`, 'good');
+                        return currentAddress; // Retorna o endereço onde o ELF foi encontrado
+                    }
+                } catch (e) {
+                    log(`Erro ao buscar no endereço ${currentAddress.toString(true)}: ${e.message}`, 'error');
+                }
+
+                // Incrementa para próximo intervalo de busca
+                currentAddress = currentAddress.add(searchIncrement);
+            }
+
+            log('Cabeçalho ELF não encontrado após busca agressiva. Considere verificar a configuração e os offsets.', 'error');
+            return null;
+        }
+
+        // Função para iniciar a busca
+        async function startELFSearch() {
+            const result = await aggressiveSearchELFHeader();
+            if (result) {
+                log(`Busca concluída: Cabeçalho ELF encontrado em ${result.toString(true)}`, 'critical');
+            } else {
+                log('Busca concluída: Cabeçalho ELF não encontrado.', 'warn');
+            }
+        }
+
+        // Classe para manipulação de números 64 bits
+        class AdvancedInt64 {
+            constructor(value) {
+                this.value = BigInt(value);
+            }
+            static fromInt(intValue) {
+                return new AdvancedInt64(BigInt(intValue));
+            }
+            add(other) {
+                return new AdvancedInt64(this.value + other.value);
+            }
+            toString(hex = false) {
+                return hex ? `0x${this.value.toString(16).padStart(16, '0')}` : this.value.toString(10);
+            }
+        }
+    </script>
+
     <div class="container">
-        <h2>Controle</h2>
-        <button id="runASLRBypassButton">Executar Bypass de ASLR</button>
-    </div>
-    <div class="container">
-        <h2>Logs</h2>
-        <div id="logOutput">Logs aparecerão aqui...</div>
+        <h2>Buscar Cabeçalho ELF</h2>
+        <p>Realiza uma busca agressiva pelo cabeçalho ELF na memória usando as primitivas configuradas.</p>
+        <button onclick="startELFSearch()">Iniciar Busca Agressiva</button>
     </div>
 
     <script>
-        // Funções utilitárias
-        function log(message, type = "info") {
-            const outputDiv = document.getElementById("logOutput");
-            const timestamp = `[${new Date().toISOString()}]`;
-            const logMessage = `${timestamp} [${type.toUpperCase()}] ${message}`;
-            outputDiv.textContent += logMessage + "\n";
-            outputDiv.scrollTop = outputDiv.scrollHeight;
-            console.log(logMessage);
-        }
-
-        // Classe AdvancedInt64 para manipulação de endereços
-        class AdvancedInt64 {
-            constructor(low, high = 0) {
-                this.low = low >>> 0;
-                this.high = high >>> 0;
-            }
-            add(other) {
-                let low = (this.low + other.low) >>> 0;
-                let high = (this.high + other.high + (low < this.low ? 1 : 0)) >>> 0;
-                return new AdvancedInt64(low, high);
-            }
-            sub(other) {
-                let low = (this.low - other.low) >>> 0;
-                let high = (this.high - other.high - (this.low < other.low ? 1 : 0)) >>> 0;
-                return new AdvancedInt64(low, high);
-            }
-            toString(hex = false) {
-                return hex
-                    ? `0x${this.high.toString(16).padStart(8, "0")}${this.low.toString(16).padStart(8, "0")}`
-                    : `${this.high}${this.low}`;
-            }
-        }
-
-        // Simulação de primitivas de leitura e escrita
-        let arb_read_primitive = (address, size) => {
-            // Simula leitura arbitrária (mock para ambiente controlado)
-            log(`Lendo ${size} bytes do endereço ${address.toString(true)}`, "info");
-            return new Uint8Array(size).fill(0x41); // Retorna bytes fictícios (A)
-        };
-
-        let arb_write_primitive = (address, data) => {
-            // Simula escrita arbitrária (mock para ambiente controlado)
-            log(`Escrevendo ${data.length} bytes no endereço ${address.toString(true)}`, "info");
-            return true; // Simula sucesso
-        };
-
-        let addrof_primitive = (obj) => {
-            log(`Obtendo endereço de ${obj}`, "info");
-            return new AdvancedInt64(0xdeadbeef, 0x0); // Endereço fictício
-        };
-
-        // Função principal para bypass de ASLR
-        async function bypassASLR() {
-            const FNAME = "bypassASLR";
-            log("--- Iniciando bypass de ASLR ---", "test", FNAME);
-
-            // Etapa 1: Configuração inicial
-            log("Configurando heap e objetos para vazamento...", "info", FNAME);
-            const victimArray = new Uint8Array(256);
-            const victimAddr = addrof_primitive(victimArray);
-            log(`Endereço do Array Vítima: ${victimAddr.toString(true)}`, "leak", FNAME);
-
-            const backingStorePtr = arb_read_primitive(victimAddr.add(new AdvancedInt64(0x20)), 8);
-            const backingStoreAddr = new AdvancedInt64(backingStorePtr[0], backingStorePtr[1]);
-            log(`Backing Store encontrado no endereço: ${backingStoreAddr.toString(true)}`, "leak", FNAME);
-
-            // Etapa 2: Escanear memória para localizar bases de bibliotecas
-            log("Escaneando memória para encontrar bases de bibliotecas ELF...", "info", FNAME);
-            const ELF_MAGIC = [0x7f, 0x45, 0x4c, 0x46];
-            let baseAddr = null;
-
-            for (let i = 0; i < 0x10000; i += 0x1000) {
-                const addrToCheck = victimAddr.sub(new AdvancedInt64(i));
-                const bytes = arb_read_primitive(addrToCheck, 4);
-                if (bytes && ELF_MAGIC.every((byte, idx) => byte === bytes[idx])) {
-                    baseAddr = addrToCheck;
-                    log(`Base ELF encontrada em: ${baseAddr.toString(true)}`, "critical", FNAME);
-                    break;
-                }
-            }
-
-            if (!baseAddr) {
-                log("Falha ao localizar a base ELF. Ajuste o intervalo de busca.", "error", FNAME);
-                return;
-            }
-
-            // Etapa 3: Derivar endereços importantes e testar leitura
-            const libcBase = baseAddr.sub(new AdvancedInt64(0x1000));
-            log(`Base estimada de libc: ${libcBase.toString(true)}`, "leak", FNAME);
-
-            const testAddr = libcBase.add(new AdvancedInt64(0x2000));
-            const testBytes = arb_read_primitive(testAddr, 8);
-            if (testBytes) {
-                log(
-                    `Leitura bem-sucedida de libc: ${Array.from(testBytes)
-                        .map((b) => b.toString(16).padStart(2, "0"))
-                        .join(" ")}`,
-                    "good",
-                    FNAME
-                );
-            } else {
-                log("Falha ao ler libc. Endereço pode estar protegido.", "warn", FNAME);
-            }
-
-            log("Bypass de ASLR concluído.", "good", FNAME);
-        }
-
-        document.getElementById("runASLRBypassButton").addEventListener("click", bypassASLR);
-        log("Laboratório carregado: Pronto para testes de bypass de ASLR.", "good", "Init");
+        log("Laboratório de Exploração Avançada (v2.5) Carregado.", "good", "Init");
     </script>
 </body>
 </html>
