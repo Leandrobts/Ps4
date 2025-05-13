@@ -2,111 +2,101 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.5 - Busca Agressiva ELF)</title>
+    <title>Analisador ELF - Laboratório de Exploração</title>
     <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 14px; }
         .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
         h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 5px; }
         h3 { color: #9cdcfe; margin-top: 20px; }
-        h4 { color: #ce9178; margin-top: 15px; }
         button { background-color: #007acc; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; margin: 5px 0; }
         button:hover { background-color: #005a9e; }
         textarea, input[type="text"] { background-color: #3c3c3c; color: #d4d4d4; border: 1px solid #555; padding: 5px; margin: 5px 0; width: 90%; font-family: monospace; }
         #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; font-size: 13px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; }
-        .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
-        .log-tool { color: #7FFF00; font-weight: bold; } .log-analysis { color: #d7ba7d; }
-        .notes { background-color: #2a2a2a; padding: 10px; border-left: 3px solid #FFC107; font-style: italic; color: #aaa; margin-top:5px; margin-bottom:10px;}
-        .code-comment { color: #6A9955; font-style: italic; display: block; margin-top: 2px; margin-bottom: 2px;}
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
+        .log-error { color: #ff6c6c; } .log-success { color: #7FFF00; }
     </style>
 </head>
 <body>
-    <h1>Laboratório de Exploração Avançada (v2.5 - Busca Agressiva ELF)</h1>
+    <h1>Analisador ELF - Laboratório de Exploração</h1>
     <div id="logOutput"></div>
 
     <script>
-        const KB = 1024; const MB = KB * KB; const GB = KB * KB * KB;
-
-        // Primitivas e Funções
-        const log = (message, type = 'info', funcName = '') => {
+        const log = (message, type = 'info') => {
             const outputDiv = document.getElementById('logOutput');
             if (!outputDiv) return;
             const timestamp = `[${new Date().toLocaleTimeString()}]`;
             const logMessage = document.createElement('div');
             logMessage.className = `log-${type}`;
-            logMessage.textContent = `${timestamp} ${funcName ? `[${funcName}] ` : ''}${message}`;
+            logMessage.textContent = `${timestamp} ${message}`;
             outputDiv.appendChild(logMessage);
             outputDiv.scrollTop = outputDiv.scrollHeight;
         };
 
-        // Busca Agressiva pelo Cabeçalho ELF
-        async function aggressiveSearchELFHeader() {
-            const initialAddress = new AdvancedInt64('0x7fff0000'); // Endereço inicial ajustável
-            const searchIncrement = AdvancedInt64.fromInt(65536); // Incremento de 64KB
-            const maxAttempts = 1000; // Máximo de iterações (64MB)
-            const targetPattern = '7f454c46'; // ELF Header (hexadecimal)
-            const searchSize = 65536; // Tamanho de cada busca em bytes
-            let currentAddress = initialAddress;
+        // Configurações para a análise ELF
+        const ELF_HEADER_PATTERN = '7f454c46'; // Padrão hexadecimal para o cabeçalho ELF
+        const SEARCH_INCREMENT = 65536; // Incremento de busca em bytes (64KB)
+        const MAX_ATTEMPTS = 2000; // Máximo de tentativas (128MB)
+        const INITIAL_ADDRESS = BigInt('0x10000'); // Endereço inicial para busca
+        const SEARCH_SIZE = 65536; // Tamanho do bloco de busca
 
-            log('Iniciando busca agressiva pelo cabeçalho ELF...', 'critical');
+        // Função para busca agressiva do cabeçalho ELF
+        async function searchELFHeader() {
+            let currentAddress = INITIAL_ADDRESS;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
-                log(`Tentando buscar padrão ELF em: ${currentAddress.toString(true)}, Tamanho: ${searchSize} bytes`, 'info');
-                
+            log('Iniciando busca agressiva pelo cabeçalho ELF...', 'info');
+
+            for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+                log(`Tentando buscar padrão ELF em: 0x${currentAddress.toString(16).padStart(8, '0')}, Tamanho: ${SEARCH_SIZE} bytes`, 'info');
                 try {
-                    let result = await searchMemoryForValue(currentAddress.toString(true), searchSize.toString(), targetPattern);
-                    
+                    const result = await searchMemoryForValue(currentAddress.toString(16), SEARCH_SIZE, ELF_HEADER_PATTERN);
                     if (result) {
-                        log(`Padrão ELF encontrado em ${currentAddress.toString(true)}!`, 'good');
-                        return currentAddress; // Retorna o endereço onde o ELF foi encontrado
+                        log(`Cabeçalho ELF encontrado em: 0x${currentAddress.toString(16).padStart(8, '0')}`, 'success');
+                        return;
                     }
                 } catch (e) {
-                    log(`Erro ao buscar no endereço ${currentAddress.toString(true)}: ${e.message}`, 'error');
+                    log(`Erro ao buscar no endereço 0x${currentAddress.toString(16).padStart(8, '0')}: ${e.message}`, 'error');
                 }
-
-                // Incrementa para próximo intervalo de busca
-                currentAddress = currentAddress.add(searchIncrement);
+                currentAddress += BigInt(SEARCH_INCREMENT);
             }
 
-            log('Cabeçalho ELF não encontrado após busca agressiva. Considere verificar a configuração e os offsets.', 'error');
-            return null;
+            log('Cabeçalho ELF não encontrado após busca agressiva.', 'error');
         }
 
-        // Função para iniciar a busca
-        async function startELFSearch() {
-            const result = await aggressiveSearchELFHeader();
-            if (result) {
-                log(`Busca concluída: Cabeçalho ELF encontrado em ${result.toString(true)}`, 'critical');
-            } else {
-                log('Busca concluída: Cabeçalho ELF não encontrado.', 'warn');
+        // Função para busca de strings legíveis no ELF
+        async function searchStringsInELF() {
+            log('Iniciando busca por strings legíveis no ELF...', 'info');
+            // Exemplo de strings ou padrões que podem ser buscados:
+            const patterns = ['libkernel', 'libSceNKWebKit', ELF_HEADER_PATTERN];
+
+            for (const pattern of patterns) {
+                log(`Buscando padrão: ${pattern}`, 'info');
+                try {
+                    const result = await searchMemoryForValue('0x10000', SEARCH_SIZE, pattern);
+                    if (result) {
+                        log(`Padrão encontrado: ${pattern} em endereço 0x${result.toString(16)}`, 'success');
+                    } else {
+                        log(`Padrão não encontrado: ${pattern}`, 'error');
+                    }
+                } catch (e) {
+                    log(`Erro ao buscar padrão ${pattern}: ${e.message}`, 'error');
+                }
             }
         }
 
-        // Classe para manipulação de números 64 bits
-        class AdvancedInt64 {
-            constructor(value) {
-                this.value = BigInt(value);
-            }
-            static fromInt(intValue) {
-                return new AdvancedInt64(BigInt(intValue));
-            }
-            add(other) {
-                return new AdvancedInt64(this.value + other.value);
-            }
-            toString(hex = false) {
-                return hex ? `0x${this.value.toString(16).padStart(16, '0')}` : this.value.toString(10);
-            }
+        // Função para iniciar a análise completa
+        async function startELFAnalysis() {
+            log('Iniciando análise completa do ELF...', 'info');
+            await searchELFHeader();
+            await searchStringsInELF();
+            log('Análise concluída.', 'success');
         }
     </script>
 
     <div class="container">
-        <h2>Buscar Cabeçalho ELF</h2>
-        <p>Realiza uma busca agressiva pelo cabeçalho ELF na memória usando as primitivas configuradas.</p>
-        <button onclick="startELFSearch()">Iniciar Busca Agressiva</button>
+        <h2>Ferramentas de Análise</h2>
+        <button onclick="startELFAnalysis()">Iniciar Análise Completa do ELF</button>
+        <button onclick="searchELFHeader()">Buscar Cabeçalho ELF</button>
+        <button onclick="searchStringsInELF()">Buscar Strings no ELF</button>
     </div>
-
-    <script>
-        log("Laboratório de Exploração Avançada (v2.5) Carregado.", "good", "Init");
-    </script>
 </body>
 </html>
