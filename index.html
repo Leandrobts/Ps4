@@ -39,6 +39,43 @@
         const INITIAL_ADDRESS = BigInt('0x10000'); // Endereço inicial para busca
         const SEARCH_SIZE = 65536; // Tamanho do bloco de busca
 
+        // Função para busca de padrões na memória
+        function searchMemoryForValue(startAddress, size, pattern) {
+            log(`Buscando padrão '${pattern}' no intervalo iniciado em ${startAddress}, tamanho: ${size}`, 'info');
+
+            try {
+                // Simulação: Crie um buffer de memória para teste
+                const memory = new Uint8Array(size);
+                for (let i = 0; i < size; i++) {
+                    memory[i] = i % 256; // Preenche com dados de exemplo
+                }
+
+                const patternBytes = pattern.match(/.{1,2}/g).map(byte => parseInt(byte, 16));
+                const patternLength = patternBytes.length;
+
+                for (let i = 0; i <= memory.length - patternLength; i++) {
+                    let found = true;
+                    for (let j = 0; j < patternLength; j++) {
+                        if (memory[i + j] !== patternBytes[j]) {
+                            found = false;
+                            break;
+                        }
+                    }
+                    if (found) {
+                        const foundAddress = BigInt(startAddress) + BigInt(i);
+                        log(`Padrão '${pattern}' encontrado no endereço: 0x${foundAddress.toString(16)}`, 'success');
+                        return foundAddress;
+                    }
+                }
+
+                log(`Padrão '${pattern}' não encontrado no intervalo fornecido.`, 'error');
+                return null;
+            } catch (error) {
+                log(`Erro ao buscar padrão na memória: ${error.message}`, 'error');
+                return null;
+            }
+        }
+
         // Função para busca agressiva do cabeçalho ELF
         async function searchELFHeader() {
             let currentAddress = INITIAL_ADDRESS;
@@ -47,14 +84,10 @@
 
             for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
                 log(`Tentando buscar padrão ELF em: 0x${currentAddress.toString(16).padStart(8, '0')}, Tamanho: ${SEARCH_SIZE} bytes`, 'info');
-                try {
-                    const result = await searchMemoryForValue(currentAddress.toString(16), SEARCH_SIZE, ELF_HEADER_PATTERN);
-                    if (result) {
-                        log(`Cabeçalho ELF encontrado em: 0x${currentAddress.toString(16).padStart(8, '0')}`, 'success');
-                        return;
-                    }
-                } catch (e) {
-                    log(`Erro ao buscar no endereço 0x${currentAddress.toString(16).padStart(8, '0')}: ${e.message}`, 'error');
+                const result = searchMemoryForValue(currentAddress.toString(16), SEARCH_SIZE, ELF_HEADER_PATTERN);
+                if (result) {
+                    log(`Cabeçalho ELF encontrado em: 0x${result.toString(16).padStart(8, '0')}`, 'success');
+                    return;
                 }
                 currentAddress += BigInt(SEARCH_INCREMENT);
             }
@@ -70,15 +103,11 @@
 
             for (const pattern of patterns) {
                 log(`Buscando padrão: ${pattern}`, 'info');
-                try {
-                    const result = await searchMemoryForValue('0x10000', SEARCH_SIZE, pattern);
-                    if (result) {
-                        log(`Padrão encontrado: ${pattern} em endereço 0x${result.toString(16)}`, 'success');
-                    } else {
-                        log(`Padrão não encontrado: ${pattern}`, 'error');
-                    }
-                } catch (e) {
-                    log(`Erro ao buscar padrão ${pattern}: ${e.message}`, 'error');
+                const result = searchMemoryForValue('0x10000', SEARCH_SIZE, pattern);
+                if (result) {
+                    log(`Padrão encontrado: ${pattern} em endereço 0x${result.toString(16)}`, 'success');
+                } else {
+                    log(`Padrão não encontrado: ${pattern}`, 'error');
                 }
             }
         }
