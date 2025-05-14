@@ -2,75 +2,364 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.6.1 - Teste Sintaxe e Chamada P1)</title>
+    <title>Laboratório de Exploração Avançada (v2.6.2 - Primitivas Relativas)</title>
     <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 10px; font-size: 13px; }
         .container { margin-bottom: 20px; padding: 10px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
-        h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 3px; margin-top:15px; }
+        h1, h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 3px; margin-top:15px; }
         button { background-color: #007acc; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 3px; margin: 3px 0; font-size: 12px;}
-        #logOutput { background: #111; border: 1px solid #444; padding: 8px; height: 350px; overflow-y: auto; white-space: pre-wrap; margin-top: 8px; font-size: 12px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; } .log-error { color: #f44336; } .log-good { color: #4CAF50; } .log-vuln { color: #ff4444; font-weight: bold; } .log-critical { color: #f0f; font-weight: bold; }
+        button:hover { background-color: #005c99; }
+        #logOutput { background: #111; border: 1px solid #444; padding: 8px; height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 8px; font-size: 12px; }
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; } .log-subtest { color: #bbb; margin-left: 10px;} .log-error { color: #f44336; } .log-good { color: #4CAF50; } .log-vuln { color: #ff4444; font-weight: bold; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FFC107;} .log-ptr { color: #C39BD3;}
         .notes { background-color: #2a2a2a; padding: 8px; border-left: 3px solid #FFC107; font-style: italic; color: #aaa; margin-top:3px; margin-bottom:8px; font-size:11px;}
     </style>
 </head>
 <body>
-    <h1>Laboratório (v2.6.1 - Teste Sintaxe e Chamada P1)</h1>
+    <h1>Laboratório (v2.6.2 - Primitivas Relativas P2)</h1>
     <p class="notes">Abra o console (F12) para ver erros. Primeiro clique no Passo 0, depois no Passo 1.</p>
     <div id="logOutput"></div>
 
     <script>
         const KB = 1024; const MB = KB * KB; const GB = KB * KB * KB;
-        class AdvancedInt64 { constructor(low, high) { let buffer = new Uint32Array(2); let bytes = new Uint8Array(buffer.buffer); if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); } if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); } let is_one = false; if (arguments.length === 1) { is_one = true; } if (!is_one) { if (typeof (low) !== 'number' && typeof (high) !== 'number') { throw TypeError('low/high must be numbers'); } } const check_range = (x) => (-0x80000000 <= x) && (x <= 0xffffffff); if (typeof low === 'number') { if (!check_range(low)) { throw TypeError('low not a valid value: ' + low); } if (is_one) { high = 0; if (low < 0) { high = -1; } } else { if (!check_range(high)) { throw TypeError('high not a valid value: ' + high); } } buffer[0] = low; buffer[1] = high; } else if (typeof low === 'string') { let hexstr = low; if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); } if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; } if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); } else { hexstr = hexstr.padStart(16, '0');} for (let i = 0; i < 8; i++) { bytes[i] = parseInt(hexstr.slice(14 - i*2, 16 - i*2), 16); } } else if (typeof low === 'object') { if (low instanceof AdvancedInt64) { bytes.set(low.bytes); } else if (low.length === 8) { bytes.set(low); } else { throw TypeError("Array must have exactly 8 elements."); } } else { throw TypeError('AdvancedInt64 does not support your object for conversion'); } this.buffer = buffer; this.bytes = bytes; } low() { return this.buffer[0]; } high() { return this.buffer[1]; } toString(is_pretty) { let lowStr = this.low().toString(16).padStart(8, '0'); let highStr = this.high().toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0, 4) + '_' + highStr.substring(4); lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4); return '0x' + highStr + '_' + lowStr; } return '0x' + highStr + lowStr; } add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = (this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF) > 0xFFFFFFFF ? 1 : 0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); } sub(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } const negOther = other.neg(); return this.add(negOther); } neg() { const low = ~this.low(); const high = ~this.high(); const one = new AdvancedInt64(1,0); const res = new AdvancedInt64(low, high); return res.add(one); } eq(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } return this.low() === other.low() && this.high() === other.high(); } static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); }
+        class AdvancedInt64 { constructor(low, high) { let buffer = new Uint32Array(2); let bytes = new Uint8Array(buffer.buffer); if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); } if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); } let is_one = false; if (arguments.length === 1) { is_one = true; } if (!is_one) { if (typeof (low) !== 'number' && typeof (high) !== 'number') { throw TypeError('low/high must be numbers'); } } const check_range = (x) => (-0x80000000 <= x) && (x <= 0xffffffff); if (typeof low === 'number') { if (!check_range(low)) { throw TypeError('low not a valid value: ' + low); } if (is_one) { high = 0; if (low < 0) { high = -1; } } else { if (!check_range(high)) { throw TypeError('high not a valid value: ' + high); } } buffer[0] = low; buffer[1] = high; } else if (typeof low === 'string') { let hexstr = low; if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); } if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; } if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); } else { hexstr = hexstr.padStart(16, '0');} for (let i = 0; i < 8; i++) { bytes[i] = parseInt(hexstr.slice(14 - i*2, 16 - i*2), 16); } } else if (typeof low === 'object') { if (low instanceof AdvancedInt64) { bytes.set(low.bytes); } else if (low.length === 8) { bytes.set(low); } else { throw TypeError("Array must have exactly 8 elements."); } } else { throw TypeError('AdvancedInt64 does not support your object for conversion'); } this.buffer = buffer; this.bytes = bytes; } low() { return this.buffer[0]; } high() { return this.buffer[1]; } toString(is_pretty) { let lowStr = (this.low() >>> 0).toString(16).padStart(8, '0'); let highStr = (this.high() >>> 0).toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0, 4) + '_' + highStr.substring(4); lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4); return '0x' + highStr + '_' + lowStr; } return '0x' + highStr + lowStr; } add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = (this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF) > 0xFFFFFFFF ? 1 : 0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); } sub(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } const negOther = other.neg(); return this.add(negOther); } neg() { const low = ~this.low(); const high = ~this.high(); const one = new AdvancedInt64(1,0); const res = new AdvancedInt64(low, high); return res.add(one); } eq(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } return this.low() === other.low() && this.high() === other.high(); } static fromNumber(num) { if (typeof num !== 'number') throw TypeError('Input must be a number'); return new AdvancedInt64(num); } static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); }
         const readWriteUtils = { readBytes: (u8_view, offset, size) => { let res = 0; for (let i = 0; i < size; i++) { res += u8_view[offset + i] << (i * 8); } return res >>> 0; }, read16: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 2), read32: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 4), read64: (u8_view, offset) => { let resBytes = []; for (let i = 0; i < 8; i++) { resBytes.push(u8_view[offset + i]); } return new AdvancedInt64(resBytes); }, writeBytes: (u8_view, offset, value, size) => { for (let i = 0; i < size; i++) { u8_view[offset + i] = (value >>> (i * 8)) & 0xff; } }, write16: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 2), write32: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 4), write64: (u8_view, offset, value) => { if (!(value instanceof AdvancedInt64)) { throw TypeError('write64 value must be an AdvancedInt64'); } let low = value.low(); let high = value.high(); for (let i = 0; i < 4; i++) { u8_view[offset + i] = (low >>> (i * 8)) & 0xff; } for (let i = 0; i < 4; i++) { u8_view[offset + 4 + i] = (high >>> (i * 8)) & 0xff; } } };
-        const generalUtils = { logToDiv: (divId, message, type = 'info', funcName = '') => { const outputDiv = document.getElementById(divId); if (!outputDiv) { console.error("logToDiv: Div de log não encontrado:", divId); return; } try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 1200000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error(`Erro no log para ${divId}:`, e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; } }, toHexLab: (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } };
+        const generalUtils = { logToDiv: (divId, message, type = 'info', funcName = '') => { const outputDiv = document.getElementById(divId); if (!outputDiv) { console.error("logToDiv: Div de log não encontrado:", divId); return; } try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 1200000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error(`Erro no log para ${divId}:`, e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; } }, toHexLab: (val, bits = 32) => { if (val instanceof AdvancedInt64) return val.toString(true); if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } };
         const log = (message, type = 'info', funcName = '') => generalUtils.logToDiv('logOutput', message, type, funcName);
         const PAUSE_LAB = (ms = 100) => new Promise(r => setTimeout(r, ms));
-        const toHexS1 = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
-        const isPotentialPointer64S1 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const toHexS1 = (val, bits = 32) => generalUtils.toHexLab(val, bits); // Alias for consistency
+        const isPotentialPointer64S1 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if ((high === 0xFFFFFFFF || high === -1) && (low === 0xFFFFFFFF || low === -1)) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
         const isPotentialData32S1 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
         const SHORT_PAUSE_S1_LAB = 50;
-        log("Script v2.6.1 (Utilitários) Carregado.", "info", "Init");
+
+        // Globais estabelecidas pelo Passo 0 e usadas pelo Passo 1
+        let oob_array_buffer_real = null;
+        let oob_dataview_real = null;
+        let oob_leaked_ptr_real = null;
+        let baseOffsetInBuffer = 128; // Definido em triggerOOB_real, replicado aqui para acesso
+        let initialBufferSize = 32;   // Definido em triggerOOB_real
+
+        log("Script v2.6.2 (Utilitários e Globais) Carregado.", "info", "Init");
     </script>
     <div class="container">
         <h2>Passo 0: Ativador de Vulnerabilidade Base (OOB Write)</h2>
         <button onclick="triggerOOB_real()">Ativar Primitiva OOB R/W (Real)</button>
         <script>
-            let oob_array_buffer_real = null; let oob_dataview_real = null; let oob_leaked_ptr_real = null; 
-            // COLE AQUI A FUNÇÃO triggerOOB_real COMPLETA e CORRIGIDA da v2.5.8 / v2.5.12
-            async function triggerOOB_real() { const FNAME = 'triggerOOB_real'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); console.log(`DEBUG: ${FNAME} chamada.`); const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = bufferSize; const readRangeStart = -64; const readRangeEnd = bufferSize + 64; const allocationSize = bufferSize + 256; const baseOffsetInBuffer = 128; const oobReadOffsets = []; for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); } let writeSuccess = false; let potentialLeakFoundCount = 0; oob_leaked_ptr_real = null; oob_dataview_real = null; oob_array_buffer_real = null; try { const buffer = new ArrayBuffer(allocationSize); oob_array_buffer_real = buffer; const dataView = new DataView(buffer); oob_dataview_real = dataView; for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset; await PAUSE_LAB(SHORT_PAUSE_S1_LAB); try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} (offset ${writeTargetAddress} no DataView) OK! Val=${toHexS1(writeValue, 8)}`, 'vuln', FNAME); log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME); writeSuccess = true; } catch (e) { log(`Escrita OOB U8 @${oobWriteOffset} (offset ${writeTargetAddress} no DataView) FALHOU/Bloqueada: ${e.message}`, 'error', FNAME); log(`--- ${FNAME} Concluído (Escrita OOB Falhou) ---`, 'test', FNAME); return false; } await PAUSE_LAB(SHORT_PAUSE_S1_LAB); for (const readOffsetRelative of oobReadOffsets) { const readTargetAddress = baseOffsetInBuffer + readOffsetRelative; const relOffsetStr = `@${readOffsetRelative} (offset ${readTargetAddress} no DataView)`; if (readTargetAddress >= 0 && readTargetAddress + 8 <= dataView.buffer.byteLength) { try { const low = dataView.getUint32(readTargetAddress, true); const high = dataView.getUint32(readTargetAddress + 4, true); if (isPotentialPointer64S1(high, low)) { const vStr = `H=${toHexS1(high)} L=${toHexS1(low)}`; log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME); potentialLeakFoundCount++; if (oob_leaked_ptr_real === null) { oob_leaked_ptr_real = { value: new AdvancedInt64(low, high), type: 'U64', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); } } } catch (e) {} } if (oob_leaked_ptr_real === null && readTargetAddress >= 0 && readTargetAddress + 4 <= dataView.buffer.byteLength) { try { const val32 = dataView.getUint32(readTargetAddress, true); if (isPotentialData32S1(val32)) { log(` -> Leak U32? ${relOffsetStr}: ${toHexS1(val32)}`, 'leak', FNAME); potentialLeakFoundCount++; if (oob_leaked_ptr_real === null) { oob_leaked_ptr_real = { value: new AdvancedInt64(val32, 0), type: 'U32', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); } } if (readOffsetRelative === oobWriteOffset && (val32 & 0xFF) === writeValue && ((val32 >> 8) & 0xFFFFFF) === 0xAAAAAA ) { log(` -> Leu valor OOB escrito (${toHexS1(val32)}) ${relOffsetStr}! Confirma R/W na área OOB.`, 'vuln', FNAME); } } catch (e) {} } if (readOffsetRelative % 32 === 0) await PAUSE_LAB(1); } } catch(e) {log("ERRO CRÍTICO em triggerOOB_real: " + e.message, "error", FNAME); console.error("ERRO CRÍTICO em triggerOOB_real:", e); } finally { const leakStatusMsg = oob_leaked_ptr_real ?  `1 valor ${oob_leaked_ptr_real.type} @offset ${oob_leaked_ptr_real.offset_in_oob_buffer} (valor: ${oob_leaked_ptr_real.value.toString(true)})` :  'nenhum valor/ponteiro útil armazenado da leitura OOB'; log(`--- ${FNAME} Concluído ---`, 'test', FNAME); log(`   Escrita OOB simples: ${writeSuccess ? 'SUCESSO' : 'FALHA'}`, writeSuccess ? 'good' : 'error', FNAME); log(`   Leituras OOB potenciais: ${potentialLeakFoundCount}`, 'info', FNAME); log(`   Valor OOB armazenado: ${leakStatusMsg}`, oob_leaked_ptr_real ? 'leak' : 'info', FNAME); if (oob_dataview_real && oob_array_buffer_real) { log("`oob_dataview_real` e `oob_array_buffer_real` estão prontos.", "good", FNAME); log(`   Tamanho do oob_dataview_real.buffer: ${oob_dataview_real.buffer.byteLength} bytes.`, "info", FNAME); } else { log("`oob_dataview_real` OU `oob_array_buffer_real` NÃO foram definidos! Verifique erros anteriores.", "error", FNAME); } } }
+            // Variáveis específicas do triggerOOB_real
+            // baseOffsetInBuffer e initialBufferSize são globais agora para uso no Passo 1.
+
+            async function triggerOOB_real() {
+                const FNAME = 'triggerOOB_real';
+                log(`--- Iniciando ${FNAME} ---`, 'test', FNAME);
+                // As constantes bufferSize e oobWriteOffset são usadas para definir initialBufferSize globalmente
+                const bufferSize = 32; // Este é o tamanho LÓGICO do buffer que estamos testando
+                initialBufferSize = bufferSize; // Atualiza global
+                const writeValue = 0xEE;
+                const oobWriteOffset = bufferSize; // OOB em relação ao bufferSize lógico
+
+                const readRangeStart = -64;
+                const readRangeEnd = bufferSize + 64;
+                const allocationSize = bufferSize + 256; // Tamanho real do ArrayBuffer alocado
+                // baseOffsetInBuffer é global (128)
+
+                const oobReadOffsets = [];
+                for (let i = readRangeStart; i < readRangeEnd; i += 4) { oobReadOffsets.push(i); }
+
+                let writeSuccess = false;
+                let potentialLeakFoundCount = 0;
+                oob_leaked_ptr_real = null;
+                oob_dataview_real = null;
+                oob_array_buffer_real = null;
+
+                try {
+                    const buffer = new ArrayBuffer(allocationSize);
+                    oob_array_buffer_real = buffer; // Tornando acessível globalmente
+                    const dataView = new DataView(buffer);
+                    oob_dataview_real = dataView; // Tornando acessível globalmente
+
+                    for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); }
+
+                    // O writeTargetAddress é onde a escrita "OOB" (relativa ao buffer lógico) ocorre.
+                    // É DENTRO dos limites do allocationSize.
+                    const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset;
+                    log(`   Alvo da escrita: offset ${writeTargetAddress} no DataView (base ${baseOffsetInBuffer} + oobOffset ${oobWriteOffset})`, 'info', FNAME);
+                    
+                    await PAUSE_LAB(SHORT_PAUSE_S1_LAB);
+
+                    try {
+                        dataView.setUint8(writeTargetAddress, writeValue);
+                        log(`VULN: Escrita OOB U8 @${oobWriteOffset} (offset ${writeTargetAddress} no DataView) OK! Val=${toHexS1(writeValue, 8)}`, 'vuln', FNAME);
+                        log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples Relativo) ***`, 'escalation', FNAME);
+                        writeSuccess = true;
+                    } catch (e) {
+                        log(`Escrita OOB U8 @${oobWriteOffset} (offset ${writeTargetAddress} no DataView) FALHOU/Bloqueada: ${e.message}`, 'error', FNAME);
+                        log(`--- ${FNAME} Concluído (Escrita OOB Falhou) ---`, 'test', FNAME);
+                        return false;
+                    }
+
+                    await PAUSE_LAB(SHORT_PAUSE_S1_LAB);
+
+                    for (const readOffsetRelative of oobReadOffsets) {
+                        // readTargetAddress é relativo ao início do DataView (0), não ao baseOffsetInBuffer para a leitura bruta.
+                        // Mas o readOffsetRelative é relativo ao baseOffsetInBuffer conceitual.
+                        const readTargetAddressInDataView = baseOffsetInBuffer + readOffsetRelative;
+                        const relOffsetStr = `@${readOffsetRelative} (offset ${readTargetAddressInDataView} no DataView)`;
+
+                        if (readTargetAddressInDataView >= 0 && readTargetAddressInDataView + 8 <= dataView.buffer.byteLength) {
+                            try {
+                                const low = dataView.getUint32(readTargetAddressInDataView, true);
+                                const high = dataView.getUint32(readTargetAddressInDataView + 4, true);
+                                if (isPotentialPointer64S1(high, low)) {
+                                    const vStr = `H=${toHexS1(high)} L=${toHexS1(low)}`;
+                                    log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME);
+                                    potentialLeakFoundCount++;
+                                    if (oob_leaked_ptr_real === null) {
+                                        oob_leaked_ptr_real = { value: new AdvancedInt64(low, high), type: 'U64', offset_in_oob_buffer: readTargetAddressInDataView, original_dataview: dataView };
+                                        log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME);
+                                    }
+                                }
+                            } catch (e) {/* ignore read errors outside valid range for this specific check */}
+                        }
+
+                        if (oob_leaked_ptr_real === null && readTargetAddressInDataView >= 0 && readTargetAddressInDataView + 4 <= dataView.buffer.byteLength) {
+                            try {
+                                const val32 = dataView.getUint32(readTargetAddressInDataView, true);
+                                if (isPotentialData32S1(val32)) {
+                                    log(` -> Leak U32? ${relOffsetStr}: ${toHexS1(val32)}`, 'leak', FNAME);
+                                    potentialLeakFoundCount++;
+                                    if (oob_leaked_ptr_real === null) {
+                                        oob_leaked_ptr_real = { value: new AdvancedInt64(val32, 0), type: 'U32', offset_in_oob_buffer: readTargetAddressInDataView, original_dataview: dataView };
+                                        log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME);
+                                    }
+                                }
+                                // Checar se lemos o valor que escrevemos OOB
+                                if (readOffsetRelative === oobWriteOffset && (val32 & 0xFF) === writeValue && ((val32 >> 8) & 0xFFFFFF) === 0xAAAAAA ) {
+                                     log(` -> Leu valor OOB escrito (${toHexS1(val32)}) ${relOffsetStr}! Confirma R/W na área OOB relativa.`, 'vuln', FNAME);
+                                }
+                            } catch (e) {/* ignore read errors */}
+                        }
+                        if (readOffsetRelative % 32 === 0) await PAUSE_LAB(1);
+                    }
+                } catch(e) {
+                    log("ERRO CRÍTICO em triggerOOB_real: " + e.message, "error", FNAME);
+                    console.error("ERRO CRÍTICO em triggerOOB_real:", e);
+                } finally {
+                    const leakStatusMsg = oob_leaked_ptr_real ?
+                        `1 valor ${oob_leaked_ptr_real.type} @offset_dataview ${oob_leaked_ptr_real.offset_in_oob_buffer} (valor: ${oob_leaked_ptr_real.value.toString(true)})` :
+                        'nenhum valor/ponteiro útil armazenado da leitura OOB';
+                    log(`--- ${FNAME} Concluído ---`, 'test', FNAME);
+                    log(`   Escrita OOB simples (relativa): ${writeSuccess ? 'SUCESSO' : 'FALHA'}`, writeSuccess ? 'good' : 'error', FNAME);
+                    log(`   Leituras OOB (relativas) potenciais: ${potentialLeakFoundCount}`, 'info', FNAME);
+                    log(`   Valor OOB armazenado: ${leakStatusMsg}`, oob_leaked_ptr_real ? 'leak' : 'info', FNAME);
+
+                    if (oob_dataview_real && oob_array_buffer_real) {
+                        log("`oob_dataview_real` e `oob_array_buffer_real` estão prontos.", "good", FNAME);
+                        log(`   Tamanho do oob_dataview_real.buffer: ${oob_dataview_real.buffer.byteLength} bytes.`, "info", FNAME);
+                        log(`   baseOffsetInBuffer (início do buffer lógico): ${baseOffsetInBuffer}`, "info", FNAME);
+                        log(`   initialBufferSize (tamanho do buffer lógico): ${initialBufferSize}`, "info", FNAME);
+                    } else {
+                        log("`oob_dataview_real` OU `oob_array_buffer_real` NÃO foram definidos! Verifique erros anteriores.", "error", FNAME);
+                    }
+                }
+            }
         </script>
     </div>
 
     <div class="container">
-        <h2>Passo 1: Teste de Chamada e Verificação de Variáveis OOB</h2>
-        <button onclick="debugStep1_InitialCall()">Testar Chamada Passo 1 e Vars OOB</button>
+        <h2>Passo 1: Testes de Exploração (Leitura/Escrita Relativa Pós-OOB)</h2>
+        <button onclick="runExploitationTests_Stage1()">Iniciar Testes de Exploração (Estágio 1)</button>
         <script>
-            async function debugStep1_InitialCall() {
-                const FNAME = "debugStep1_InitialCall";
-                console.log(`CONSOLE.LOG: >>> Função ${FNAME} FOI CHAMADA <<<`);
-                alert(`ALERTA: Função ${FNAME} foi chamada!`);
-                log(`--- ${FNAME}: Teste Mínimo INICIADO ---`, "test", FNAME);
+            const STAGE1_FNAME = "runExploitationTests_Stage1";
 
-                if (typeof oob_dataview_real !== 'undefined' && oob_dataview_real !== null &&
-                    typeof oob_array_buffer_real !== 'undefined' && oob_array_buffer_real !== null) {
-                    log("SUCESSO: `oob_dataview_real` e `oob_array_buffer_real` ESTÃO DEFINIDAS!", "good", FNAME);
-                    log(`   oob_dataview_real.buffer.byteLength: ${oob_dataview_real.buffer.byteLength}`, "info", FNAME);
-                    if (oob_leaked_ptr_real) {
-                        log(`   oob_leaked_ptr_real: { type: '${oob_leaked_ptr_real.type}', value: ${oob_leaked_ptr_real.value.toString(true)}, offset: ${oob_leaked_ptr_real.offset_in_oob_buffer} }`, "info", FNAME);
-                    } else {
-                        log("   oob_leaked_ptr_real: não definido ou nulo.", "info", FNAME);
-                    }
-                    log("Próximo passo: Reintroduzir a lógica de `runDirectOOBWriteTest` (do v2.5.9) aqui.", "info", FNAME);
-                } else {
-                    log("ERRO: `oob_dataview_real` ou `oob_array_buffer_real` NÃO ESTÃO DEFINIDAS ou são NULAS!", "error", FNAME);
+            /**
+             * Tenta ler N bytes do oob_dataview_real em um offset relativo ao baseOffsetInBuffer.
+             * @param {number} relative_offset - Offset a partir do baseOffsetInBuffer.
+             * @param {number} num_bytes - Número de bytes para ler (1, 2, 4, ou 8).
+             * @returns {number | AdvancedInt64 | null} - O valor lido ou null em caso de erro.
+             */
+            function oob_read_relative(relative_offset, num_bytes = 4) {
+                const FNAME_READ = "oob_read_relative";
+                if (!oob_dataview_real) {
+                    log("ERRO: oob_dataview_real não está pronto!", "error", `${STAGE1_FNAME}::${FNAME_READ}`);
+                    return null;
                 }
-                log(`--- ${FNAME} Concluído ---`, "test", FNAME);
+                const absolute_offset = baseOffsetInBuffer + relative_offset;
+                let is_oob_logical = relative_offset >= initialBufferSize || relative_offset < 0;
+                
+                log(`Tentando ler ${num_bytes} bytes em offset relativo ${relative_offset} (abs: ${absolute_offset})${is_oob_logical ? ' (LOGICAMENTE OOB)' : ''}`, "subtest", `${STAGE1_FNAME}::${FNAME_READ}`);
+
+                if (absolute_offset < 0 || absolute_offset + num_bytes > oob_dataview_real.buffer.byteLength) {
+                    log(`ERRO: Leitura fora dos limites REAIS do DataView (abs_offset: ${absolute_offset}, len: ${oob_dataview_real.buffer.byteLength})`, "error", `${STAGE1_FNAME}::${FNAME_READ}`);
+                    return null;
+                }
+
+                try {
+                    let value;
+                    switch (num_bytes) {
+                        case 1: value = oob_dataview_real.getUint8(absolute_offset); break;
+                        case 2: value = oob_dataview_real.getUint16(absolute_offset, true); break;
+                        case 4: value = oob_dataview_real.getUint32(absolute_offset, true); break;
+                        case 8: 
+                            const low = oob_dataview_real.getUint32(absolute_offset, true);
+                            const high = oob_dataview_real.getUint32(absolute_offset + 4, true);
+                            value = new AdvancedInt64(low, high);
+                            break;
+                        default:
+                            log(`ERRO: Número de bytes inválido para leitura: ${num_bytes}`, "error", `${STAGE1_FNAME}::${FNAME_READ}`);
+                            return null;
+                    }
+                    log(`   Lido ${toHexS1(value, num_bytes * 8)} de rel ${relative_offset} (abs ${absolute_offset})`, "info", `${STAGE1_FNAME}::${FNAME_READ}`);
+                    return value;
+                } catch (e) {
+                    log(`ERRO ao ler de rel ${relative_offset} (abs ${absolute_offset}): ${e.message}`, "error", `${STAGE1_FNAME}::${FNAME_READ}`);
+                    return null;
+                }
+            }
+
+            /**
+             * Tenta escrever N bytes no oob_dataview_real em um offset relativo ao baseOffsetInBuffer.
+             * @param {number} relative_offset - Offset a partir do baseOffsetInBuffer.
+             * @param {number | AdvancedInt64} value - Valor a ser escrito.
+             * @param {number} num_bytes - Número de bytes para escrever (1, 2, 4, ou 8).
+             */
+            function oob_write_relative(relative_offset, value, num_bytes = 4) {
+                const FNAME_WRITE = "oob_write_relative";
+                if (!oob_dataview_real) {
+                    log("ERRO: oob_dataview_real não está pronto!", "error", `${STAGE1_FNAME}::${FNAME_WRITE}`);
+                    return;
+                }
+                const absolute_offset = baseOffsetInBuffer + relative_offset;
+                let is_oob_logical = relative_offset >= initialBufferSize || relative_offset < 0;
+
+                log(`Tentando escrever ${num_bytes} bytes (${toHexS1(value, num_bytes*8)}) em offset relativo ${relative_offset} (abs: ${absolute_offset})${is_oob_logical ? ' (LOGICAMENTE OOB)' : ''}`, "subtest", `${STAGE1_FNAME}::${FNAME_WRITE}`);
+
+                if (absolute_offset < 0 || absolute_offset + num_bytes > oob_dataview_real.buffer.byteLength) {
+                    log(`ERRO: Escrita fora dos limites REAIS do DataView (abs_offset: ${absolute_offset}, len: ${oob_dataview_real.buffer.byteLength})`, "error", `${STAGE1_FNAME}::${FNAME_WRITE}`);
+                    return;
+                }
+                
+                try {
+                    switch (num_bytes) {
+                        case 1: oob_dataview_real.setUint8(absolute_offset, Number(value)); break;
+                        case 2: oob_dataview_real.setUint16(absolute_offset, Number(value), true); break;
+                        case 4: oob_dataview_real.setUint32(absolute_offset, Number(value), true); break;
+                        case 8:
+                            if (!(value instanceof AdvancedInt64)) {
+                                log("ERRO: Valor para escrita de 8 bytes deve ser AdvancedInt64.", "error", `${STAGE1_FNAME}::${FNAME_WRITE}`);
+                                return;
+                            }
+                            oob_dataview_real.setUint32(absolute_offset, value.low(), true);
+                            oob_dataview_real.setUint32(absolute_offset + 4, value.high(), true);
+                            break;
+                        default:
+                            log(`ERRO: Número de bytes inválido para escrita: ${num_bytes}`, "error", `${STAGE1_FNAME}::${FNAME_WRITE}`);
+                            return;
+                    }
+                    log(`   Escrito ${toHexS1(value, num_bytes * 8)} em rel ${relative_offset} (abs ${absolute_offset})`, "good", `${STAGE1_FNAME}::${FNAME_WRITE}`);
+                } catch (e) {
+                    log(`ERRO ao escrever ${toHexS1(value, num_bytes*8)} em rel ${relative_offset} (abs ${absolute_offset}): ${e.message}`, "error", `${STAGE1_FNAME}::${FNAME_WRITE}`);
+                }
+            }
+
+            async function runExploitationTests_Stage1() {
+                log(`--- ${STAGE1_FNAME}: Testes de Exploração Pós-OOB INICIADOS ---`, "test", STAGE1_FNAME);
+
+                if (!oob_dataview_real || !oob_array_buffer_real) {
+                    log("ERRO: `oob_dataview_real` ou `oob_array_buffer_real` NÃO ESTÃO DEFINIDAS. Execute o Passo 0 primeiro.", "error", STAGE1_FNAME);
+                    log(`--- ${STAGE1_FNAME} Concluído (Com Falha Crítica) ---`, "test", STAGE1_FNAME);
+                    return;
+                }
+
+                log("SUCESSO: `oob_dataview_real` e `oob_array_buffer_real` ESTÃO DEFINIDAS!", "good", STAGE1_FNAME);
+                log(`   oob_dataview_real.buffer.byteLength: ${oob_dataview_real.buffer.byteLength}`, "info", STAGE1_FNAME);
+                log(`   baseOffsetInBuffer (início do buffer lógico): ${baseOffsetInBuffer}`, "info", STAGE1_FNAME);
+                log(`   initialBufferSize (tamanho do buffer lógico): ${initialBufferSize}`, "info", STAGE1_FNAME);
+
+                if (oob_leaked_ptr_real) {
+                    log(`   oob_leaked_ptr_real (do Passo 0): { type: '${oob_leaked_ptr_real.type}', value: ${oob_leaked_ptr_real.value.toString(true)}, offset_dataview: ${oob_leaked_ptr_real.offset_in_oob_buffer} }`, "leak", STAGE1_FNAME);
+                } else {
+                    log("   oob_leaked_ptr_real: não definido ou nulo após Passo 0.", "info", STAGE1_FNAME);
+                }
+
+                log("--- Testando Primitivas de Leitura/Escrita Relativa ---", "test", STAGE1_FNAME);
+                
+                // Teste 1: Ler o valor escrito OOB pelo Passo 0
+                // O Passo 0 escreveu 0xEE no offset `initialBufferSize` (relativo)
+                log("Teste 1: Ler o valor originalmente escrito pelo Passo 0 (0xEE).", "subtest", STAGE1_FNAME);
+                const oob_write_offset_from_pass0 = initialBufferSize; // =32
+                let val_at_oob_write = oob_read_relative(oob_write_offset_from_pass0, 1); // Ler 1 byte
+                if (val_at_oob_write !== null) {
+                    if (val_at_oob_write === 0xEE) {
+                        log(`   SUCESSO: Lido 0xEE de rel_offset ${oob_write_offset_from_pass0}. Confirma leitura na área OOB lógica.`, "good", STAGE1_FNAME);
+                    } else {
+                        log(`   FALHA: Lido ${toHexS1(val_at_oob_write, 8)} de rel_offset ${oob_write_offset_from_pass0}, esperado 0xEE.`, "error", STAGE1_FNAME);
+                    }
+                }
+
+                await PAUSE_LAB(SHORT_PAUSE_S1_LAB);
+
+                // Teste 2: Escrever um novo valor em uma área OOB (lógica) e ler de volta.
+                log("Teste 2: Escrever novo valor (0xDEADBEEF) em área OOB lógica e ler de volta.", "subtest", STAGE1_FNAME);
+                const test_oob_offset = initialBufferSize + 4; // Ex: 32 + 4 = 36 (relativo)
+                const test_value_32 = 0xDEADBEEF;
+                
+                oob_write_relative(test_oob_offset, test_value_32, 4);
+                await PAUSE_LAB(SHORT_PAUSE_S1_LAB); // Pausa para garantir que a escrita ocorra
+                let read_back_val_32 = oob_read_relative(test_oob_offset, 4);
+
+                if (read_back_val_32 !== null) {
+                    if (read_back_val_32 === test_value_32) {
+                        log(`   SUCESSO: Escrito e lido ${toHexS1(test_value_32)} de rel_offset ${test_oob_offset}. Primitiva R/W relativa OOB lógica funciona.`, "good", STAGE1_FNAME);
+                    } else {
+                        log(`   FALHA: Lido ${toHexS1(read_back_val_32)} de rel_offset ${test_oob_offset}, esperado ${toHexS1(test_value_32)}.`, "error", STAGE1_FNAME);
+                    }
+                }
+                
+                await PAUSE_LAB(SHORT_PAUSE_S1_LAB);
+
+                // Teste 3: Tentar ler um ponteiro (se um foi vazado no Passo 0)
+                if (oob_leaked_ptr_real && oob_leaked_ptr_real.type === 'U64') {
+                    log("Teste 3: Tentar reler o ponteiro vazado no Passo 0 usando offset absoluto.", "subtest", STAGE1_FNAME);
+                    // oob_leaked_ptr_real.offset_in_oob_buffer é o offset absoluto no DataView.
+                    // Para usar oob_read_relative, precisamos convertê-lo para relativo ao baseOffsetInBuffer.
+                    let relative_offset_of_leaked_ptr = oob_leaked_ptr_real.offset_in_oob_buffer - baseOffsetInBuffer;
+                    let re_read_ptr = oob_read_relative(relative_offset_of_leaked_ptr, 8);
+                    if (re_read_ptr instanceof AdvancedInt64 && re_read_ptr.eq(oob_leaked_ptr_real.value)) {
+                         log(`   SUCESSO: Ponteiro ${re_read_ptr.toString(true)} relido com sucesso de rel_offset ${relative_offset_of_leaked_ptr}.`, "good", STAGE1_FNAME);
+                    } else {
+                         log(`   FALHA OU DIVERGÊNCIA: Tentativa de reler ponteiro de rel_offset ${relative_offset_of_leaked_ptr}. Lido: ${re_read_ptr ? toHexS1(re_read_ptr) : 'null'}. Original: ${oob_leaked_ptr_real.value.toString(true)}`, "warn", STAGE1_FNAME);
+                    }
+                }
+
+
+                log("--- Próximos Passos Conceituais (Requer Exploit Específico) ---", "test", STAGE1_FNAME);
+                log("   O objetivo final é obter R/W arbitrário em todo o espaço de endereçamento do processo.", "info", STAGE1_FNAME);
+                log("   Isso geralmente envolve corromper metadados de um ArrayBuffer (ex: seu tamanho ou ponteiro base)", "info", STAGE1_FNAME);
+                log("   para que o oob_dataview_real possa ser usado para acessar qualquer endereço.", "info", STAGE1_FNAME);
+
+                log("   Placeholder: addrof_placeholder(object_to_find_addr)", "subtest", STAGE1_FNAME);
+                log("     Lógica: Usar OOB Read para encontrar o endereço de 'object_to_find_addr' na memória.", "info", STAGE1_FNAME);
+                log("     Isso requer 'heap grooming' para posicionar o objeto perto de um buffer controlado.", "info", STAGE1_FNAME);
+
+                log("   Placeholder: fakeobj_placeholder(address_to_point_to)", "subtest", STAGE1_FNAME);
+                log("     Lógica: Usar OOB Write para criar um objeto JS (ex: um novo DataView ou ArrayBuffer)", "info", STAGE1_FNAME);
+                log("     cujos dados subjacentes apontem para 'address_to_point_to'.", "info", STAGE1_FNAME);
+
+                log("   Placeholder: read_arbitrary_address_placeholder(address, size)", "subtest", STAGE1_FNAME);
+                log("     Lógica: Usar fakeobj_placeholder para criar um DataView que lê de 'address'.", "info", STAGE1_FNAME);
+
+                log("   Placeholder: write_arbitrary_address_placeholder(address, value, size)", "subtest", STAGE1_FNAME);
+                log("     Lógica: Usar fakeobj_placeholder para criar um DataView que escreve em 'address'.", "info", STAGE1_FNAME);
+                
+                log("   Com R/W arbitrário, o próximo passo seria vazar ponteiros de módulos (ASLR bypass)", "info", STAGE1_FNAME);
+                log("   e então construir uma cadeia ROP para obter execução de código.", "info", STAGE1_FNAME);
+
+                log(`--- ${STAGE1_FNAME} Concluído ---`, "test", STAGE1_FNAME);
             }
         </script>
     </div>
     
     <script>
-        log("Laboratório (v2.6.1 - Teste Sintaxe e Chamada P1) Carregado.", "good", "Init");
+        log("Laboratório (v2.6.2 - Primitivas Relativas P2) Carregado e Pronto.", "good", "Init");
     </script>
 </body>
 </html>
