@@ -2,105 +2,10 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.5.5 - Depuração Ultra-Mínima 1A)</title>
+    <title>Laboratório de Exploração Avançada (v2.5.4 - Depuração Teste Mínimo 1A)</title>
     <style>
-        /* ... (mesmos estilos das versões anteriores) ... */
+        /* ... (mesmos estilos da v2.5.3) ... */
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 20px; font-size: 14px; }
         .container { margin-bottom: 30px; padding: 15px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
         h2 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 5px; }
-        h3 { color: #9cdcfe; margin-top: 20px; }
-        button { background-color: #007acc; color: white; border: none; padding: 8px 15px; cursor: pointer; border-radius: 3px; margin: 5px 0; }
-        #logOutput { background: #111; border: 1px solid #444; padding: 10px; height: 300px; overflow-y: auto; white-space: pre-wrap; margin-top: 10px; font-size: 13px; }
-        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; } .log-error { color: #f44336; } .log-good { color: #4CAF50; } .log-vuln { color: #ff4444; }
-        /* Outras classes de log podem ser adicionadas se necessário */
-    </style>
-</head>
-<body>
-    <h1>Laboratório de Exploração Avançada (v2.5.5 - Depuração Ultra-Mínima 1A)</h1>
-    <div id="logOutput"></div>
-
-    <script>
-        // ... (AdvancedInt64, readWriteUtils, generalUtils, log, PAUSE_LAB, toHexS1, etc. - Mantenha os mesmos da v2.5.3)
-        const KB = 1024; const MB = KB * KB; const GB = KB * KB * KB;
-        class AdvancedInt64 { constructor(low, high) { let buffer = new Uint32Array(2); let bytes = new Uint8Array(buffer.buffer); if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); } if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); } let is_one = false; if (arguments.length === 1) { is_one = true; } if (!is_one) { if (typeof (low) !== 'number' && typeof (high) !== 'number') { throw TypeError('low/high must be numbers'); } } const check_range = (x) => (-0x80000000 <= x) && (x <= 0xffffffff); if (typeof low === 'number') { if (!check_range(low)) { throw TypeError('low not a valid value: ' + low); } if (is_one) { high = 0; if (low < 0) { high = -1; } } else { if (!check_range(high)) { throw TypeError('high not a valid value: ' + high); } } buffer[0] = low; buffer[1] = high; } else if (typeof low === 'string') { let hexstr = low; if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); } if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; } if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); } else { hexstr = hexstr.padStart(16, '0');} for (let i = 0; i < 8; i++) { bytes[i] = parseInt(hexstr.slice(14 - i*2, 16 - i*2), 16); } } else if (typeof low === 'object') { if (low instanceof AdvancedInt64) { bytes.set(low.bytes); } else if (low.length === 8) { bytes.set(low); } else { throw TypeError("Array must have exactly 8 elements."); } } else { throw TypeError('AdvancedInt64 does not support your object for conversion'); } this.buffer = buffer; this.bytes = bytes; } low() { return this.buffer[0]; } high() { return this.buffer[1]; } toString(is_pretty) { let lowStr = this.low().toString(16).padStart(8, '0'); let highStr = this.high().toString(16).padStart(8, '0'); if (is_pretty) { highStr = highStr.substring(0, 4) + '_' + highStr.substring(4); lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4); return '0x' + highStr + '_' + lowStr; } return '0x' + highStr + lowStr; } add(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } let newLow = (this.low() + other.low()) >>> 0; let carry = (this.low() & 0xFFFFFFFF) + (other.low() & 0xFFFFFFFF) > 0xFFFFFFFF ? 1 : 0; let newHigh = (this.high() + other.high() + carry) >>> 0; return new AdvancedInt64(newLow, newHigh); } sub(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } const negOther = other.neg(); return this.add(negOther); } neg() { const low = ~this.low(); const high = ~this.high(); const one = new AdvancedInt64(1,0); const res = new AdvancedInt64(low, high); return res.add(one); } eq(other) { if (!(other instanceof AdvancedInt64)) { other = new AdvancedInt64(other); } return this.low() === other.low() && this.high() === other.high(); } static Zero = new AdvancedInt64(0,0); static One = new AdvancedInt64(1,0); }
-        const readWriteUtils = { readBytes: (u8_view, offset, size) => { let res = 0; for (let i = 0; i < size; i++) { res += u8_view[offset + i] << (i * 8); } return res >>> 0; }, read16: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 2), read32: (u8_view, offset) => readWriteUtils.readBytes(u8_view, offset, 4), read64: (u8_view, offset) => { let resBytes = []; for (let i = 0; i < 8; i++) { resBytes.push(u8_view[offset + i]); } return new AdvancedInt64(resBytes); }, writeBytes: (u8_view, offset, value, size) => { for (let i = 0; i < size; i++) { u8_view[offset + i] = (value >>> (i * 8)) & 0xff; } }, write16: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 2), write32: (u8_view, offset, value) => readWriteUtils.writeBytes(u8_view, offset, value, 4), write64: (u8_view, offset, value) => { if (!(value instanceof AdvancedInt64)) { throw TypeError('write64 value must be an AdvancedInt64'); } let low = value.low(); let high = value.high(); for (let i = 0; i < 4; i++) { u8_view[offset + i] = (low >>> (i * 8)) & 0xff; } for (let i = 0; i < 4; i++) { u8_view[offset + 4 + i] = (high >>> (i * 8)) & 0xff; } } };
-        const generalUtils = { logToDiv: (divId, message, type = 'info', funcName = '') => { const outputDiv = document.getElementById(divId); if (!outputDiv) { console.error("logToDiv: Div de log não encontrado:", divId); return; } try { const timestamp = `[${new Date().toLocaleTimeString()}]`; const prefix = funcName ? `[${funcName}] ` : ''; const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;"); const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info'; if(outputDiv.innerHTML.length > 1200000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; } outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`; outputDiv.scrollTop = outputDiv.scrollHeight; } catch(e) { console.error(`Erro no log para ${divId}:`, e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; } }, toHexLab: (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); } };
-        const log = (message, type = 'info', funcName = '') => generalUtils.logToDiv('logOutput', message, type, funcName);
-        const PAUSE_LAB = (ms = 100) => new Promise(r => setTimeout(r, ms));
-    </script>
-    <div class="container">
-        <h2>Passo 0: Ativador de Vulnerabilidade Base (OOB Write)</h2>
-        <p class="notes">Clique primeiro neste botão. Verifique no console (F12) e no log abaixo se `oob_dataview_real` é criado.</p>
-        <button onclick="triggerOOB_real()">Ativar Primitiva OOB R/W (Real)</button>
-        <script>
-            let oob_array_buffer_real = null; let oob_dataview_real = null; let oob_leaked_ptr_real = null; 
-            // ... (Função triggerOOB_real completa da v2.5.3 - é longa, então omitida aqui para brevidade, mas deve ser incluída)
-            // ESSENCIALMENTE, COPIE A FUNÇÃO triggerOOB_real DA VERSÃO ANTERIOR DO SCRIPT AQUI.
-            // Exemplo (início da função triggerOOB_real):
-             async function triggerOOB_real() { const FNAME = 'triggerOOB_real'; log(`--- Iniciando ${FNAME} ---`, 'test', FNAME); console.log(`DEBUG: ${FNAME} chamada.`); const bufferSize = 32; const writeValue = 0xEE; const oobWriteOffset = bufferSize; const allocationSize = bufferSize + 256; const baseOffsetInBuffer = 128; let writeSuccess = false; oob_leaked_ptr_real = null; oob_dataview_real = null; oob_array_buffer_real = null; try { const buffer = new ArrayBuffer(allocationSize); oob_array_buffer_real = buffer; const dataView = new DataView(buffer); oob_dataview_real = dataView; /* ... resto da função ... */ if (oob_dataview_real) { log("`oob_dataview_real` e `oob_array_buffer_real` estão prontos.", "good", FNAME); }else{ log("`oob_dataview_real` OU `oob_array_buffer_real` NÃO foram definidos!", "error", FNAME); } } catch(e) {log("ERRO CRÍTICO em triggerOOB_real: " + e, "error", FNAME); console.error(e); } /* ... resto da função ... */ }
-        </script>
-    </div>
-
-    <div class="container">
-        <h2>Passo 1: Teste Mínimo de Chamada de Função e Log</h2>
-        <p class="notes">Após clicar no Passo 0, clique no botão abaixo. Verifique o console (F12) e o log aqui.</p>
-        <button onclick="debugStep1A_Minimal()">Testar Chamada do Passo 1.A (Mínimo)</button>
-        
-        <script>
-            // Primitivas que seriam definidas pelo Passo 1.A bem-sucedido
-            let arb_read_primitive = null;    
-            let arb_write_primitive = null;   
-
-            async function debugStep1A_Minimal() {
-                const FNAME = "debugStep1A_Minimal";
-                
-                // Log direto para o console do navegador - este é o primeiro a verificar
-                console.log(`CONSOLE.LOG: >>> Função ${FNAME} FOI CHAMADA <<<`); 
-                
-                // Log para o div da página
-                log(`--- ${FNAME}: Teste Mínimo INICIADO ---`, "test", FNAME);
-                
-                if (!oob_dataview_real || !oob_array_buffer_real) {
-                    log("!!! ERRO CRÍTICO: `oob_dataview_real` ou `oob_array_buffer_real` NÃO ESTÃO DEFINIDOS após Passo 0 !!!", "error", FNAME);
-                    alert("ALERTA: `oob_dataview_real` ou `oob_array_buffer_real` NÃO estão definidos! Verifique o Passo 0 e o console.");
-                    return;
-                } else {
-                    log("`oob_dataview_real` e `oob_array_buffer_real` PARECEM estar definidos (verificados no início do Passo 1A).", "good", FNAME);
-                    log(`Tamanho do oob_dataview_real.buffer: ${oob_dataview_real.buffer.byteLength} bytes`, "info", FNAME);
-                }
-                
-                log("DEBUG: Teste mínimo da função do Passo 1.A concluído com sucesso.", "good", FNAME);
-                alert("ALERTA: debugStep1A_Minimal CONCLUÍDA!");
-            }
-
-            // As funções mais complexas do Passo 1 são mantidas abaixo, mas não são o foco deste teste mínimo.
-            // Elas só devem ser chamadas/depuradas DEPOIS que debugStep1A_Minimal funcionar.
-            let victim_view_for_addrof_target = null; 
-            window.victim_view_for_addrof_target_GLOBAL = null;
-            let ab_to_corrupt_initially = null; 
-            window.ab_to_corrupt_initially_GLOBAL = null;
-            let addrof_primitive = null;      
-            let fakeobj_primitive = null;   
-
-            async function setupVictimForInitialCorruption() { /* ... (como na v2.5.3) ... */ }
-            async function findAndCorruptInitialVictim_original() { /* Esta seria a lógica mais complexa da v2.5.3 */ }
-            async function attemptBaseAddressLeak() { log("`attemptBaseAddressLeak` não implementado nesta versão de depuração.", "warn"); }
-            async function searchMemoryForValue() { log("`searchMemoryForValue` não implementado nesta versão de depuração.", "warn"); }
-            async function manualSetupAndAddrofTest() { log("`manualSetupAndAddrofTest` não implementado nesta versão de depuração.", "warn"); }
-            async function setupVictimForAddrofTarget(){ log("`setupVictimForAddrofTarget` não implementado nesta versão de depuração.", "warn"); }
-            async function testAddrof() { log("`testAddrof` não implementado nesta versão de depuração.", "warn"); }
-            async function testFakeobj() { log("`testFakeobj` não implementado nesta versão de depuração.", "warn"); }
-            async function performHexDump() { log("`performHexDump` não implementado nesta versão de depuração.", "warn"); }
-
-        </script>
-    </div>
-    
-    <script>
-        log("Laboratório de Exploração Avançada (v2.5.5 - Depuração Ultra-Mínima 1A) Carregado.", "good", "Init");
-        log("1. Clique em 'Ativar Primitiva OOB R/W (Real)' (Passo 0).", "info", "Init");
-        log("2. ABRA O CONSOLE DO DESENVOLVEDOR (F12).", "critical", "Init");
-        log("3. Clique em 'Testar Chamada do Passo 1.A (Mínimo)'.", "info", "Init");
-        log("4. Observe o Console do Desenvolvedor E o log nesta página.", "info", "Init");
-    </script>
-</body>
-</html>
+        h3 { color
