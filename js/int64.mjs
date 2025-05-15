@@ -1,7 +1,9 @@
 // js/int64.mjs
-// Não precisa mais importar 'log' aqui se for passado como parâmetro para testModule
+
+// Não importamos 'log' aqui, esperamos que seja injetado em testModule
 
 export class AdvancedInt64 {
+    // ... (nenhuma alteração no construtor ou métodos da classe) ...
     constructor(low, high) {
         this.buffer = new Uint32Array(2);
         this.bytes = new Uint8Array(this.buffer.buffer);
@@ -42,11 +44,17 @@ AdvancedInt64.One = new AdvancedInt64(1,0);
 AdvancedInt64.NegOne = new AdvancedInt64(0xFFFFFFFF, 0xFFFFFFFF);
 AdvancedInt64.NullPtr = new AdvancedInt64(0,0);
 
-export function testModule(logFn) { // <<< ACEITA logFn como parâmetro
+export function testModule(logFn) {
+    // Verifica se logFn foi passado e é uma função
     if (!logFn || typeof logFn !== 'function') {
-        console.error("Int64.testModule: Função de log não fornecida!");
-        return;
+        // Tenta usar console.error como fallback se o log da UI não estiver disponível
+        const fallbackLog = (typeof console !== 'undefined' && console.error) ? console.error : (msg) => {};
+        fallbackLog("Int64.testModule: Função de log não fornecida ou inválida!");
+        // Ainda assim tenta executar os testes, mas sem log específico da UI se logFn falhar
+        // Isso ajuda a ver se a lógica de Int64 em si está ok, mesmo que o logging falhe.
+        if (!logFn) logFn = (msg, type, func) => fallbackLog(`${func}: ${type} - ${msg}`);
     }
+
     logFn("--- Testando Módulo Int64 (int64.mjs) ---", "test", "Int64.test");
     const a = new AdvancedInt64("0x100000000");
     const b = new AdvancedInt64(1,1);
