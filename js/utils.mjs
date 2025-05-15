@@ -13,8 +13,9 @@ export function log(message, type = 'info', funcName = '') {
         const timestamp = `[${new Date().toLocaleTimeString()}]`;
         const prefix = funcName ? `[${funcName}] ` : '';
         const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+        // ADICIONADO 'analysis' À LISTA DE TIPOS DE LOG
         const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation', 'tool', 'analysis'].includes(type) ? type : 'info';
-        if(logOutputDiv.innerHTML.length > 1200000){
+        if(logOutputDiv.innerHTML.length > 1200000){ // Limita o tamanho do log para evitar travamentos
             logOutputDiv.innerHTML = logOutputDiv.innerHTML.substring(logOutputDiv.innerHTML.length - 600000);
             logOutputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + logOutputDiv.innerHTML;
         }
@@ -28,9 +29,9 @@ export function log(message, type = 'info', funcName = '') {
 
 export function toHexS1(val, bits = 32) {
     if (val instanceof AdvancedInt64) return val.toString(true);
-    if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid';
+    if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; // Lida com NaN e Infinity
     let num = Number(val);
-    if (bits <= 32) { num = num >>> 0; }
+    if (bits <= 32) { num = num >>> 0; } // Garante que é Uint32 para números menores
     const pad = Math.ceil(bits / 4);
     return '0x' + num.toString(16).toUpperCase().padStart(pad, '0');
 }
@@ -43,6 +44,8 @@ export function testModule() {
     log("--- Testando Módulo Utils (utils.mjs) ---", "test", "Utils.test");
     log("Mensagem de log normal.", "info", "Utils.test");
     log("Mensagem de erro.", "error", "Utils.test");
+    log("Mensagem de análise.", "analysis", "Utils.test");
+    log("Mensagem crítica.", "critical", "Utils.test");
     log(`toHexS1(12345): ${toHexS1(12345)}`, "info", "Utils.test");
     log("Teste Utils concluído.", "good", "Utils.test");
 }
