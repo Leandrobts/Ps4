@@ -1,5 +1,5 @@
 // js/int64.mjs
-import { log } from './utils.mjs'; // <<< ADICIONADO IMPORT
+// Não precisa mais importar 'log' aqui se for passado como parâmetro para testModule
 
 export class AdvancedInt64 {
     constructor(low, high) {
@@ -42,14 +42,18 @@ AdvancedInt64.One = new AdvancedInt64(1,0);
 AdvancedInt64.NegOne = new AdvancedInt64(0xFFFFFFFF, 0xFFFFFFFF);
 AdvancedInt64.NullPtr = new AdvancedInt64(0,0);
 
-export function testModule() {
-    log("--- Testando Módulo Int64 (int64.mjs) ---", "test", "Int64.test"); // <<< CORRIGIDO: Usa 'log' importado
+export function testModule(logFn) { // <<< ACEITA logFn como parâmetro
+    if (!logFn || typeof logFn !== 'function') {
+        console.error("Int64.testModule: Função de log não fornecida!");
+        return;
+    }
+    logFn("--- Testando Módulo Int64 (int64.mjs) ---", "test", "Int64.test");
     const a = new AdvancedInt64("0x100000000");
     const b = new AdvancedInt64(1,1);
     const c = AdvancedInt64.fromNumber(-1);
-    log(`a = ${a.toString(true)}`, "info", "Int64.test");
-    log(`b = ${b.toString(true)}`, "info", "Int64.test");
-    log(`c = ${c.toString(true)} (isNegativeOne: ${c.isNegativeOne()})`, "info", "Int64.test");
-    log(`a + b = ${a.add(b).toString(true)}`, "info", "Int64.test");
-    log("Teste Int64 concluído.", "good", "Int64.test");
+    logFn(`a = ${a.toString(true)}`, "info", "Int64.test");
+    logFn(`b = ${b.toString(true)}`, "info", "Int64.test");
+    logFn(`c = ${c.toString(true)} (isNegativeOne: ${c.isNegativeOne()})`, "info", "Int64.test");
+    logFn(`a + b = ${a.add(b).toString(true)}`, "info", "Int64.test");
+    logFn("Teste Int64 concluído.", "good", "Int64.test");
 }
