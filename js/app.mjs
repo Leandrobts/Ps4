@@ -176,12 +176,12 @@ const App = {
 
             let objectToPass;
 
-            if (selectedScenario === 'scenario0_poc_v21') {
-                appLog("Cenário 0 (PoC v2.1): Usando objeto de teste simples.", "tool", "App.JsonTestSetup");
+            if (selectedScenario === 'scenario0_poc_v21' || selectedScenario === 'scenario0_poc_v23') {
+                appLog(`Cenário ${selectedScenario}: Usando objeto de teste simples, similar ao PoC Isolado.`, "tool", "App.JsonTestSetup");
                 objectToPass = {
-                    a: 1, // Similar ao testObject do PoC Isolado
-                    b: 'test_data_from_app_for_poc_v21_scenario',
-                    c: { nested_in_app: true }
+                    a: 1,
+                    b: 'test_data', // Mantendo 'test_data' como no PoC original para maior fidelidade
+                    c: { nested: true }
                 };
             } else if (selectedScenario === 'scenario3') {
                 appLog("Cenário 3: Preparando para passar objeto vítima (se existir)...", "tool", "App.JsonTestSetup");
@@ -224,7 +224,7 @@ const App = {
             btnRunStrategies.disabled = false;
             btnRunStrategies.textContent = "Executar Todas Estratégias de Grooming & Busca de GAP";
         }
-        appLog("Laboratório Modularizado (v2.8.8 - Cenário PoC Isolado) pronto.", "good", "App.Init");
+        appLog("Laboratório Modularizado (v2.8.9 - Cenário PoC v2.3) pronto.", "good", "App.Init");
         const addrofGapEl = document.getElementById('addrofGap');
         if (addrofGapEl) addrofGapEl.value = "";
         uiInitialized = true;
