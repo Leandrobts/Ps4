@@ -1,4 +1,5 @@
 // js/int64.mjs
+import { log } from './utils.mjs'; // <<< ADICIONADO IMPORT
 
 export class AdvancedInt64 {
     constructor(low, high) {
@@ -42,7 +43,7 @@ AdvancedInt64.NegOne = new AdvancedInt64(0xFFFFFFFF, 0xFFFFFFFF);
 AdvancedInt64.NullPtr = new AdvancedInt64(0,0);
 
 export function testModule() {
-    log("--- Testando Módulo Int64 (int64.mjs) ---", "test", "Int64.test"); // Usa 'log' global
+    log("--- Testando Módulo Int64 (int64.mjs) ---", "test", "Int64.test"); // <<< CORRIGIDO: Usa 'log' importado
     const a = new AdvancedInt64("0x100000000");
     const b = new AdvancedInt64(1,1);
     const c = AdvancedInt64.fromNumber(-1);
