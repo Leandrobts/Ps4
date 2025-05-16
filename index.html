@@ -2,11 +2,12 @@
 <html lang="pt-BR">
 <head>
     <meta charset="UTF-8">
-    <title>Laboratório de Exploração Modular (v3.0.0 - Com VictimFinder)</title>
+    <title>Laboratório de Exploração Modular (v3.1.0 - Correções e Refinamentos)</title>
    <style>
         body { background: #1e1e1e; color: #d4d4d4; font-family: monospace; padding: 10px; font-size: 13px; }
         .container { margin-bottom: 20px; padding: 10px; background-color: #252526; border: 1px solid #333; border-radius: 5px; }
-        h1, h2, h3 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 3px; margin-top:15px; }
+        h1, h2, h3, h4 { color: #4ec9b0; border-bottom: 1px solid #4ec9b0; padding-bottom: 3px; margin-top:15px; }
+        h4 { font-size: 1.0em; border-bottom-style: dashed; margin-top: 12px;}
         button { background-color: #007acc; color: white; border: none; padding: 6px 12px; cursor: pointer; border-radius: 3px; margin: 3px 0; font-size: 12px;}
         button:hover { background-color: #005c99; }
         button:disabled { background-color: #555; color: #888; cursor: not-allowed; }
@@ -14,19 +15,20 @@
         input[type="text"], input[type="number"] { width: 120px; }
         label { margin-right: 5px; }
         .notes { font-size: 0.9em; color: #888; margin-top:0; margin-bottom:10px; line-height: 1.3;}
-        .input-group { margin-bottom: 8px; display: flex; align-items: center; }
-        .input-group label { min-width: 180px; }
-        .input-group small { margin-left: 10px; color: #777; font-size: 0.85em; }
-        #logOutput { background: #111; border: 1px solid #444; padding: 8px; height: 600px; overflow-y: scroll; white-space: pre; line-height: 1.2; border-radius: 3px; margin-top: 10px; }
+        .input-group { margin-bottom: 8px; display: flex; align-items: center; flex-wrap: wrap; }
+        .input-group label { min-width: 180px; display: inline-block; margin-bottom: 3px;}
+        .input-group small { margin-left: 10px; color: #777; font-size: 0.85em; flex-basis: 100%; margin-top: -5px; margin-left: 0px;}
+        hr { border-color: #444; margin: 10px 0; border-style: dashed;}
+        #logOutput { background: #111; border: 1px solid #444; padding: 8px; height: 600px; overflow-y: scroll; white-space: pre; line-height: 1.2; border-radius: 3px; margin-top: 10px; font-size: 12px; }
         .log-info { color: #9cdcfe; }
         .log-test { color: #4ec9b0; font-weight: bold; }
         .log-subtest { color: #4abf8a; margin-left: 10px; }
-        .log-vuln { color: #f08080; font-weight: bold; } /* Vermelho claro para vulnerabilidades */
-        .log-good { color: #7fbf7f; } /* Verde para sucesso */
-        .log-warn { color: #ffd700; } /* Amarelo para avisos */
-        .log-error { color: #ce9178; font-weight: bold; } /* Laranja/Vermelho para erros */
-        .log-leak { color: #b5cea8; } /* Cor para vazamentos de dados/endereços */
-        .log-ptr { color: #c586c0; } /* Roxo para ponteiros/endereços */
+        .log-vuln { color: #f08080; font-weight: bold; }
+        .log-good { color: #7fbf7f; }
+        .log-warn { color: #ffd700; }
+        .log-error { color: #ce9178; font-weight: bold; }
+        .log-leak { color: #b5cea8; }
+        .log-ptr { color: #c586c0; }
         .log-critical { background-color: #800000; color: white; font-weight: bold; }
         .log-escalation { background-color: #ff4500; color: white; font-weight: bold; }
         .log-tool { color: #6a9955; }
@@ -34,24 +36,26 @@
    </style>
 </head>
 <body>
-    <h1>Laboratório de Exploração Modular (v3.0.0 - Com VictimFinder)</h1>
+    <h1>Laboratório de Exploração Modular (v3.1.0 - Correções e Refinamentos)</h1>
     <p class="notes">Use os botões abaixo para testar diferentes módulos e passos de um exploit conceitual.</p>
 
     <div class="container">
         <h2>Configurações Globais da Primitiva OOB</h2>
         <div class="input-group">
             <label for="oobAllocSize">Tamanho da Alocação OOB (bytes):</label>
-            <input type="number" id="oobAllocSize" value="288">
+            <input type="number" id="oobAllocSize" value="8192"> <small>Este é o OOB_CONFIG.ALLOCATION_SIZE, afeta o tamanho total do buffer OOB.</small>
         </div>
         <div class="input-group">
             <label for="baseOffset">Offset Base no DataView (bytes):</label>
             <input type="number" id="baseOffset" value="128">
+            <small>OOB_CONFIG.BASE_OFFSET_IN_DV.</small>
         </div>
         <div class="input-group">
             <label for="initialBufSize">Tam. Buffer Inicial Lógico (bytes):</label>
             <input type="number" id="initialBufSize" value="32">
+            <small>OOB_CONFIG.INITIAL_BUFFER_SIZE.</small>
         </div>
-        <p class="notes">Estes valores afetam `core_exploit.mjs`. Mude ANTES de ativar a primitiva OOB.</p>
+        <p class="notes">Mude ANTES de ativar a primitiva OOB. Um "Tamanho da Alocação OOB" maior permite testar GAPs e offsets de varredura maiores.</p>
     </div>
 
     <div class="container">
@@ -69,35 +73,53 @@
     </div>
 
     <div class="container">
-        <h2>Passo 1 & 2: Heap Grooming & Corrupção de Vítima (EM DESENVOLVIMENTO)</h2>
-        <p class="notes">Estas seções estão em desenvolvimento e podem não funcionar como esperado. Requerem Passo 0 ativo.</p>
+        <h2>Passo 1 & 2: Heap Grooming & Corrupção de Vítima</h2>
+        <p class="notes">Requer Passo 0 ativo. O Heap Grooming é altamente experimental.</p>
         
-        <h3>Passo 1: Heap Grooming (heap_groomer.mjs)</h3>
+        <h4>Passo 1: Heap Grooming (heap_groomer.mjs)</h4>
         <div class="input-group">
-            <label for="victim_object_size_groom">Tam. Vítima p/ Grooming (bytes):</label>
+            <label for="victim_object_size_groom">Tam. Alvo/Vítima (bytes):</label>
             <input type="number" id="victim_object_size_groom" value="288">
+            <small>Usado para `prepareVictim` e como `target_object_size` no grooming.</small>
         </div>
         <button id="btnPrepareVictim" title="Aloca Groomer.victim_object com o tamanho especificado.">Preparar Vítima (Isolado)</button>
-        <button id="btnRunGroomingStrategies" disabled title="Funcionalidade de grooming completo desabilitada/WIP">Executar Estratégias de Grooming (WIP)</button>
+        <hr>
+        <h4>Grooming Experimental:</h4>
+        <div class="input-group">
+            <label for="groomSprayCount">Contagem de Spray:</label>
+            <input type="number" id="groomSprayCount" value="200">
+        </div>
+        <div class="input-group">
+            <label for="groomTargetObjectSize">Tam. Objeto Alvo (bytes):</label>
+            <input type="number" id="groomTargetObjectSize" value="288">
+            <small>Para `groomHeapExperimental`. Idealmente igual ao Tam. Alvo/Vítima acima e `OOB_CONFIG.ALLOCATION_SIZE`.</small>
+        </div>
+        <div class="input-group">
+            <label for="groomIntermediateAllocs">Alocações Interm. (Buracos):</label>
+            <input type="number" id="groomIntermediateAllocs" value="50">
+        </div>
+        <button id="btnRunGroomingExperimental">Executar Grooming Experimental</button>
+        <p class="notes">O grooming é altamente dependente do alocador do motor JS e requer muita experimentação.</p>
 
-        <h3>Passo 2: Busca de GAP & Corrupção (victim_corruptor.mjs)</h3>
+        <hr>
+        <h4>Passo 2: Busca de GAP & Corrupção (victim_corruptor.mjs)</h4>
         <div class="input-group">
-            <label for="gap_start_input">GAP Início:</label>
-            <input type="number" id="gap_start_input" value="0">
+            <label for="gap_start_input">GAP Início (Decimal):</label>
+            <input type="text" id="gap_start_input" value="0" placeholder="Ex: 0 ou 0x0">
         </div>
         <div class="input-group">
-            <label for="gap_end_input">GAP Fim:</label>
-            <input type="number" id="gap_end_input" value="1024">
+            <label for="gap_end_input">GAP Fim (Decimal):</label>
+            <input type="text" id="gap_end_input" value="2048" placeholder="Ex: 1024 ou 0x400">
         </div>
         <div class="input-group">
-            <label for="gap_step_input">Passo do GAP:</label>
+            <label for="gap_step_input">Passo do GAP (Decimal):</label>
             <input type="number" id="gap_step_input" value="8">
         </div>
         <button id="btnFindAndCorrupt">Buscar GAP & Corromper Iterativamente</button>
         <p class="notes">Status da Busca: <span id="current_gap_display">-</span></p>
         
         <div class="input-group">
-            <label for="gap_to_test_input">GAP para Teste Direto (Decimal):</label>
+            <label for="gap_to_test_input">GAP para Teste Direto (Decimal/Hex):</label>
             <input type="text" id="gap_to_test_input" value="" placeholder="Ex: 256 ou 0x100">
         </div>
         <button id="btnTestCorruptKnownGap">Testar Corrupção em GAP Específico</button>
@@ -112,12 +134,12 @@
         <div class="input-group">
             <label for="victimFinderScanStartOffset">Offset Relativo Inicial (Hex):</label>
             <input type="text" id="victimFinderScanStartOffset" value="0x20" placeholder="Ex: 0x20">
-            <small>Onde começar (rel. ao início da visão OOB).</small>
+            <small>Onde começar (rel. ao início da visão OOB). Default: `INITIAL_BUFFER_SIZE`.</small>
         </div>
         <div class="input-group">
             <label for="victimFinderScanRange">Range da Varredura (bytes):</label>
-            <input type="number" id="victimFinderScanRange" value="4096">
-            <small>Ex: 2048, 4096.</small>
+            <input type="number" id="victimFinderScanRange" value="8192">
+            <small>Ex: 4096, 8192.</small>
         </div>
         <div class="input-group">
             <label for="victimFinderScanStep">Passo da Varredura (bytes):</label>
@@ -127,13 +149,11 @@
         <button id="btnFindVictim">Procurar Vítimas TypedArray (Scan)</button>
     </div>
 
-
     <div class="container">
         <h2>Passo 3 & 4: Primitivas addrof / fakeobj (Conceitual)</h2>
-        <p class="notes">Requer um GAP funcional identificado no Passo 2 ou Passo Alternativo (Localizador de Vítimas).
-                       O GAP é a distância em bytes do buffer OOB até o objeto vítima (ex: `arr_marker`).</p>
+        <p class="notes">Requer um GAP funcional identificado. O GAP é a distância em bytes do buffer OOB até o objeto vítima.</p>
         <div class="input-group">
-            <label for="addrofGap">GAP para addrof/fakeobj (Decimal):</label>
+            <label for="addrofGap">GAP para addrof/fakeobj (Decimal/Hex):</label>
             <input type="text" id="addrofGap" value="" placeholder="Ex: 256 ou 0x100">
         </div>
         <button id="btnSetupAddrofFakeobj">Configurar Par addrof/fakeobj (Conceitual)</button>
@@ -142,7 +162,7 @@
         <div class="input-group">
             <label for="objectNameToLeak">Nome do Objeto para addrof:</label>
             <input type="text" id="objectNameToLeak" value="arr_marker">
-            <small>(Ex: 'arr_marker', 'PostExploitLib_Conceptual.arr_leaker')</small>
+            <small>(Ex: 'arr_marker', 'PostExploit.arr_leaker')</small>
         </div>
         <button id="btnTestAddrof">Testar addrof (Conceitual)</button>
 
@@ -169,29 +189,26 @@
 
     <div class="container">
         <h2>Passo 6: `JSON.stringify` como Gatilho OOB Read/Write Funcional</h2>
-        <p class="notes">Requer que o Passo 0 (Ativar Primitiva OOB) tenha sido bem-sucedido.
-                       Este teste usará a poluição de `toJSON` para executar leituras/escritas OOB
-                       usando as primitivas de `core_exploit.mjs`.</p>
+        <p class="notes">Requer Passo 0 ativo. Usa poluição de `toJSON` para executar R/W OOB.</p>
         <div class="input-group">
             <label for="jsonOobTargetObject">Alvo para JSON.stringify:</label>
             <select id="jsonOobTargetObject" style="margin-bottom: 5px;">
                 <option value="new_array_buffer" selected>Novo ArrayBuffer(128) (Alvo da Poluição)</option>
                 <option value="core_oob_buffer">Core.oob_array_buffer_real (Alvo da Poluição)</option>
-                </select>
+            </select>
         </div>
         <div class="input-group">
-            <label for="jsonOobRelativeOffset">Offset OOB Relativo (Decimal):</label>
-            <input type="number" id="jsonOobRelativeOffset" value="0">
-            <small>(Rel. ao início da visão OOB)</small>
+            <label for="jsonOobRelativeOffset">Offset OOB Relativo (Decimal/Hex):</label>
+            <input type="text" id="jsonOobRelativeOffset" value="0" placeholder="Ex: 0 ou 0x0">
         </div>
         <div class="input-group">
-            <label for="jsonOobValueToWriteHex">Valor para Escrita OOB (Hex32):</label>
-            <input type="text" id="jsonOobValueToWriteHex" value="0x41424344">
+            <label for="jsonOobValueToWriteHex">Valor para Escrita OOB (Hex):</label>
+            <input type="text" id="jsonOobValueToWriteHex" value="0x41424344" placeholder="Ex: 0xDEADBEEF">
         </div>
         <div class="input-group">
             <label for="jsonOobBytesToRead">Bytes para Leitura OOB:</label>
             <input type="number" id="jsonOobBytesToRead" value="4">
-            <small>(1, 2, 4, ou 8 p/ Int64)</small>
+            <small>(1, 2, 4, ou 8)</small>
         </div>
         <button id="btnRunJsonOOBExploit">Executar JSON como Gatilho OOB</button>
     </div>
