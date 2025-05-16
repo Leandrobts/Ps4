@@ -37,7 +37,6 @@ export const JSC_OFFSETS = {
 
         ASSOCIATED_ARRAYBUFFER_OFFSET: 0x30 // Offset para o ponteiro do ArrayBuffer de backing (JSArrayBuffer*).
                                             // Fonte: JSObjectGetTypedArrayBytesPtr.txt ([rbx+30h]).
-                                            // JSArrayBufferView.txt mencionava 0x18, mas 0x30 parece mais específico.
     },
     JSFunction: { // Para exploração mais avançada de funções
         M_EXECUTABLE_OFFSET: 0x18 // Sem novas informações, mantido como estava.
@@ -49,9 +48,7 @@ export let OOB_CONFIG = {
     ALLOCATION_SIZE: 288,    // Tamanho do oob_array_buffer_real e do victim_object (padrão)
     BASE_OFFSET_IN_DV: 128,  // Offset base dentro do DataView para o início da "janela OOB"
     INITIAL_BUFFER_SIZE: 32  // Tamanho do buffer "antes" da área OOB, usado para calcular offsets relativos
-                             // em core_exploit.mjs. Um acesso no offset relativo 0 em oob_read/write_relative
-                             // na verdade acessa OOB_CONFIG.BASE_OFFSET_IN_DV - OOB_CONFIG.INITIAL_BUFFER_SIZE
-                             // dentro do oob_array_buffer_real.
+                             // em core_exploit.mjs.
 };
 
 export function updateOOBConfigFromUI() {
@@ -59,11 +56,35 @@ export function updateOOBConfigFromUI() {
     const baseOffsetEl = document.getElementById('baseOffset');
     const initialBufSizeEl = document.getElementById('initialBufSize');
 
-    if (oobAllocSizeEl) OOB_CONFIG.ALLOCATION_SIZE = parseInt(oobAllocSizeEl.value, 10) || OOB_CONFIG.ALLOCATION_SIZE;
-    if (baseOffsetEl) OOB_CONFIG.BASE_OFFSET_IN_DV = parseInt(baseOffsetEl.value, 10) || OOB_CONFIG.BASE_OFFSET_IN_DV;
-    if (initialBufSizeEl) OOB_CONFIG.INITIAL_BUFFER_SIZE = parseInt(initialBufSizeEl.value, 10) || OOB_CONFIG.INITIAL_BUFFER_SIZE;
+    let changed = false;
+    const currentAllocSize = OOB_CONFIG.ALLOCATION_SIZE;
+    const currentBaseOffset = OOB_CONFIG.BASE_OFFSET_IN_DV;
+    const currentInitialBufSize = OOB_CONFIG.INITIAL_BUFFER_SIZE;
+
+    if (oobAllocSizeEl) {
+        const val = parseInt(oobAllocSizeEl.value, 10);
+        if (!isNaN(val) && val > 0) OOB_CONFIG.ALLOCATION_SIZE = val;
+    }
+    if (baseOffsetEl) {
+        const val = parseInt(baseOffsetEl.value, 10);
+        if (!isNaN(val) && val >= 0) OOB_CONFIG.BASE_OFFSET_IN_DV = val;
+    }
+    if (initialBufSizeEl) {
+        const val = parseInt(initialBufSizeEl.value, 10);
+        if (!isNaN(val) && val >= 0) OOB_CONFIG.INITIAL_BUFFER_SIZE = val;
+    }
+
+    if (currentAllocSize !== OOB_CONFIG.ALLOCATION_SIZE ||
+        currentBaseOffset !== OOB_CONFIG.BASE_OFFSET_IN_DV ||
+        currentInitialBufSize !== OOB_CONFIG.INITIAL_BUFFER_SIZE) {
+        changed = true;
+    }
+    // Loga apenas se houver mudança real e se a função de log estiver disponível
+    // import { log } from './utils.mjs'; // Importaria log se fosse usar
+    // if (changed && typeof log === 'function') {
+    //    log(`Configurações OOB atualizadas da UI: AllocSize=${OOB_CONFIG.ALLOCATION_SIZE}, BaseOffsetDV=${OOB_CONFIG.BASE_OFFSET_IN_DV}, InitialBufSize=${OOB_CONFIG.INITIAL_BUFFER_SIZE}`, "info", "ConfigModule.UIUpdate");
+    // }
 }
 
-// Log para indicar que o módulo foi carregado/atualizado (opcional)
-// import { log } from './utils.mjs'; // Descomente se quiser logar aqui
-// log("config.mjs carregado com offsets atualizados.", "info", "ConfigModule");
+// Inicializa com valores da UI ao carregar o módulo
+// updateOOBConfigFromUI(); // Removido para ser chamado explicitamente por app.mjs
