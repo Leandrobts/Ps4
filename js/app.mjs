@@ -7,6 +7,7 @@ import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import * as JsonExploitTest from './json_exploit_test.mjs';
 import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
+import * as VictimFinder from './victim_finder.mjs';
 
 let uiInitialized = false;
 
@@ -83,6 +84,25 @@ const App = {
             // Aqui apenas chamamos a função de topo que internamente usa seu próprio testObject.
             await JsonExploitTest.runJsonRecursionTest(selectedScenario);
         });
+
+        const btnFindVictimEl = document.getElementById('btnFindVictim');
+if (btnFindVictimEl) {
+    btnFindVictimEl.onclick = () => {
+        // Ler valores hex e converter para número para scanStartOffset
+        const offsetHexStr = document.getElementById('victimFinderScanStartOffset').value;
+        let offsetInt;
+        try {
+            offsetInt = parseInt(offsetHexStr, 16);
+            if (isNaN(offsetInt)) throw new Error("Valor Hex inválido");
+        } catch (e) {
+            appLog(`Offset inicial de varredura '${offsetHexStr}' é inválido. Usando null para que VictimFinder use o padrão.`, "warn", "App.VictimFinderUI");
+            offsetInt = null; // Deixa VictimFinder decidir o padrão
+        }
+        document.getElementById('victimFinderScanStartOffset').value = offsetInt !== null ? `0x${offsetInt.toString(16)}` : ""; // Atualiza UI com valor processado ou limpa
+
+        VictimFinder.findVictimButtonHandler(); // findVictimButtonHandler agora lê os campos internamente.
+    };
+}
 
         // Passo 6: JSON como Gatilho OOB Exploit
         document.getElementById('btnJsonTriggerOOBExploit')?.addEventListener('click', async () => {
