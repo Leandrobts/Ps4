@@ -7,7 +7,7 @@ import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import * as JsonExploitTest from './json_exploit_test.mjs';
 import * as VictimFinder from './victim_finder.mjs';
-import { updateOOBConfigFromUI as updateGlobalOOBConfig, WEBKIT_LIBRARY_INFO } from './config.mjs'; // Importa WEBKIT_LIBRARY_INFO
+import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
 
 let uiInitialized = false;
 
@@ -52,7 +52,7 @@ const App = {
         document.getElementById('btnTriggerOOB')?.addEventListener('click', async () => {
             const btn = document.getElementById('btnTriggerOOB');
             if(btn) btn.disabled = true;
-            updateGlobalOOBConfig();
+            updateGlobalOOBConfig(); // Garante que configs OOB são lidas antes de ativar
             await Core.triggerOOB_primitive();
             if(btn) btn.disabled = false;
         });
@@ -117,7 +117,7 @@ const App = {
                 VictimFinder.setLeakedWebKitBaseAddress(baseAddrHexEl.value.trim());
             } else {
                 VictimFinder.setLeakedWebKitBaseAddress(null); // Limpa se vazio
-                appLog("Nenhum endereço base da WebKit fornecido para definir (ou campo limpo).", "warn", "App.SetWebKitBase");
+                appLog("Nenhum endereço base da WebKit fornecido (ou campo limpo). Base resetada no VictimFinder.", "info", "App.SetWebKitBase");
             }
         });
 
@@ -150,13 +150,12 @@ const App = {
             if(btn) btn.disabled = true;
             updateGlobalOOBConfig();
             const targetType = document.getElementById('jsonOobTargetObject').value;
-            // Usa parseMaybeHex, mas como jsonOobRelativeOffset é numérico por padrão, pode não ser estritamente necessário
             const relativeOffset = parseMaybeHex(document.getElementById('jsonOobRelativeOffset').value, 0);
             const valueHexStr = document.getElementById('jsonOobValueToWriteHex').value;
             const bytesToRead = parseMaybeHex(document.getElementById('jsonOobBytesToRead').value, 4);
             
-            document.getElementById('jsonOobRelativeOffset').value = toHexS1(relativeOffset);
-            document.getElementById('jsonOobBytesToRead').value = bytesToRead;
+            document.getElementById('jsonOobRelativeOffset').value = toHexS1(relativeOffset); // Atualiza UI com valor parseado/default
+            document.getElementById('jsonOobBytesToRead').value = bytesToRead; // Atualiza UI com valor parseado/default
 
             await JsonExploitTest.jsonTriggeredOOBInteraction(targetType, relativeOffset, valueHexStr, bytesToRead);
             if(btn) btn.disabled = false;
@@ -179,7 +178,7 @@ const App = {
             appLog("App.initialize: UI já inicializada. Ignorando.", "warn", "App.Init");
             return;
         }
-        updateGlobalOOBConfig();
+        updateGlobalOOBConfig(); // Garante que os valores da UI sejam lidos no início
         
         App.setupUIEventListeners();
         App.exploitSuccessfulThisSession = false;
@@ -191,13 +190,16 @@ const App = {
         try {
             const titleMatch = document.title.match(/v(\d+\.\d+\.\d+)/);
             if (titleMatch && titleMatch[1]) version = titleMatch[1];
-        } catch(e){}
+        } catch(e){ /* ignora erro de match no título */ }
         appLog(`Laboratório Modular (v${version}) pronto.`, "good", "App.Init");
         
         const addrofGapEl = document.getElementById('addrofGap');
         if (addrofGapEl) addrofGapEl.value = ""; 
         const gapToTestInputEl = document.getElementById('gap_to_test_input');
         if (gapToTestInputEl) gapToTestInputEl.value = "";
+        const leakedWebKitBaseHexEl = document.getElementById('leakedWebKitBaseHex');
+        if (leakedWebKitBaseHexEl) leakedWebKitBaseHexEl.value = "";
+
 
         uiInitialized = true;
     }
@@ -206,7 +208,7 @@ const App = {
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', App.initialize);
 } else {
-    App.initialize();
+    App.initialize(); // DOM já carregado
 }
 
 appLog("app.mjs carregado e pronto.", "info", "Global");
