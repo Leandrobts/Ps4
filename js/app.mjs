@@ -6,8 +6,8 @@ import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import * as JsonExploitTest from './json_exploit_test.mjs';
-import * as VictimFinder from './victim_finder.mjs';
-import { updateOOBConfigFromUI as updateGlobalOOBConfig } from './config.mjs';
+import * as VictimFinder from './victim_finder.mjs'; // VictimFinder importado
+import { updateOOBConfigFromUI as updateGlobalOOBConfig, OOB_CONFIG } from './config.mjs';
 
 let uiInitialized = false;
 
@@ -31,174 +31,140 @@ function parseMaybeHex(valueStr, defaultValue = 0) {
         }
         return parsedValue;
     } catch (e) {
-        appLog(`Erro ao parsear valor '${valueStr}'. Usando default ${defaultValue}. Erro: ${e.message}`, "warn", "App.ParseHelper");
+        appLog(`Exceção ao parsear '${valueStr}': ${e.message}. Usando default ${defaultValue}.`, "error", "App.ParseHelper");
         if (typeof defaultValue === 'function') return defaultValue();
         return defaultValue;
     }
 }
 
+
 const App = {
+    exploitSuccessfulThisSession: false,
     isCurrentlyRunningIterativeSearch: false,
     isCurrentlyRunningGrooming: false,
     isCurrentlyFindingVictims: false,
 
-    setupUIEventListeners: () => {
-        // Testes de Módulos
-        document.getElementById('btnTestInt64')?.addEventListener('click', () => Int64Lib.testModule(appLog));
-        document.getElementById('btnTestUtils')?.addEventListener('click', () => { import('./utils.mjs').then(utils => utils.testModule(appLog)); });
-        document.getElementById('btnTestCore')?.addEventListener('click', () => Core.testModule(appLog));
-
-        // Passo 0
+    setupUIEventListeners: function () {
+        const FNAME_SETUP_UI = "App.setupUIListeners";
+        // Passo 0: Config OOB
         document.getElementById('btnTriggerOOB')?.addEventListener('click', async () => {
-            const btn = document.getElementById('btnTriggerOOB');
-            if(btn) btn.disabled = true;
-            updateGlobalOOBConfig(); // Garante que configs OOB são lidas antes de ativar
+            const FNAME = `${FNAME_SETUP_UI}.btnTriggerOOB`;
+            appLog("Botão 'Configurar Primitiva OOB' clicado.", "tool", FNAME);
             await Core.triggerOOB_primitive();
-            if(btn) btn.disabled = false;
-        });
-
-        // Passos 1 & 2 (Grooming & Corruptor)
-        document.getElementById('btnPrepareVictim')?.addEventListener('click', () => {
-            const sizeStr = document.getElementById('victim_object_size_groom').value;
-            Groomer.prepareVictim(sizeStr);
-        });
-        document.getElementById('btnRunGroomingExperimental')?.addEventListener('click', async () => {
-            if (App.isCurrentlyRunningGrooming) {
-                appLog("Grooming experimental já em execução.", "warn", "App.Grooming");
-                return;
+            const oobStatusEl = document.getElementById('oobStatus');
+            if (Core.oob_dataview_real) {
+                 oobStatusEl.textContent = `CONFIGURADO: Janela OOB de ${Core.getOOBAllocationSize()} bytes em offset ${Core.getBaseOffsetInDV()}.`;
+                 oobStatusEl.style.color = "#b5cea8"; // good
+            } else {
+                oobStatusEl.textContent = "FALHA AO CONFIGURAR. Verifique o console.";
+                oobStatusEl.style.color = "#f44747"; // error
             }
-            App.isCurrentlyRunningGrooming = true;
-            const btn = document.getElementById('btnRunGroomingExperimental');
-            if(btn) btn.disabled = true;
-            await Groomer.groomHeapButtonHandler(); // Handler agora é async
-            if(btn) btn.disabled = false;
-            App.isCurrentlyRunningGrooming = false;
         });
+        document.getElementById('btnClearOOB')?.addEventListener('click', Core.clearOOBEnvironment);
+        document.getElementById('btnTestCoreModule')?.addEventListener('click', () => Core.testModule(appLog));
+
+        // Passo 1: Heap Grooming
+        document.getElementById('btnPrepareVictim')?.addEventListener('click', async () => {
+            const FNAME = `${FNAME_SETUP_UI}.btnPrepareVictim`;
+            const victimSizeEl = document.getElementById('victimObjectSize');
+            const victimSize = victimSizeEl ? victimSizeEl.value : OOB_CONFIG.ALLOCATION_SIZE.toString();
+            appLog(`Botão 'Preparar Vítima' clicado. Tamanho: ${victimSize}`, "tool", FNAME);
+            await Groomer.prepareVictim(victimSize);
+        });
+        document.getElementById('btnRunGroomingExperimental')?.addEventListener('click', Groomer.groomHeapButtonHandler);
         document.getElementById('btnClearSprayArray')?.addEventListener('click', Groomer.clearSprayArrayButtonHandler);
 
-        document.getElementById('btnFindAndCorrupt')?.addEventListener('click', async () => {
-            if (App.isCurrentlyRunningIterativeSearch) {
-                appLog("Busca iterativa de GAP já em execução.", "warn", "App.FindAndCorrupt");
-                return;
-            }
-            App.isCurrentlyRunningIterativeSearch = true;
-            const btn = document.getElementById('btnFindAndCorrupt');
-            if(btn) btn.disabled = true;
-            updateGlobalOOBConfig();
+        // Passo 2: Victim Finder
+        document.getElementById('btnSetLeakedBase')?.addEventListener('click', VictimFinder.setLeakedWebKitBaseAddressFromUI);
+        document.getElementById('btnFindVictim')?.addEventListener('click', VictimFinder.findVictimButtonHandler);
 
-            const gapStartStr = document.getElementById('gap_start_input').value;
-            const gapEndStr = document.getElementById('gap_end_input').value;
-            const gapStepStr = document.getElementById('gap_step_input').value;
-            const victimSizeStr = document.getElementById('victim_object_size_groom').value;
-            
-            await Corruptor.findAndCorruptVictimFields_Iterative(gapStartStr, gapEndStr, gapStepStr, victimSizeStr);
 
-            if(btn) btn.disabled = false;
-            App.isCurrentlyRunningIterativeSearch = false;
-        });
+        // Passo 3: Victim Corruptor
         document.getElementById('btnTestCorruptKnownGap')?.addEventListener('click', Corruptor.testCorruptKnownGapButtonHandler);
+        document.getElementById('btnFindAndCorruptIterative')?.addEventListener('click', Corruptor.findAndCorruptVictimFields_Iterative);
 
-        // Listener para o VictimFinder
-        document.getElementById('btnFindVictim')?.addEventListener('click', async () => {
-            if (App.isCurrentlyFindingVictims) {
-                appLog("Localizador de Vítimas já em execução.", "warn", "App.FindVictim");
-                return;
-            }
-            App.isCurrentlyFindingVictims = true;
-            const btn = document.getElementById('btnFindVictim');
-            if(btn) btn.disabled = true;
-            await VictimFinder.findVictimButtonHandler();
-            if(btn) btn.disabled = false;
-            App.isCurrentlyFindingVictims = false;
-        });
-        document.getElementById('btnSetWebKitBase')?.addEventListener('click', () => {
-            const baseAddrHexEl = document.getElementById('leakedWebKitBaseHex');
-            if (baseAddrHexEl && baseAddrHexEl.value.trim() !== "") {
-                VictimFinder.setLeakedWebKitBaseAddress(baseAddrHexEl.value.trim());
-            } else {
-                VictimFinder.setLeakedWebKitBaseAddress(null); // Limpa se vazio
-                appLog("Nenhum endereço base da WebKit fornecido (ou campo limpo). Base resetada no VictimFinder.", "info", "App.SetWebKitBase");
-            }
-        });
+        // Passo 4: Post Exploit
+        document.getElementById('btnSetupAddrofFakeobj')?.addEventListener('click', PostExploit.setup_addrof_fakeobj_pair_conceptual);
+        document.getElementById('btnTestAddrof')?.addEventListener('click', PostExploit.test_addrof_conceptual);
+        document.getElementById('btnTestFakeobj')?.addEventListener('click', PostExploit.test_fakeobj_conceptual);
 
-        // Passos 3 & 4 (PostExploit)
-        document.getElementById('btnSetupAddrofFakeobj')?.addEventListener('click', () => {
-            const gapStr = document.getElementById('addrofGap').value;
-            PostExploit.setup_addrof_fakeobj_pair_conceptual(gapStr);
-        });
-        document.getElementById('btnTestAddrof')?.addEventListener('click', () => {
-            const objName = document.getElementById('objectNameToLeak').value;
-            PostExploit.test_addrof_conceptual(objName);
-        });
-        document.getElementById('btnTestFakeObj')?.addEventListener('click', () => {
-            const addrHex = document.getElementById('fakeObjAddrHex').value;
-            PostExploit.test_fakeobj_conceptual(addrHex);
-        });
-        
-        // Passo 5 (JSON DoS)
+        // Testes JSON
         document.getElementById('btnRunJsonRecursionTest')?.addEventListener('click', async () => {
-            const btn = document.getElementById('btnRunJsonRecursionTest');
-            if(btn) btn.disabled = true;
-            const scenario = document.getElementById('jsonRecursionScenario').value;
-            await JsonExploitTest.runJsonRecursionTest(scenario);
-            if(btn) btn.disabled = false;
+            const scenarioEl = document.getElementById('jsonRecursionScenario');
+            if (scenarioEl) await JsonExploitTest.runJsonRecursionTest(scenarioEl.value);
         });
-
-        // Passo 6 (JSON OOB Trigger)
         document.getElementById('btnRunJsonOOBExploit')?.addEventListener('click', async () => {
-            const btn = document.getElementById('btnRunJsonOOBExploit');
-            if(btn) btn.disabled = true;
-            updateGlobalOOBConfig();
-            const targetType = document.getElementById('jsonOobTargetObject').value;
-            const relativeOffset = parseMaybeHex(document.getElementById('jsonOobRelativeOffset').value, 0);
-            const valueHexStr = document.getElementById('jsonOobValueToWriteHex').value;
-            const bytesToRead = parseMaybeHex(document.getElementById('jsonOobBytesToRead').value, 4);
-            
-            document.getElementById('jsonOobRelativeOffset').value = toHexS1(relativeOffset); // Atualiza UI com valor parseado/default
-            document.getElementById('jsonOobBytesToRead').value = bytesToRead; // Atualiza UI com valor parseado/default
+            const targetObjEl = document.getElementById('jsonOobTargetObject');
+            const offsetEl = document.getElementById('jsonOobRelativeOffset');
+            const valueHexEl = document.getElementById('jsonOobValueToWriteHex');
+            const bytesEl = document.getElementById('jsonOobBytesToReadWrite'); // ID Corrigido
 
-            await JsonExploitTest.jsonTriggeredOOBInteraction(targetType, relativeOffset, valueHexStr, bytesToRead);
-            if(btn) btn.disabled = false;
+            const target = targetObjEl ? targetObjEl.value : "new_array_buffer";
+            const offset = offsetEl ? offsetEl.value : "0x50";
+            const valueHex = valueHexEl ? valueHexEl.value : "0xDEADBEEF";
+            const bytes = bytesEl ? parseInt(bytesEl.value, 10) : 1;
+
+            await JsonExploitTest.jsonTriggeredOOBInteraction(target, offset, valueHex, bytes);
         });
-        
-        // Log
+
+
+        // Geral
         document.getElementById('btnClearLog')?.addEventListener('click', () => {
             const logOutputDiv = document.getElementById('logOutput');
             if (logOutputDiv) logOutputDiv.innerHTML = '';
-            appLog("Log limpo.", "info", "App.ClearLog");
+            appLog("Log limpo pelo usuário.", "info", "App.ClearLog");
         });
 
-        document.getElementById('oobAllocSize')?.addEventListener('change', updateGlobalOOBConfig);
-        document.getElementById('baseOffset')?.addEventListener('change', updateGlobalOOBConfig);
-        document.getElementById('initialBufSize')?.addEventListener('change', updateGlobalOOBConfig);
+        // Atualizar display de GAPs
+        Corruptor.setGapUpdateUICallback((gap) => {
+            const currentGapUIEl = document.getElementById('current_gap_display');
+            if (currentGapUIEl) currentGapUIEl.textContent = gap !== null ? toHexS1(gap) + ` (${gap})` : "N/A";
+        });
+        Corruptor.setSuccessfulGapUpdateUICallback((gap) => {
+            const successfulGapUIEl = document.getElementById('last_successful_gap_display');
+            if (successfulGapUIEl) successfulGapUIEl.textContent = gap !== null ? toHexS1(gap) + ` (${gap})` : "N/A";
+        });
+
+
+        appLog("Ouvintes de eventos da UI configurados.", "info", FNAME_SETUP_UI);
     },
 
-    initialize: () => {
+    initialize: function () {
         if (uiInitialized) {
             appLog("App.initialize: UI já inicializada. Ignorando.", "warn", "App.Init");
             return;
         }
         updateGlobalOOBConfig(); // Garante que os valores da UI sejam lidos no início
-        
+
         App.setupUIEventListeners();
         App.exploitSuccessfulThisSession = false;
         App.isCurrentlyRunningIterativeSearch = false;
         App.isCurrentlyRunningGrooming = false;
         App.isCurrentlyFindingVictims = false;
-        
-        let version = "?.?.?";
-        try {
+
+        let version = "?";
+        try { // Tenta extrair a versão do título do HTML
             const titleMatch = document.title.match(/v(\d+\.\d+\.\d+)/);
             if (titleMatch && titleMatch[1]) version = titleMatch[1];
         } catch(e){ /* ignora erro de match no título */ }
         appLog(`Laboratório Modular (v${version}) pronto.`, "good", "App.Init");
-        
+
+        // Limpa campos de input que podem persistir entre reloads de página
         const addrofGapEl = document.getElementById('addrofGap');
-        if (addrofGapEl) addrofGapEl.value = ""; 
+        if (addrofGapEl) addrofGapEl.value = "";
         const gapToTestInputEl = document.getElementById('gap_to_test_input');
         if (gapToTestInputEl) gapToTestInputEl.value = "";
         const leakedWebKitBaseHexEl = document.getElementById('leakedWebKitBaseHex');
         if (leakedWebKitBaseHexEl) leakedWebKitBaseHexEl.value = "";
+        const oobStatusEl = document.getElementById('oobStatus');
+        if (oobStatusEl) {
+            oobStatusEl.textContent = "Não configurado";
+            oobStatusEl.style.color = "#ce9178"; // warn
+        }
+        const successfulGapUIEl = document.getElementById('last_successful_gap_display');
+        if (successfulGapUIEl) successfulGapUIEl.textContent = "N/A";
+         const currentGapUIEl = document.getElementById('current_gap_display');
+        if (currentGapUIEl) currentGapUIEl.textContent = "N/A";
 
 
         uiInitialized = true;
@@ -208,7 +174,19 @@ const App = {
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', App.initialize);
 } else {
-    App.initialize(); // DOM já carregado
+    App.initialize();
 }
 
+// Expor módulos para depuração no console, se necessário
+window.LabModules = {
+    Core,
+    Groomer,
+    Corruptor,
+    PostExploit,
+    JsonExploitTest,
+    VictimFinder,
+    Int64Lib,
+    AppUtils: { log: appLog, PAUSE_LAB, toHexS1, parseMaybeHex },
+    Config: { OOB_CONFIG, JSC_OFFSETS, WEBKIT_LIBRARY_INFO }
+};
 appLog("app.mjs carregado e pronto.", "info", "Global");
