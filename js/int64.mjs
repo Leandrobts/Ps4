@@ -2,7 +2,6 @@
 
 export class AdvancedInt64 {
     constructor(low, high) {
-        // Adiciona uma propriedade distintiva, não enumerável
         Object.defineProperty(this, '_isAdvancedInt64', {
             value: true,
             writable: false,
@@ -34,7 +33,10 @@ export class AdvancedInt64 {
             } else {
                  this.buffer[1] = 0;
             }
-        } else if (low instanceof AdvancedInt64 || (low && low._isAdvancedInt64 === true)) { // Verifica também a propriedade
+        } else if (low && low._isAdvancedInt64 === true) { // Prioriza a propriedade para cópia
+            this.buffer[0] = low.buffer[0];
+            this.buffer[1] = low.buffer[1];
+        } else if (low instanceof AdvancedInt64) { // Fallback para instanceof se a prop não existir (legado)
             this.buffer[0] = low.buffer[0];
             this.buffer[1] = low.buffer[1];
         } else {
@@ -47,19 +49,22 @@ export class AdvancedInt64 {
 
     toString(hex = false) {
         if (!hex) {
-            if (this.buffer[1] === 0 && this.buffer[0] >= 0) return String(this.buffer[0]);
-            if (this.buffer[1] === 0xFFFFFFFF && (this.buffer[0] & 0x80000000)) return String(this.buffer[0] | 0);
-            return `(Int64: H:0x${this.buffer[1].toString(16).padStart(8,'0')} L:0x${this.buffer[0].toString(16).padStart(8,'0')})`;
+            if (this.buffer[1] === 0 && this.buffer[0] >= 0 && this.buffer[0] <= Number.MAX_SAFE_INTEGER) return String(this.buffer[0]);
+            if (this.buffer[1] === 0xFFFFFFFF && (this.buffer[0] & 0x80000000)) {
+                 const num = this.buffer[0] | 0; // Converte para Int32
+                 if (num >= Number.MIN_SAFE_INTEGER) return String(num);
+            }
+            return `(Int64 H:0x${this.buffer[1].toString(16).padStart(8,'0')} L:0x${this.buffer[0].toString(16).padStart(8,'0')})`;
         }
         const highHex = this.buffer[1].toString(16).padStart(8, '0');
         const lowHex = this.buffer[0].toString(16).padStart(8, '0');
         return `0x${highHex}_${lowHex}`;
     }
 
-    toNumber() { /* ... (como antes) ... */ 
+    toNumber() { 
         const high = this.buffer[1];
         const low = this.buffer[0];
-        const sign = high & 0x80000000;
+        const sign = high & 0x80000000; 
         if (sign) {
             let twosCompLow = (~low + 1) >>> 0;
             let twosCompHigh = (~high + (twosCompLow === 0 ? 1 : 0)) >>> 0;
@@ -71,7 +76,7 @@ export class AdvancedInt64 {
     }
 
     equals(other) {
-        // Verifica se 'other' é um AdvancedInt64 pela propriedade ou instanceof
+        // Usa a função de verificação mais robusta
         if (!isAdvancedInt64Object(other)) return false;
         return this.buffer[0] === other.buffer[0] && this.buffer[1] === other.buffer[1];
     }
@@ -79,16 +84,17 @@ export class AdvancedInt64 {
     isNullPtr() { return this.buffer[0] === 0 && this.buffer[1] === 0; }
     isNegativeOne() { return this.buffer[0] === 0xFFFFFFFF && this.buffer[1] === 0xFFFFFFFF; }
 
-    add(other) { /* ... (como antes, mas pode adicionar verificação isAdvancedInt64Object) ... */ 
-        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(other);
+    // Métodos add, sub, greaterThanOrEqual, lessThan devem usar isAdvancedInt64Object para 'other'
+    add(other) { 
+        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(Number(other)); // Tenta converter se não for
         let low = (this.buffer[0] + other.buffer[0]);
         let high = (this.buffer[1] + other.buffer[1] + (low > 0xFFFFFFFF ? 1 : 0)) >>> 0;
         low = low >>> 0;
         return new AdvancedInt64(low, high);
     }
 
-    sub(other) { /* ... (como antes, mas pode adicionar verificação isAdvancedInt64Object) ... */ 
-        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(other);
+    sub(other) { 
+        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(Number(other));
         const neg_other_low = (~other.buffer[0] + 1) >>> 0;
         const neg_other_high = (~other.buffer[1] + ((~other.buffer[0] + 1) > 0xFFFFFFFF ? 1 : 0)) >>> 0;
         let low = (this.buffer[0] + neg_other_low);
@@ -97,20 +103,20 @@ export class AdvancedInt64 {
         return new AdvancedInt64(low, high);
     }
     
-    greaterThanOrEqual(other) { /* ... (como antes, mas pode adicionar verificação isAdvancedInt64Object) ... */ 
-        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(other);
+    greaterThanOrEqual(other) { 
+        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(Number(other));
         if (this.buffer[1] > other.buffer[1]) return true;
         if (this.buffer[1] < other.buffer[1]) return false;
         return this.buffer[0] >= other.buffer[0];
     }
-    lessThan(other) { /* ... (como antes, mas pode adicionar verificação isAdvancedInt64Object) ... */
-        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(other);
+    lessThan(other) { 
+        if (!isAdvancedInt64Object(other)) other = AdvancedInt64.fromNumber(Number(other));
         if (this.buffer[1] < other.buffer[1]) return true;
         if (this.buffer[1] > other.buffer[1]) return false;
         return this.buffer[0] < other.buffer[0];
      }
 
-    static fromNumber(n) { /* ... (como antes) ... */
+    static fromNumber(n) {
         if (typeof n !== 'number') throw new Error("fromNumber espera um número");
         const isNegative = n < 0;
         n = Math.abs(n);
@@ -127,14 +133,17 @@ export class AdvancedInt64 {
     static fromHex(hexStr) { return new AdvancedInt64(hexStr); }
 }
 
-// Função de verificação centralizada agora verifica a propriedade distintiva E os métodos
+// Função de verificação centralizada - Prioriza a propriedade distintiva
 export function isAdvancedInt64Object(obj) {
-    return obj && obj._isAdvancedInt64 === true && // Checa a propriedade primeiro
-           typeof obj.isNullPtr === 'function' &&
-           typeof obj.isNegativeOne === 'function' &&
-           typeof obj.greaterThanOrEqual === 'function' &&
-           typeof obj.equals === 'function' &&
-           typeof obj.toString === 'function';
+    // 1. Checa se é um objeto e tem a propriedade _isAdvancedInt64
+    if (!(obj && obj._isAdvancedInt64 === true)) {
+        return false;
+    }
+    // 2. Se tiver a propriedade, confia que tem os métodos (duck typing básico)
+    //    Para maior robustez, ainda podemos verificar os métodos essenciais.
+    return typeof obj.isNullPtr === 'function' &&
+           typeof obj.toString === 'function' && // toString é um método chave
+           typeof obj.equals === 'function';     // equals também é importante
 }
 
 AdvancedInt64.Zero = new AdvancedInt64(0,0);
@@ -142,9 +151,8 @@ AdvancedInt64.One = new AdvancedInt64(1,0);
 AdvancedInt64.NegOne = new AdvancedInt64(0xFFFFFFFF, 0xFFFFFFFF);
 
 export function testModule(logFnParam) {
-    const log = (typeof logFnParam === 'function') ? logFnParam : (msg, type, func) => console.log(`${func ? '['+func+'] ' : ''}${type}: ${msg}`);
+    const log = (typeof logFnParam === 'function') ? logFnParam : (msg, type, func) => console.log(`${func ? '['+func+'] ' : ''}${type || 'info'}: ${msg}`);
     log("--- Testando Módulo Int64 (int64.mjs) ---", "test", "Int64.test");
-    // ... (testes como antes, isAdvancedInt64Object(d) deve continuar true)
     const a = new AdvancedInt64("0x100000000");
     const b = new AdvancedInt64(1,1);
     const c = AdvancedInt64.fromNumber(-1);
@@ -155,9 +163,11 @@ export function testModule(logFnParam) {
     
     const d = new AdvancedInt64("0x0000000000000000");
     log(`d = ${d.toString(true)}, isNullPtr: ${d.isNullPtr()}`, "info", "Int64.test");
-    log(`isAdvancedInt64Object(d) [propriedade _isAdvancedInt64: ${d._isAdvancedInt64}]: ${isAdvancedInt64Object(d)}`, "info", "Int64.test");
-    const plainObj = { low: 0, high: 0 };
-    log(`isAdvancedInt64Object(plainObj) [propriedade _isAdvancedInt64: ${plainObj._isAdvancedInt64}]: ${isAdvancedInt64Object(plainObj)}`, "info", "Int64.test");
+    log(`isAdvancedInt64Object(d) [prop: ${d._isAdvancedInt64}]: ${isAdvancedInt64Object(d)}`, "info", "Int64.test"); // Deve ser true
+    const plainObj = { low: 0, high: 0, _isAdvancedInt64: false }; // Simula um objeto que não é
+    log(`isAdvancedInt64Object(plainObj) [prop: ${plainObj._isAdvancedInt64}]: ${isAdvancedInt64Object(plainObj)}`, "info", "Int64.test"); // Deve ser false
+    const objWithPropOnly = { _isAdvancedInt64: true };
+    log(`isAdvancedInt64Object(objWithPropOnly) [prop: ${objWithPropOnly._isAdvancedInt64}]: ${isAdvancedInt64Object(objWithPropOnly)}`, "info", "Int64.test"); // Deve ser false
     
     log("Teste Int64 concluído.", "test", "Int64.test");
 }
