@@ -6,7 +6,7 @@ import * as Groomer from './heap_groomer.mjs';
 import * as Corruptor from './victim_corruptor.mjs';
 import * as PostExploit from './post_exploit_conceptual.mjs';
 import * as JsonExploitTest from './json_exploit_test.mjs';
-import * as VictimFinder from './victim_finder.mjs'; // VictimFinder importado
+import * as VictimFinder from './victim_finder.mjs';
 import { updateOOBConfigFromUI as updateGlobalOOBConfig, OOB_CONFIG } from './config.mjs';
 
 let uiInitialized = false;
@@ -97,7 +97,7 @@ const App = {
             const targetObjEl = document.getElementById('jsonOobTargetObject');
             const offsetEl = document.getElementById('jsonOobRelativeOffset');
             const valueHexEl = document.getElementById('jsonOobValueToWriteHex');
-            const bytesEl = document.getElementById('jsonOobBytesToReadWrite'); // ID Corrigido
+            const bytesEl = document.getElementById('jsonOobBytesToReadWrite'); // ID Corrigido no HTML também
 
             const target = targetObjEl ? targetObjEl.value : "new_array_buffer";
             const offset = offsetEl ? offsetEl.value : "0x50";
@@ -115,15 +115,24 @@ const App = {
             appLog("Log limpo pelo usuário.", "info", "App.ClearLog");
         });
 
-        // Atualizar display de GAPs
-        Corruptor.setGapUpdateUICallback((gap) => {
-            const currentGapUIEl = document.getElementById('current_gap_display');
-            if (currentGapUIEl) currentGapUIEl.textContent = gap !== null ? toHexS1(gap) + ` (${gap})` : "N/A";
-        });
-        Corruptor.setSuccessfulGapUpdateUICallback((gap) => {
-            const successfulGapUIEl = document.getElementById('last_successful_gap_display');
-            if (successfulGapUIEl) successfulGapUIEl.textContent = gap !== null ? toHexS1(gap) + ` (${gap})` : "N/A";
-        });
+        // Atualizar display de GAPs - ESTAS SÃO AS LINHAS RELEVANTES PARA O ERRO
+        if (typeof Corruptor.setGapUpdateUICallback === 'function') {
+            Corruptor.setGapUpdateUICallback((gap) => {
+                const currentGapUIEl = document.getElementById('current_gap_display');
+                if (currentGapUIEl) currentGapUIEl.textContent = gap !== null ? toHexS1(gap) + ` (${gap})` : "N/A";
+            });
+        } else {
+            appLog("AVISO: Corruptor.setGapUpdateUICallback não é uma função.", "warn", FNAME_SETUP_UI);
+        }
+
+        if (typeof Corruptor.setSuccessfulGapUpdateUICallback === 'function') {
+            Corruptor.setSuccessfulGapUpdateUICallback((gap) => {
+                const successfulGapUIEl = document.getElementById('last_successful_gap_display');
+                if (successfulGapUIEl) successfulGapUIEl.textContent = gap !== null ? toHexS1(gap) + ` (${gap})` : "N/A";
+            });
+        } else {
+            appLog("AVISO: Corruptor.setSuccessfulGapUpdateUICallback não é uma função.", "warn", FNAME_SETUP_UI);
+        }
 
 
         appLog("Ouvintes de eventos da UI configurados.", "info", FNAME_SETUP_UI);
@@ -142,8 +151,8 @@ const App = {
         App.isCurrentlyRunningGrooming = false;
         App.isCurrentlyFindingVictims = false;
 
-        let version = "?";
-        try { // Tenta extrair a versão do título do HTML
+        let version = "?.?.?"; // Default version
+        try {
             const titleMatch = document.title.match(/v(\d+\.\d+\.\d+)/);
             if (titleMatch && titleMatch[1]) version = titleMatch[1];
         } catch(e){ /* ignora erro de match no título */ }
@@ -174,6 +183,7 @@ const App = {
 if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', App.initialize);
 } else {
+    // DOM já carregado
     App.initialize();
 }
 
@@ -187,6 +197,7 @@ window.LabModules = {
     VictimFinder,
     Int64Lib,
     AppUtils: { log: appLog, PAUSE_LAB, toHexS1, parseMaybeHex },
-    Config: { OOB_CONFIG, JSC_OFFSETS, WEBKIT_LIBRARY_INFO }
+    Config: { OOB_CONFIG } // Removido JSC_OFFSETS e WEBKIT_LIBRARY_INFO para simplificar, eles são usados internamente
 };
 appLog("app.mjs carregado e pronto.", "info", "Global");
+
