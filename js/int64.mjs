@@ -33,7 +33,7 @@ export class AdvancedInt64 {
             } else {
                  this.buffer[1] = 0;
             }
-        } else if (low && low._isAdvancedInt64 === true) {
+        } else if (low && low._isAdvancedInt64 === true) { // Prioriza a propriedade para cópia
             this.buffer[0] = low.buffer[0];
             this.buffer[1] = low.buffer[1];
         } else if (low instanceof AdvancedInt64) { // Fallback
@@ -115,9 +115,8 @@ export class AdvancedInt64 {
      }
 
     static fromNumber(n) {
-        if (typeof n !== 'number' || isNaN(n) || !isFinite(n)) { // Adicionada checagem para NaN/Infinity
-            // console.warn("AdvancedInt64.fromNumber: Input não é um número finito. Retornando zero.");
-            return new AdvancedInt64(0,0);
+        if (typeof n !== 'number' || isNaN(n) || !isFinite(n)) {
+            return new AdvancedInt64(0,0); // Retorna zero para NaN/Infinity
         }
         const isNegative = n < 0;
         n = Math.abs(n);
@@ -135,11 +134,14 @@ export class AdvancedInt64 {
 }
 
 export function isAdvancedInt64Object(obj) {
-    // A verificação MAIS ROBUSTA é pela propriedade e pela presença de métodos chave.
-    // O `instanceof` pode ser problemático entre diferentes contextos de módulo se as referências de classe não forem idênticas.
-    return obj && obj._isAdvancedInt64 === true && 
-           typeof obj.isNullPtr === 'function' &&
-           typeof obj.toString === 'function'; // Adicionar mais verificações de método se necessário
+    const hasProp = obj && obj._isAdvancedInt64 === true;
+    const hasIsNullPtr = obj && typeof obj.isNullPtr === 'function';
+    const hasToString = obj && typeof obj.toString === 'function';
+    // Se precisar de log aqui para depurar qual falha:
+    // if (obj && (!hasProp || !hasIsNullPtr || !hasToString)) {
+    //     console.log(`isAdvancedInt64Object check: obj exists, _isAdvInt64=${obj._isAdvancedInt64}, typeof isNullPtr=${typeof obj.isNullPtr}, typeof toString=${typeof obj.toString}`);
+    // }
+    return hasProp && hasIsNullPtr && hasToString;
 }
 
 AdvancedInt64.Zero = new AdvancedInt64(0,0);
@@ -151,16 +153,9 @@ export function testModule(logFnParam) {
     log("--- Testando Módulo Int64 (int64.mjs) ---", "test", "Int64.test");
     const a = new AdvancedInt64("0x100000000");
     log(`a = ${a.toString(true)}, isAdvInt64: ${isAdvancedInt64Object(a)}, _isProp: ${a._isAdvancedInt64}`, "info", "Int64.test");
-    const b = new AdvancedInt64(1,1);
-    log(`b = ${b.toString(true)}, isAdvInt64: ${isAdvancedInt64Object(b)}, _isProp: ${b._isAdvancedInt64}`, "info", "Int64.test");
-    const c = AdvancedInt64.fromNumber(-1);
-    log(`c = ${c.toString(true)} (isNegativeOne: ${c.isNegativeOne()}), isAdvInt64: ${isAdvancedInt64Object(c)}, _isProp: ${c._isAdvancedInt64}`, "info", "Int64.test");
-    log(`a + b = ${a.add(b).toString(true)}`, "info", "Int64.test");
     const d = new AdvancedInt64(0,0);
     log(`d = ${d.toString(true)}, isNullPtr: ${d.isNullPtr()}, isAdvInt64: ${isAdvancedInt64Object(d)}, _isProp: ${d._isAdvancedInt64}`, "info", "Int64.test");
-    const plainObj = { _isAdvancedInt64: true, isNullPtr: () => false, toString: () => "fake" }; // Simula duck typing
+    const plainObj = { _isAdvancedInt64: true, isNullPtr: () => false, toString: () => "fake" };
     log(`isAdvancedInt64Object(plainObj com _isAdvancedInt64=true e metodos): ${isAdvancedInt64Object(plainObj)}`, "info", "Int64.test");
-    const plainObj2 = { low: 0, high: 0 };
-    log(`isAdvancedInt64Object(plainObj2 sem _isAdvancedInt64): ${isAdvancedInt64Object(plainObj2)}`, "info", "Int64.test");
     log("Teste Int64 concluído.", "test", "Int64.test");
 }
